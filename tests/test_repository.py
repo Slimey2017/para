@@ -52,20 +52,22 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('label: "External Drives"', screen)
         self.assertIn('action: "bear-more"', screen)
         self.assertIn("console-art-frame bear-home-room__frame", screen)
-        self.assertIn("object-fit: contain", css)
-        self.assertNotIn("object-fit: cover", css)
+        self.assertIn(".bear-home-room__art { object-fit: contain; }", css)
 
-    def test_home_uses_reference_dashboard_and_shared_navigation(self):
-        art = ROOT / "apps/para-home/assets/para-home-dashboard.png"
+    def test_home_uses_real_components_over_separate_background(self):
+        art = ROOT / "apps/para-home/assets/para-home-background.png"
         self.assertTrue(art.exists())
-        self.assertGreater(art.stat().st_size, 500_000)
+        self.assertGreater(art.stat().st_size, 1_000_000)
         screen = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
-        self.assertIn("para-home-dashboard.png", screen)
-        self.assertIn('label: "Continue"', screen)
-        self.assertIn('label: "Community"', screen)
-        self.assertIn('label: "Library"', screen)
-        self.assertIn('route: "notifications"', screen)
-        self.assertIn("dashboard-hotspot", screen)
+        self.assertIn("para-home-background.png", screen)
+        self.assertNotIn("para-home-dashboard.png", screen)
+        self.assertIn('title: "Continue"', screen)
+        self.assertIn('title: "Community"', screen)
+        self.assertIn('title: "Library"', screen)
+        self.assertIn('data-route="notifications"', screen)
+        self.assertIn("home-launcher", screen)
+        self.assertIn("home-shortcut", screen)
+        self.assertNotIn("dashboard-hotspot", screen)
 
 
 if __name__ == "__main__":

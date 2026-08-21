@@ -38,8 +38,33 @@ function toast(title, message) {
 }
 
 function updateClock() {
-  const value = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date());
+  const now = new Date();
+  const value = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(now);
+  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   document.querySelectorAll("[data-clock]").forEach((clock) => { clock.textContent = value; });
+  document.querySelectorAll("[data-greeting]").forEach((node) => { node.textContent = greeting; });
+}
+
+function activateHomeMotion() {
+  const cards = [...document.querySelectorAll(".home-launcher")];
+  const cleanups = cards.map((card) => {
+    const move = (event) => {
+      const bounds = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${((event.clientX - bounds.left) / bounds.width) * 100}%`);
+      card.style.setProperty("--my", `${((event.clientY - bounds.top) / bounds.height) * 100}%`);
+    };
+    const leave = () => {
+      card.style.setProperty("--mx", "50%");
+      card.style.setProperty("--my", "35%");
+    };
+    card.addEventListener("pointermove", move);
+    card.addEventListener("pointerleave", leave);
+    return () => {
+      card.removeEventListener("pointermove", move);
+      card.removeEventListener("pointerleave", leave);
+    };
+  });
+  return () => cleanups.forEach((cleanup) => cleanup());
 }
 
 function render(route) {
@@ -55,6 +80,8 @@ function render(route) {
     cleanupScreen = () => clearTimeout(timer);
   } else if (route === "intro") {
     cleanupScreen = activateIntro(() => router.go("setup", { replace: true }));
+  } else if (route === "home") {
+    cleanupScreen = activateHomeMotion();
   }
 }
 

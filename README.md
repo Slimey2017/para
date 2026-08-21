@@ -5,9 +5,9 @@ contains a safe boot-to-PARA-Home development experience, a full console-style
 menu shell, a mock local API, native service probes, Linux user-service examples,
 and documented boundaries for future hardware integration.
 
-The current Home and Bear Home surfaces use centered 1672×941 console artwork
-with real focus navigation layered on top. They preserve the full composition
-on wider or taller displays instead of zooming and cropping it.
+PARA Home uses real responsive HTML/CSS controls over a separate full-screen
+purple planet background. Bear Home uses a centered 1672×941 room with spatial
+focus controls and preserves its full composition without zooming or cropping.
 
 The prototype does **not** replace Linux, change a bootloader, install drivers,
 enable system services, format storage, or modify a desktop session.

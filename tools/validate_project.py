@@ -52,6 +52,7 @@ def main() -> int:
         ROOT / "apps/para-home/index.html",
         ROOT / "apps/para-home/assets/bear-home-room.png",
         ROOT / "apps/para-home/assets/para-home-dashboard.png",
+        ROOT / "apps/para-home/assets/para-home-background.png",
         ROOT / "services/mock-api/server.py",
         ROOT / "interfaces/openapi.yaml",
         ROOT / "render.yaml",
