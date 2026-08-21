@@ -1,44 +1,63 @@
-# PARA Development Skeleton
+# PARA
 
-PARA is an early Linux-based home console/PC hybrid. This repository contains a
-safe boot-to-PARA-Home experience, a polished controller-first console
-interface, a local sample API, native service probes, Linux user-service
-examples, and documented boundaries for future hardware integration.
+PARA is a controller-first console/PC shell powered by Linux. This repository
+contains a safe boot-to-PARA-Home experience, live read-only Linux information,
+an installed-app launcher boundary, and Bear Home as a spatial 2D file explorer.
 
-PARA Home uses real responsive HTML/CSS controls over a separate full-screen
-purple planet background. The five primary cards are Continue, Explore, Create,
-Community, and System. Bear Home uses a centered 1672×941 room with spatial
-focus controls and preserves its full composition without zooming or cropping.
+The consumer route graph contains only working destinations. Apps come from the
+PARA/Linux application service; Bear Home is one built-in application. The room
+art contains no baked interface—TV, shelves, record player, desk, door, storage
+nook, and PARA bear are separate focusable controls.
 
-The prototype does **not** replace Linux, change a bootloader, install drivers,
-enable system services, format storage, or modify a desktop session.
-
-## Run it
+## Run
 
 ```bash
 make dev
 ```
 
-Open <http://127.0.0.1:4173>. Add `?reset=1` to replay first boot. Use Arrow
-keys, Enter, Escape, Tab, or a connected browser-compatible gamepad.
+Open <http://127.0.0.1:4173>. Add `?reset=1` to replay first boot.
+
+To list and launch actual Linux desktop applications on a local loopback run:
 
 ```bash
-make check      # static, unit, and safety checks
-make smoke      # start the local server and probe its health endpoint
-make render-check # exercise the explicit public-demo bind and security headers
-make native-check  # compile native stubs when compilers are present
+PARA_ENABLE_APP_LAUNCH=1 make dev
 ```
 
-## Deploy the public prototype on Render
+Application launch is off by default and always off on Render.
 
-The repository includes a root `render.yaml` Blueprint. After pushing PARA to
-GitHub, connect that repository in Render and create a Blueprint. Render will
-run the validation command, start the dependency-free Python service on its
-provided `PORT`, and use `/api/v1/health` for health checks.
+## Controls
 
-Public hosting enables only the same consumer interface and read-only sample API. It
-does not enable accounts, purchases, hardware access, Linux services, power
-controls, file access, or privileged system integration.
+- Arrow keys / D-pad / left stick: spatial navigation
+- Enter / controller primary: select
+- Escape / controller back: back
+- `M` / controller menu: quick menu
+- Tab / Shift+Tab: focus cycle
+- Mouse: hover and click
 
-Start with [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) for the full architecture,
-file-by-file status, limitations, safety notes, and next milestones.
+Prompts change for Xbox, PlayStation Mode, Nintendo, or PARA/generic controls.
+
+## Check and package
+
+```bash
+make check
+make smoke
+make render-check
+make native-check
+make package
+```
+
+## Render
+
+The repository includes `render.yaml`.
+
+- Build command: `python3 tools/validate_project.py`
+- Start command: `./scripts/render-start.sh`
+- Health path: `/api/v1/health`
+
+No Supabase project, secret, or environment variable is required. Render
+provides `PORT` automatically.
+
+PARA does not modify the bootloader, partitions, firmware, kernel modules,
+graphics drivers, desktop environment, or systemd configuration. Read
+[PROJECT_GUIDE.md](PROJECT_GUIDE.md) for the complete architecture, status,
+safety policy, file inventory, and next milestones.

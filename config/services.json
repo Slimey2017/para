@@ -1,18 +1,18 @@
 {
-  "mode": "development-mock",
+  "mode": "linux-gateway",
   "services": [
-    { "id": "para-home", "name": "PARA Home", "kind": "frontend", "status": "working-prototype", "privileged": false },
-    { "id": "accounts", "name": "Accounts", "kind": "system", "status": "stub", "privileged": false },
-    { "id": "bear-home", "name": "Bear Home Index", "kind": "system", "status": "mock", "privileged": false },
-    { "id": "hardware", "name": "Hardware Manager", "kind": "hardware", "status": "read-only-probe", "privileged": false },
-    { "id": "network", "name": "Networking", "kind": "system", "status": "stub", "privileged": true },
-    { "id": "optical", "name": "Optical Disc", "kind": "hardware", "status": "stub", "privileged": false },
-    { "id": "parastore", "name": "ParaStore", "kind": "remote", "status": "mock", "privileged": false },
-    { "id": "pulsewave", "name": "PulseWave Controller", "kind": "hardware", "status": "browser-prototype", "privileged": false },
-    { "id": "security", "name": "Security Policy", "kind": "system", "status": "design-stub", "privileged": true },
-    { "id": "updates", "name": "System Updates", "kind": "system", "status": "design-stub", "privileged": true },
-    { "id": "recovery", "name": "Recovery", "kind": "system", "status": "safe-shell-only", "privileged": true },
-    { "id": "vrus", "name": "VR-US Bridge", "kind": "hardware", "status": "stub", "privileged": false }
+    { "id": "para-home", "name": "PARA Home", "kind": "interface", "status": "available", "privileged": false },
+    { "id": "applications", "name": "Applications", "kind": "system", "status": "local-opt-in", "privileged": false },
+    { "id": "accounts", "name": "Local Profiles", "kind": "system", "status": "local-session", "privileged": false },
+    { "id": "bear-home", "name": "Bear Home Files", "kind": "system", "status": "read-only", "privileged": false },
+    { "id": "hardware", "name": "Hardware Information", "kind": "hardware", "status": "read-only", "privileged": false },
+    { "id": "network", "name": "Networking", "kind": "system", "status": "read-only", "privileged": false },
+    { "id": "optical", "name": "Optical Media", "kind": "hardware", "status": "mounted-media-read-only", "privileged": false },
+    { "id": "pulsewave", "name": "Controller Input", "kind": "hardware", "status": "browser-gamepad", "privileged": false },
+    { "id": "recovery", "name": "Interface Recovery", "kind": "system", "status": "interface-actions", "privileged": false },
+    { "id": "parastore", "name": "ParaStore", "kind": "remote", "status": "contract-only", "privileged": false },
+    { "id": "security", "name": "Security Policy", "kind": "system", "status": "contract-only", "privileged": true },
+    { "id": "updates", "name": "System Updates", "kind": "system", "status": "contract-only", "privileged": true },
+    { "id": "vrus", "name": "VR-US Bridge", "kind": "hardware", "status": "contract-only", "privileged": false }
   ]
 }
-

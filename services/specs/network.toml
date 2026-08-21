@@ -1,7 +1,6 @@
 id = "network"
-status = "stub"
+status = "read-only"
 frontend_routes = ["network", "setup"]
-development_provider = "services/mock-api/modules/endpoints.py"
+current_provider = "services/gateway/system_layer.py"
 future_runtime = "Permission-aware D-Bus client"
 linux_apis = ["NetworkManager", "iwd", "systemd-resolved"]
-

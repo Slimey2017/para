@@ -1,7 +1,6 @@
 id = "pulsewave"
-status = "browser-prototype"
+status = "browser-gamepad"
 frontend_routes = ["controller", "quick", "setup"]
-development_provider = "Browser Gamepad API and services/native/pulsewave-controller"
+current_provider = "Browser Gamepad API via apps/para-home/src/gamepad.js"
 future_runtime = "C++ or Rust input daemon using hidraw/evdev through udev permissions"
 linux_apis = ["evdev", "hidraw", "BlueZ", "udev", "SDL game controller database"]
-

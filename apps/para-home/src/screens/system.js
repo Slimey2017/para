@@ -1,93 +1,102 @@
-import { content } from "../mock-data.js";
 import { getState } from "../state.js";
+import { paraApi, escapeHtml } from "../services/para-api.js";
 import { page, tile, listRow, progress, topbar, hints, toggleRow, livingBackground } from "../ui/components.js";
 
-export function notificationsScreen() {
-  const items = content.notifications.map((item, index) => listRow({ ...item, action: "notification-open", end: index === 0 ? "New" : "", autofocus: index === 0 })).join("");
-  return page({ title: "Notifications", description: "Updates from games, friends, and your system.", eyebrow: "Activity", body: `<div class="panel"><div class="panel__head"><h2>Latest</h2><button class="action-button action-button--ghost" data-action="clear-notifications">Clear</button></div><div class="list">${items}</div></div>` });
-}
-
-export function downloadsScreen() {
-  const rows = content.downloads.map((item, index) => `<button class="list-row download-row" data-action="download-open" ${index === 0 ? "data-autofocus='true'" : ""}><span class="list-row__icon">${item.progress === 100 ? "✓" : "↓"}</span><span class="list-row__body"><span class="list-row__title">${item.title}</span><span class="list-row__meta">${item.meta}</span><span class="download-progress">${progress(item.progress)}</span></span><span class="list-row__end">${item.progress}%</span></button>`).join("");
-  return page({ title: "Downloads", description: "Games, apps, media, and system updates.", eyebrow: "Transfers", body: `<div class="panel"><div class="panel__head"><h2>Queue</h2><button class="action-button action-button--ghost" data-action="download-options">Manage</button></div><div class="list">${rows}</div></div>` });
-}
-
 export function quickScreen() {
-  return `<section class="screen quick-overlay">${livingBackground()}<aside class="quick-menu">${topbar({ section: "Quick Menu" })}<div class="quick-now"><div><span>84%</span><small>Controller</small></div><div><span>72°</span><small>Temperature</small></div><div><span>5G</span><small>Connected</small></div></div><div class="list">${listRow({ title: "Notifications", meta: "3 new", route: "notifications", icon: "✦", autofocus: true })}${listRow({ title: "Downloads", meta: "1 active", route: "downloads", icon: "↓" })}${listRow({ title: "Controllers", meta: "PulseWave Controller", route: "controller", icon: "⌁" })}${listRow({ title: "Accessibility", meta: "Comfort and assistance", route: "accessibility", icon: "◎" })}${listRow({ title: "Power", meta: "Sleep, restart, or turn off", route: "power", icon: "○" })}</div><div class="quick-sliders"><label><span>Volume</span><input type="range" min="0" max="100" value="68" aria-label="Volume" /></label><label><span>Brightness</span><input type="range" min="0" max="100" value="74" aria-label="Brightness" /></label></div><div style="margin-top:auto">${hints()}</div></aside></section>`;
+  return `<section class="screen quick-overlay">${livingBackground()}<aside class="quick-menu">${topbar({ section: "Quick Menu" })}<div class="list">${listRow({ title: "Apps", meta: "Installed applications", route: "apps", icon: "▦", autofocus: true })}${listRow({ title: "Bear Home", meta: "Files and connected storage", route: "bear-home", icon: "▱" })}${listRow({ title: "Controllers", meta: "Connected gamepads", route: "controller", icon: "⌁" })}${listRow({ title: "Storage", meta: "Disk and mounted drives", route: "storage", icon: "▯" })}${listRow({ title: "Accessibility", meta: "Text, contrast, and motion", route: "accessibility", icon: "◎" })}${listRow({ title: "Power", meta: "Session controls", route: "power", icon: "○" })}</div><div style="margin-top:auto">${hints()}</div></aside></section>`;
 }
 
 export function controllerScreen() {
-  const body = `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"><i class="controller-control controller-control--blue"></i><i class="controller-control controller-control--red"></i><i class="controller-control controller-control--green"></i><i class="controller-control controller-control--yellow"></i></div><div><span class="eyebrow">Controller 1</span><h2>PulseWave Controller</h2><p>Connected · 84% battery</p><button class="action-button" data-action="controller-test" data-autofocus="true">Test Input</button></div></section><div class="controller-map"><h2>PARA controls</h2><div><span><i class="control-dot control-dot--blue"></i><strong>Select</strong><small>Primary action</small></span><span><i class="control-dot control-dot--red"></i><strong>Back</strong><small>Cancel or return</small></span><span><i class="control-dot control-dot--green"></i><strong>Context</strong><small>Secondary action</small></span><span><i class="control-dot control-dot--yellow"></i><strong>Options</strong><small>Additional actions</small></span></div></div><div class="tile-grid tile-grid--wide controller-actions">${tile({ title: "Pair a controller", meta: "Add a new wireless controller", action: "pair-controller", icon: "+" })}${tile({ title: "Assignments", meta: "Choose who uses each controller", action: "controller-assign", icon: "◎" })}${tile({ title: "Vibration", meta: "Adjust haptic strength", action: "controller-vibration", icon: "≈" })}</div>`;
-  return page({ title: "Controllers", description: "Pair, assign, and personalize your controllers.", eyebrow: "Input", body });
+  return page({ title: "Controllers", description: "Controllers available to PARA.", eyebrow: "Input", body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section><div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="secondary">C</b><strong>Context</strong><small>Secondary action</small></span><span><b data-prompt="options">M</b><strong>Options</strong><small>Additional actions</small></span></div></div>` });
+}
+
+export function updateControllerScreen(controller) {
+  const name = document.querySelector("[data-controller-name]");
+  const detail = document.querySelector("[data-controller-detail]");
+  const map = document.querySelector("[data-controller-map]");
+  if (!name || !detail || !map) return;
+  name.textContent = controller.connected ? controller.name : "No controller connected";
+  detail.textContent = controller.connected ? `${controller.typeLabel} controls active` : "Connect a controller, then press any button.";
+  map.hidden = !controller.connected;
 }
 
 export function storageScreen() {
-  const body = `<section class="storage-overview panel"><div class="panel__head"><div><span class="eyebrow">Internal storage</span><h2>1 TB</h2></div><strong>860 GB free</strong></div>${progress(14)}<div class="storage-legend"><span style="--c:#9d5cff">Games <b>82 GB</b></span><span style="--c:#4f9dff">Apps <b>18 GB</b></span><span style="--c:#ff6eb4">Captures <b>34 GB</b></span><span style="--c:#ffd45a">System <b>6 GB</b></span></div></section><div class="tile-grid tile-grid--wide storage-actions">${tile({ title: "Games & apps", meta: "100 GB", action: "storage-open", icon: "◇", autofocus: true })}${tile({ title: "Captures", meta: "34 GB", action: "storage-open", icon: "▧" })}${tile({ title: "External drives", meta: "Connect storage by USB", action: "storage-open", icon: "▯" })}${tile({ title: "Clear space", meta: "Review items you no longer use", action: "storage-open", icon: "⌫" })}${tile({ title: "Install location", meta: "Internal storage", action: "storage-open", icon: "⌖" })}</div>`;
-  return page({ title: "Storage", description: "See what is using space and manage connected drives.", eyebrow: "System", body });
+  return page({ title: "Storage", description: "Disk space and connected drives.", eyebrow: "System", body: `<div data-storage-view><div class="library-loading"><span></span><strong>Reading storage…</strong></div></div>` });
+}
+
+export async function activateStorage() {
+  const container = document.querySelector("[data-storage-view]");
+  if (!container) return;
+  try {
+    const payload = await paraApi.storage();
+    const primary = payload.primary;
+    const mounts = (payload.mounts || []).filter((mount) => mount.external);
+    container.innerHTML = `<section class="storage-overview panel"><div class="panel__head"><div><span class="eyebrow">Primary storage</span><h2>${primary.total_gb} GB</h2></div><strong>${primary.free_gb} GB free</strong></div>${progress(primary.used_percent)}<p class="storage-usage">${primary.used_gb} GB used</p></section><section class="storage-mounts"><h2>Connected drives</h2>${mounts.length ? `<div class="drive-grid">${mounts.map((mount) => `<div class="drive-card"><span>▯</span><strong>${escapeHtml(mount.name)}</strong><small>${mount.free_gb} GB free · ${escapeHtml(mount.filesystem)}</small></div>`).join("")}</div>` : `<div class="library-empty library-empty--small"><span>▯</span><h2>No external drives connected</h2></div>`}</section>`;
+  } catch { container.innerHTML = `<div class="library-empty"><span>▯</span><h2>Storage information is unavailable</h2></div>`; }
 }
 
 export function settingsScreen() {
   const items = [
-    ["Display", "Picture, HDR, safe area, and interface size", "display", "▭"], ["Network", "Wi-Fi, Ethernet, and connection status", "network", "⌁"],
-    ["Audio", "Output, volume, microphone, and spatial sound", "audio", "◖"], ["Controllers", "PulseWave pairing, mapping, and assistance", "controller", "◇"],
-    ["Storage", "Capacity, games, captures, and drives", "storage", "▯"], ["VR-US", "Headset, play area, and spatial comfort", "vrus", "◉"],
-    ["Accounts", "Profiles, sign-in, security, and plans", "account", "●"], ["Privacy", "Data sharing, permissions, and personalization", "privacy", "◐"],
-    ["Accessibility", "Text, motion, captions, and assistance", "accessibility", "◎"], ["Updates", "System and controller updates", "updates", "↓"],
-    ["Power", "Sleep, restart, and turn off", "power", "○"], ["Repair & health", "Status, diagnostics, and recovery", "health", "+"],
+    ["Display", "Screen information and interface size", "display", "▭"],
+    ["Network", "Connections available to PARA", "network", "⌁"],
+    ["Controllers", "Gamepads available to PARA", "controller", "◇"],
+    ["Storage", "Disk usage and mounted drives", "storage", "▯"],
+    ["Downloads", "Open your Downloads folder", "downloads", "↓"],
+    ["Account", "Local PARA profile", "account", "●"],
+    ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
+    ["Power", "Session controls", "power", "○"],
+    ["Repair & health", "PARA and system status", "health", "+"],
   ];
-  return page({ title: "System", description: "Make PARA work the way you want.", eyebrow: "Settings", className: "settings-page", body: `<div class="settings-grid">${items.map((item, index) => tile({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus: index === 0, className: "settings-tile" })).join("")}</div>` });
+  return page({ title: "System", description: "Manage the parts of PARA available on this system.", eyebrow: "Settings", className: "settings-page", body: `<div class="settings-grid">${items.map((item, index) => tile({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus: index === 0, className: "settings-tile" })).join("")}</div>` });
 }
 
 export function displayScreen() {
   const state = getState();
-  return page({ title: "Display", description: "Tune the picture for your TV or monitor.", eyebrow: "System", body: `<div class="system-columns"><section class="panel"><div class="panel__head"><h2>Current display</h2><span class="status-ok">Connected</span></div><div class="display-summary"><strong data-display-resolution>1920 × 1080</strong><span data-refresh-rate>60 Hz</span><span data-hdr-status>Standard range</span></div><div class="list">${listRow({ title: "Resolution", meta: "Recommended", icon: "▭", end: "Auto", action: "display-option", autofocus: true })}${listRow({ title: "Refresh rate", meta: "Smooth motion", icon: "≈", end: "Auto", action: "display-option" })}${listRow({ title: "HDR", meta: "High dynamic range", icon: "☼", end: "Auto", action: "display-option" })}${listRow({ title: "Safe area", meta: "Keep all edges visible", icon: "⌗", action: "display-option" })}${listRow({ title: "Interface size", meta: "Readable from your seat", icon: "Aa", end: state.largeText ? "Large" : "Standard", action: "toggle-large" })}</div></section><aside class="display-preview"><span>PARA</span><i></i><small>Picture preview</small></aside></div>` });
+  return page({ title: "Display", description: "Information from the screen running PARA.", eyebrow: "System", body: `<div class="system-columns"><section class="panel"><div class="panel__head"><h2>Current screen</h2><span class="status-ok">Active</span></div><div class="display-summary"><strong data-display-resolution>Reading…</strong><span data-refresh-rate>Reading…</span><span data-hdr-status>Reading…</span></div><div class="list">${listRow({ title: "Interface size", meta: "Choose couch or desk spacing", icon: "Aa", end: state.displayMode, action: "cycle-display-mode", autofocus: true })}${toggleRow({ title: "Larger text", meta: "Increase text throughout PARA", action: "toggle-large", value: state.largeText, icon: "Aa" })}</div></section><aside class="display-preview"><span>PARA</span><i></i><small>Current interface</small></aside></div>` });
 }
 
 export function accessibilityScreen() {
   const state = getState();
-  return page({ title: "Accessibility", description: "Personalize PARA for vision, hearing, mobility, and comfort.", eyebrow: "System", body: `<div class="panel"><div class="list">${toggleRow({ title: "Screen reader", meta: "Hear items and actions", action: "toggle-screen-reader", value: state.screenReader, icon: "◉", autofocus: true })}${toggleRow({ title: "Larger text", meta: "Increase text throughout PARA", action: "toggle-large", value: state.largeText, icon: "Aa" })}${toggleRow({ title: "Reduce motion", meta: "Use calmer transitions", action: "toggle-reduced", value: state.reducedMotion, icon: "≈" })}${toggleRow({ title: "High contrast", meta: "Strengthen text and interface edges", action: "toggle-contrast", value: state.highContrast, icon: "◐" })}${toggleRow({ title: "Captions", meta: "Show speech and sound captions", action: "toggle-captions", value: state.captions, icon: "CC" })}${toggleRow({ title: "Controller assistance", meta: "Extra help with holds and timing", action: "toggle-controller-assist", value: state.controllerAssist, icon: "⌁" })}</div></div>` });
+  return page({ title: "Accessibility", description: "Preferences that change the PARA interface now.", eyebrow: "System", body: `<div class="panel"><div class="list">${toggleRow({ title: "Larger text", meta: "Increase text throughout PARA", action: "toggle-large", value: state.largeText, icon: "Aa", autofocus: true })}${toggleRow({ title: "Reduce motion", meta: "Use calmer transitions", action: "toggle-reduced", value: state.reducedMotion, icon: "≈" })}${toggleRow({ title: "High contrast", meta: "Strengthen text and interface edges", action: "toggle-contrast", value: state.highContrast, icon: "◐" })}</div></div>` });
 }
 
 export function networkScreen() {
-  const rows = content.networks.map((network, index) => listRow({ title: network.title, meta: network.meta, action: "network-select", icon: "⌁", end: network.signal, autofocus: index === 0, selected: index === 0 })).join("");
-  return page({ title: "Network", description: "Connect PARA for play, downloads, and communication.", eyebrow: "System", body: `<div class="system-columns"><section class="panel"><div class="panel__head"><h2>Wi-Fi</h2><button class="action-button action-button--ghost" data-action="network-refresh">Refresh</button></div><div class="list">${rows}</div></section><aside class="network-status panel"><span class="network-orb">⌁</span><h2>Connected</h2><strong>PulseWave 5G</strong><dl><div><dt>Signal</dt><dd>Strong</dd></div><div><dt>Band</dt><dd>5 GHz</dd></div><div><dt>Internet</dt><dd>Available</dd></div></dl><button class="action-button action-button--ghost" data-action="network-details">Connection details</button></aside></div><section class="network-more">${tile({ title: "Ethernet", meta: "No cable connected", action: "network-details", icon: "↔" })}${tile({ title: "Test connection", meta: "Check internet performance", action: "network-test", icon: "◇" })}${tile({ title: "Advanced", meta: "DNS, proxy, and other settings", action: "network-details", icon: "⚙" })}</section>` });
+  return page({ title: "Network", description: "Connections available to PARA.", eyebrow: "System", body: `<div class="panel"><div class="panel__head"><h2>Connections</h2><button class="action-button action-button--ghost" data-action="refresh-network" data-autofocus="true">Refresh</button></div><div data-network-view><div class="library-loading"><span></span><strong>Checking connections…</strong></div></div></div>` });
 }
 
-export function audioScreen() {
-  return page({ title: "Audio", description: "Choose how PARA sounds and how others hear you.", eyebrow: "System", body: `<div class="system-columns"><section class="panel"><h2>Output</h2><div class="list">${listRow({ title: "Living room speakers", meta: "HDMI audio", icon: "◖", end: "Active", action: "audio-select", autofocus: true, selected: true })}${listRow({ title: "PulseWave headset", meta: "Wireless audio", icon: "⌁", end: "Not connected", action: "audio-select" })}${listRow({ title: "Spatial sound", meta: "Immersive surround audio", icon: "◎", end: "On", action: "audio-option" })}</div></section><section class="panel"><h2>Voice</h2><div class="list">${listRow({ title: "Microphone", meta: "PulseWave Controller", icon: "⌕", end: "On", action: "audio-option" })}${listRow({ title: "Mic level", meta: "Voice input sensitivity", icon: "≈", end: "68%", action: "audio-option" })}${listRow({ title: "Voice balance", meta: "Balance games and people", icon: "◐", end: "Center", action: "audio-option" })}</div></section></div>` });
-}
-
-export function privacyScreen() {
-  const state = getState();
-  return page({ title: "Privacy", description: "Control how your information and activity are used.", eyebrow: "Account", body: `<div class="panel"><div class="list">${toggleRow({ title: "Share diagnostics", meta: "Help improve stability and performance", action: "toggle-diagnostics-sharing", value: state.diagnosticsSharing, icon: "◇", autofocus: true })}${toggleRow({ title: "Personalized recommendations", meta: "Tailor games, apps, and Store suggestions", action: "toggle-personalization", value: state.personalization, icon: "✦" })}${toggleRow({ title: "Location services", meta: "Allow location for supported experiences", action: "toggle-location", value: state.locationServices, icon: "⌖" })}${listRow({ title: "Online status", meta: "Who can see when you are online", icon: "◎", end: "Friends", action: "privacy-option" })}${listRow({ title: "Activity visibility", meta: "Who can see games and achievements", icon: "◇", end: "Friends", action: "privacy-option" })}${listRow({ title: "App permissions", meta: "Camera, microphone, files, and location", icon: "▦", action: "privacy-option" })}</div></div>` });
+export async function activateNetwork() {
+  const container = document.querySelector("[data-network-view]");
+  if (!container) return;
+  try {
+    const payload = await paraApi.network();
+    if (!payload.interfaces?.length) { container.innerHTML = `<div class="library-empty library-empty--small"><span>⌁</span><h2>No network interfaces found</h2></div>`; return; }
+    container.innerHTML = `<div class="network-interface-list">${payload.interfaces.map((item) => `<div class="network-interface"><span>${item.kind === "wifi" ? "⌁" : "↔"}</span><div><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "wifi" ? "Wi-Fi" : "Ethernet"}</small></div><b class="${item.connected ? "is-connected" : ""}">${item.connected ? "Connected" : escapeHtml(item.state)}</b></div>`).join("")}</div>`;
+  } catch { container.innerHTML = `<div class="library-empty library-empty--small"><span>⌁</span><h2>Network information is unavailable</h2></div>`; }
 }
 
 export function accountScreen() {
-  const state = getState();
-  const profile = state.activeProfile || "Player One";
-  return page({ title: "Accounts", description: "Profiles, sign-in, security, and services.", eyebrow: "System", body: `<section class="account-hero panel"><span class="avatar">${profile === "Player One" ? "P1" : profile.slice(0, 2).toUpperCase()}</span><div><span class="eyebrow">Signed in</span><h2>${profile}</h2><p>Controller 1 · Online</p></div><button class="action-button action-button--ghost" data-route="profiles" data-autofocus="true">Switch Profile</button></section><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Profile", meta: "Name, avatar, and presence", action: "account-option", icon: "●" })}${tile({ title: "Sign-in & security", meta: "PIN and sign-in options", action: "sign-in-options", icon: "⌾" })}${tile({ title: "Privacy", meta: "Sharing and permissions", route: "privacy", icon: "◐" })}${tile({ title: "Subscription", meta: "Plan and benefits", route: "subscription", icon: "✦" })}${tile({ title: "Family", meta: "Members and play settings", action: "account-option", icon: "◎" })}</div>` });
-}
-
-export function subscriptionScreen() {
-  return page({ title: "Subscription", description: "Choose the PARA experience that fits you.", eyebrow: "Account", body: `<section class="plan-current"><span class="eyebrow">Current plan</span><h2>PARA Free</h2><p>Play your games, use your apps, and enjoy the essential PARA experience.</p><span>Active</span></section><div class="plan-grid"><article><span class="plan-icon">○</span><h2>PARA Free</h2><strong>$0</strong><ul><li>Your games and apps</li><li>Local multiplayer</li><li>Creator Mode</li><li>Community access</li></ul><button class="action-button action-button--ghost" disabled>Current plan</button></article><article class="plan-feature"><span class="plan-icon">✦</span><h2>PARA Plus</h2><strong>$9.99 <small>/ month</small></strong><ul><li>Monthly game collection</li><li>Cloud saves</li><li>Exclusive Store savings</li><li>Extended creator storage</li></ul><button class="action-button" data-action="plan-select" data-autofocus="true">View benefits</button></article></div>` });
-}
-
-export function vrusScreen() {
-  return page({ title: "VR-US", description: "Set up your headset and spatial play area.", eyebrow: "System", body: `<section class="vr-hero"><div class="vr-headset" aria-hidden="true"><i></i></div><div><span class="eyebrow">Headset</span><h2>Ready when you are</h2><p>Connect a VR-US headset to begin setup.</p><button class="action-button" data-action="vr-connect" data-autofocus="true">Connect headset</button></div></section><div class="tile-grid tile-grid--wide">${tile({ title: "Play area", meta: "Set boundaries and floor height", action: "vr-option", icon: "⌗" })}${tile({ title: "Visual comfort", meta: "Movement, height, and focus", action: "vr-option", icon: "◎" })}${tile({ title: "Controllers", meta: "Pair spatial controllers", route: "controller", icon: "◇" })}${tile({ title: "Bear Home VR", meta: "Explore your files in 3D", action: "vr-option", icon: "⌂" })}</div>` });
-}
-
-export function updatesScreen() {
-  return page({ title: "Updates", description: "Keep PARA, controllers, and apps current.", eyebrow: "System", body: `<section class="update-hero panel"><span class="update-check">✓</span><div><span class="eyebrow">PARA 0.1</span><h2>You’re up to date</h2><p>Last checked today at 1:42 PM</p></div><button class="action-button action-button--ghost" data-action="check-updates" data-autofocus="true">Check again</button></section><div class="panel"><div class="list">${listRow({ title: "System updates", meta: "Download and install automatically", icon: "↓", end: "On", action: "update-option" })}${listRow({ title: "Game & app updates", meta: "Keep recently used items current", icon: "◇", end: "On", action: "update-option" })}${listRow({ title: "Controller updates", meta: "PulseWave Controller is current", icon: "⌁", end: "Current", action: "update-option" })}${listRow({ title: "Update history", meta: "See recent changes", icon: "↻", action: "update-history" })}</div></div>` });
+  const profile = getState().activeProfile || "Player One";
+  const initials = profile === "Player One" ? "P1" : profile.slice(0, 2).toUpperCase();
+  return page({ title: "Account", description: "The profile used for this PARA session.", eyebrow: "Local profile", body: `<section class="account-hero panel"><span class="avatar">${escapeHtml(initials)}</span><div><h2>${escapeHtml(profile)}</h2><p>Stored on this device</p></div><button class="action-button action-button--ghost" data-route="profiles" data-autofocus="true">Switch Profile</button></section><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}</div>` });
 }
 
 export function powerScreen() {
-  return page({ title: "Power", description: "Choose what PARA should do next.", eyebrow: "System", body: `<div class="power-grid">${tile({ title: "Return Home", meta: "Go back to PARA Home", route: "home", icon: "⌂", autofocus: true })}${tile({ title: "Sleep", meta: "Keep your session ready", action: "system-power", icon: "◐" })}${tile({ title: "Restart PARA", meta: "Close and reopen the PARA interface", action: "restart-shell", icon: "↻" })}${tile({ title: "Turn off", meta: "Shut down this system", action: "system-power", icon: "○" })}${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}${tile({ title: "Recovery", meta: "Open repair options", route: "recovery", icon: "+" })}</div>` });
+  return page({ title: "Power", description: "Controls for the PARA session.", eyebrow: "System", body: `<div class="power-grid">${tile({ title: "Return Home", meta: "Go back to PARA Home", route: "home", icon: "⌂", autofocus: true })}${tile({ title: "Restart PARA", meta: "Reload the PARA interface", action: "restart-shell", icon: "↻" })}${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}${tile({ title: "Recovery", meta: "Open PARA recovery choices", route: "recovery", icon: "+" })}</div>` });
 }
 
 export function healthScreen() {
-  return page({ title: "Repair & health", description: "Check system health and find recovery options.", eyebrow: "System", body: `<section class="health-hero panel"><span class="health-ring"><i>96</i></span><div><span class="eyebrow">System health</span><h2>Everything looks good</h2><p>Storage, network, updates, and system files are in good condition.</p></div><button class="action-button" data-action="diagnostics" data-autofocus="true">Run system check</button></section><div class="tile-grid tile-grid--wide">${tile({ title: "Storage health", meta: "No issues found", route: "storage", icon: "▯", badge: "Good" })}${tile({ title: "Network check", meta: "Internet available", route: "network", icon: "⌁", badge: "Good" })}${tile({ title: "System update", meta: "Current", route: "updates", icon: "↓", badge: "Good" })}${tile({ title: "Recovery", meta: "Restart, reset, and repair options", route: "recovery", icon: "+" })}</div>` });
+  return page({ title: "Repair & health", description: "Live status from PARA and this system.", eyebrow: "System", body: `<section class="health-hero panel" data-health-view><div class="library-loading"><span></span><strong>Checking PARA…</strong></div></section><div class="tile-grid tile-grid--wide">${tile({ title: "Storage", meta: "View disk and drive status", route: "storage", icon: "▯", autofocus: true })}${tile({ title: "Network", meta: "View connection status", route: "network", icon: "⌁" })}${tile({ title: "Recovery", meta: "Restart or replay setup", route: "recovery", icon: "+" })}</div>` });
+}
+
+export async function activateHealth() {
+  const container = document.querySelector("[data-health-view]");
+  if (!container) return;
+  try {
+    const [health, system] = await Promise.all([paraApi.health(), paraApi.system()]);
+    container.innerHTML = `<span class="update-check">✓</span><div><span class="eyebrow">PARA ${escapeHtml(health.version)}</span><h2>PARA is responding</h2><p>${escapeHtml(system.machine)} · ${escapeHtml(system.hostname)}</p></div><button class="action-button action-button--ghost" data-action="run-health-check">Check again</button>`;
+  } catch { container.innerHTML = `<div><h2>PARA needs attention</h2><p>System information could not be reached.</p></div><button class="action-button" data-action="run-health-check">Try again</button>`; }
 }
 
 export function recoveryScreen() {
-  return page({ title: "Recovery", description: "Restore a comfortable, reliable PARA experience.", eyebrow: "Repair & health", body: `<section class="recovery-note"><span>＋</span><div><h2>Choose a recovery option</h2><p>Your personal files are left alone unless you explicitly choose to remove them.</p></div></section><div class="recovery-list">${listRow({ title: "Restart PARA", meta: "Close and reopen the PARA interface", icon: "↻", action: "restart-shell", autofocus: true })}${listRow({ title: "Run system check", meta: "Check core PARA services and files", icon: "◇", action: "diagnostics" })}${listRow({ title: "Replay welcome setup", meta: "Review display, network, privacy, and profile choices", icon: "≈", action: "reset-first-boot" })}${listRow({ title: "Repair installation", meta: "Restore PARA system files", icon: "+", action: "unavailable", end: "Unavailable" })}</div>` });
+  return page({ title: "Recovery", description: "Safe actions for the PARA interface.", eyebrow: "Repair & health", body: `<div class="recovery-list">${listRow({ title: "Restart PARA", meta: "Reload the interface", icon: "↻", action: "restart-shell", autofocus: true })}${listRow({ title: "Replay welcome setup", meta: "Clear PARA interface preferences", icon: "≈", action: "reset-first-boot" })}</div>` });
 }

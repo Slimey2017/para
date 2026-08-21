@@ -1,7 +1,6 @@
 id = "vrus"
-status = "stub"
-frontend_routes = ["apps", "home", "bear-home"]
-development_provider = "services/mock-api/modules/endpoints.py"
+status = "contract-only"
+frontend_routes = []
+current_provider = "none"
 future_runtime = "OpenXR compositor bridge and capability-scoped Bear Home data adapter"
 linux_apis = ["OpenXR", "PipeWire", "Wayland", "udev"]
-

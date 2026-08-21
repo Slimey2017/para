@@ -1,54 +1,66 @@
 openapi: 3.1.0
 info:
-  title: PARA Local Development API
-  version: 0.1.0-dev
-  description: Explicit mock/read-only contracts. No endpoint performs privileged actions.
+  title: PARA Linux Gateway API
+  version: 0.2.0
+  description: Read-only Linux system information plus an explicitly enabled local application launcher.
 servers:
   - url: http://127.0.0.1:4173/api/v1
 paths:
   /health:
     get:
-      summary: Report local mock API health
+      summary: Report gateway health
       responses:
-        '200': { description: Development server is healthy }
-  /status:
+        '200': { description: Gateway is responding }
+  /system:
     get:
-      summary: Return safe development system state
+      summary: Read operating system and hardware architecture information
       responses:
-        '200': { description: Mock/read-only system state }
-  /services:
+        '200': { description: Current Linux system information }
+  /storage:
     get:
-      summary: List service implementation status
+      summary: Read primary storage and mounted drive usage
       responses:
-        '200': { description: Working, mock, and stub service declarations }
-  /hardware:
+        '200': { description: Storage reported by the host }
+  /network:
     get:
-      summary: Return non-privileged hardware summary
+      summary: Read current network interface state
       responses:
-        '200': { description: Read-only development data }
-  /accounts:
+        '200': { description: Interfaces reported by the host }
+  /directories:
     get:
-      summary: Return local mock profiles without authentication claims
+      summary: Read XDG user-directory availability
       responses:
-        '200': { description: Mock profiles }
-  /bear-home:
+        '200': { description: User directory availability }
+  /files:
     get:
-      summary: Return mock Bear Home collections
-      responses:
-        '200': { description: Non-writing collection list }
-  /store:
-    get:
-      summary: Return fictional mock catalog entries
-      responses:
-        '200': { description: Catalog with commerce disabled }
-  /components/{componentId}:
-    get:
-      summary: Return declared status for a PARA component
+      summary: List a supported user directory or mounted-media collection
       parameters:
-        - in: path
-          name: componentId
+        - in: query
+          name: collection
           required: true
-          schema: { type: string }
+          schema:
+            type: string
+            enum: [videos, music, documents, downloads, discs, external]
       responses:
-        '200': { description: Component status }
-
+        '200': { description: Readable entries or connected media }
+        '404': { description: Unknown collection }
+  /apps:
+    get:
+      summary: List routable PARA apps and launchable Linux desktop entries
+      responses:
+        '200': { description: Applications available in the current runtime }
+  /apps/launch:
+    post:
+      summary: Launch an exact discovered Linux desktop entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '202': { description: Launch request accepted }
+        '404': { description: Application is not available }
