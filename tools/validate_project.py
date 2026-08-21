@@ -47,7 +47,16 @@ def main() -> int:
         if re.search(pattern, script_text):
             fail(f"unsafe executable pattern found: {pattern}")
 
-    required_files = [ROOT / "PROJECT_GUIDE.md", ROOT / "apps/para-home/index.html", ROOT / "apps/para-home/assets/bear-home-room.png", ROOT / "services/mock-api/server.py", ROOT / "interfaces/openapi.yaml", ROOT / "render.yaml", ROOT / "scripts/render-start.sh"]
+    required_files = [
+        ROOT / "PROJECT_GUIDE.md",
+        ROOT / "apps/para-home/index.html",
+        ROOT / "apps/para-home/assets/bear-home-room.png",
+        ROOT / "apps/para-home/assets/para-home-dashboard.png",
+        ROOT / "services/mock-api/server.py",
+        ROOT / "interfaces/openapi.yaml",
+        ROOT / "render.yaml",
+        ROOT / "scripts/render-start.sh",
+    ]
     missing = [str(path.relative_to(ROOT)) for path in required_files if not path.exists()]
     if missing:
         fail(f"missing required files: {missing}")

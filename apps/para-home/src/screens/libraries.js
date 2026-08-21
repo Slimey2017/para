@@ -21,7 +21,8 @@ export function bearHomeScreen() {
     `<button class="bear-hotspot ${className}" style="--x:${x}%;--y:${y}%;--w:${w}%;--h:${h}%" ${route ? `data-route="${route}"` : `data-action="${action}" data-collection="${label}"`} data-focus-label="${label}" aria-label="Open ${label}" ${autofocus ? "data-autofocus='true'" : ""}></button>`;
 
   return `<section class="bear-home-room" aria-label="Bear Home visual file manager">
-    <img class="bear-home-room__art" src="./assets/bear-home-room.png" alt="A warm illustrated wooden living room with a chibi PARA bear and glowing file-category signs" />
+    <div class="console-art-frame bear-home-room__frame">
+    <img class="console-art-frame__image bear-home-room__art" src="./assets/bear-home-room.png" alt="A warm illustrated wooden living room with a chibi PARA bear and glowing file-category signs" />
     ${hotspot({ label: "PARA Home", x: 0, y: 0, w: 18, h: 10, route: "home", className: "bear-hotspot--brand" })}
     ${hotspot({ label: "Videos", x: 2.7, y: 15.8, w: 10.2, h: 10.5, autofocus: true })}
     ${hotspot({ label: "Discs", x: 28.2, y: 20.1, w: 8.2, h: 8.8 })}
@@ -44,6 +45,7 @@ export function bearHomeScreen() {
         ${listRow({ title: "Trash", meta: "Deletion is not implemented", icon: "⌫", action: "bear-folder-stub" })}
       </div>
     </aside>
+    </div>
   </section>`;
 }
 

@@ -46,10 +46,26 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(art.exists())
         self.assertGreater(art.stat().st_size, 1_000_000)
         screen = (ROOT / "apps/para-home/src/screens/libraries.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
         self.assertIn("bear-home-room.png", screen)
         self.assertIn('label: "Videos"', screen)
         self.assertIn('label: "External Drives"', screen)
         self.assertIn('action: "bear-more"', screen)
+        self.assertIn("console-art-frame bear-home-room__frame", screen)
+        self.assertIn("object-fit: contain", css)
+        self.assertNotIn("object-fit: cover", css)
+
+    def test_home_uses_reference_dashboard_and_shared_navigation(self):
+        art = ROOT / "apps/para-home/assets/para-home-dashboard.png"
+        self.assertTrue(art.exists())
+        self.assertGreater(art.stat().st_size, 500_000)
+        screen = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
+        self.assertIn("para-home-dashboard.png", screen)
+        self.assertIn('label: "Continue"', screen)
+        self.assertIn('label: "Community"', screen)
+        self.assertIn('label: "Library"', screen)
+        self.assertIn('route: "notifications"', screen)
+        self.assertIn("dashboard-hotspot", screen)
 
 
 if __name__ == "__main__":

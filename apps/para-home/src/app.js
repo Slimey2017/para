@@ -128,6 +128,8 @@ function handleAction(action, target) {
     case "toggle-contrast": setState({ highContrast: !state.highContrast }); toast("Contrast preference updated", !state.highContrast ? "High contrast is on." : "Standard contrast is on."); rerender(); break;
     case "diagnostics": runDiagnostics(); break;
     case "controller-test": toast("Input layer active", controllerStatus.connected ? `${controllerStatus.name} is connected through the Browser Gamepad API.` : "No browser gamepad detected. Keyboard fallback is active."); break;
+    case "home-current": toast("PARA Home", "You are already on the Home dashboard."); break;
+    case "dashboard-stub": toast(target?.dataset.dashboardLabel || "Dashboard preview", "This card is interactive, but its activity data and supporting service are still development placeholders."); break;
     case "bear-more": {
       const drawer = document.querySelector("[data-bear-drawer]");
       if (drawer) {
