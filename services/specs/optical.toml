@@ -1,0 +1,7 @@
+id = "optical"
+status = "stub"
+frontend_routes = ["bear-home", "apps"]
+development_provider = "services/native/optical-disc"
+future_runtime = "C or Rust media coordinator using existing Linux drivers"
+linux_apis = ["udev", "udisks2", "sr_mod", "sg", "UDF"]
+

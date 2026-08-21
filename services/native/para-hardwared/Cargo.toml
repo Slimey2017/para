@@ -1,0 +1,10 @@
+[package]
+name = "para-hardwared"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[profile.release]
+strip = true
+lto = true
+

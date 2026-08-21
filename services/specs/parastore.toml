@@ -1,0 +1,7 @@
+id = "parastore"
+status = "mock"
+frontend_routes = ["store", "downloads"]
+development_provider = "services/mock-api/modules/endpoints.py"
+future_runtime = "Signed catalog, commerce, license, CDN, and moderation services"
+security_note = "The prototype has no checkout, entitlement, or package trust."
+

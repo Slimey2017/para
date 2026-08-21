@@ -1,0 +1,54 @@
+openapi: 3.1.0
+info:
+  title: PARA Local Development API
+  version: 0.1.0-dev
+  description: Explicit mock/read-only contracts. No endpoint performs privileged actions.
+servers:
+  - url: http://127.0.0.1:4173/api/v1
+paths:
+  /health:
+    get:
+      summary: Report local mock API health
+      responses:
+        '200': { description: Development server is healthy }
+  /status:
+    get:
+      summary: Return safe development system state
+      responses:
+        '200': { description: Mock/read-only system state }
+  /services:
+    get:
+      summary: List service implementation status
+      responses:
+        '200': { description: Working, mock, and stub service declarations }
+  /hardware:
+    get:
+      summary: Return non-privileged hardware summary
+      responses:
+        '200': { description: Read-only development data }
+  /accounts:
+    get:
+      summary: Return local mock profiles without authentication claims
+      responses:
+        '200': { description: Mock profiles }
+  /bear-home:
+    get:
+      summary: Return mock Bear Home collections
+      responses:
+        '200': { description: Non-writing collection list }
+  /store:
+    get:
+      summary: Return fictional mock catalog entries
+      responses:
+        '200': { description: Catalog with commerce disabled }
+  /components/{componentId}:
+    get:
+      summary: Return declared status for a PARA component
+      parameters:
+        - in: path
+          name: componentId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Component status }
+

@@ -1,0 +1,7 @@
+[Unit]
+Description=PARA Home development target (example; not installed or enabled)
+Documentation=file:PROJECT_GUIDE.md
+
+[Install]
+WantedBy=default.target
+

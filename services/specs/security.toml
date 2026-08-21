@@ -1,0 +1,7 @@
+id = "security"
+status = "design-stub"
+frontend_routes = ["account", "settings", "creator"]
+development_provider = "config/services.json"
+future_runtime = "Polkit policies, sandbox profiles, package signature verification, and secrets broker"
+linux_apis = ["polkit", "systemd sandboxing", "bubblewrap", "Landlock", "kernel keyring"]
+

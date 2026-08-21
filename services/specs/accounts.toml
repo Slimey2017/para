@@ -1,0 +1,7 @@
+id = "accounts"
+status = "stub"
+frontend_routes = ["login", "profiles", "account", "subscription"]
+development_provider = "services/mock-api/modules/endpoints.py"
+future_runtime = "Rust or Go identity broker plus remote account backend"
+security_note = "Never treat the current local profile card as authentication."
+

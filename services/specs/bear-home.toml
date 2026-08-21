@@ -1,0 +1,7 @@
+id = "bear-home"
+status = "mock"
+frontend_routes = ["bear-home"]
+development_provider = "services/mock-api/modules/endpoints.py"
+future_runtime = "Indexed metadata service over Tracker/SPARQL or a PARA-owned SQLite index"
+linux_apis = ["xdg-user-dirs", "udisks2", "inotify"]
+

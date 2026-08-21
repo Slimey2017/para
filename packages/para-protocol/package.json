@@ -1,0 +1,8 @@
+{
+  "name": "@para/protocol",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript contracts for PARA frontend and services"
+}
+
