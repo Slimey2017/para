@@ -30,7 +30,7 @@ function icon(name, className = "") {
   return `<svg class="home-icon ${className}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[name] || paths.system}</svg>`;
 }
 
-function routeAttributes({ route, action = "dashboard-stub", label }) {
+function routeAttributes({ route, action = "unavailable", label }) {
   return route ? `data-route="${route}"` : `data-action="${action}" data-dashboard-label="${label}"`;
 }
 
@@ -39,12 +39,12 @@ function launcher({ title, subtitle, iconName, route, autofocus = false, progres
     <span class="home-launcher__glow" aria-hidden="true"></span>
     <span class="home-launcher__icon">${icon(iconName)}</span>
     <span class="home-launcher__copy"><strong>${title}</strong><small>${subtitle}</small></span>
-    ${progress ? '<span class="home-launcher__progress" aria-label="Mock progress: 78 percent"><i></i></span>' : ""}
+    ${progress ? '<span class="home-launcher__progress" aria-label="Resume progress: 78 percent"><i></i></span>' : ""}
   </button>`;
 }
 
 function activity({ title, meta, iconName, route, action }) {
-  return `<button class="home-activity" ${routeAttributes({ route, action, label: title })} data-mock="true">
+  return `<button class="home-activity" ${routeAttributes({ route, action, label: title })}>
     <span class="home-activity__icon">${icon(iconName)}</span>
     <span><strong>${title}</strong><small>${meta}</small></span>
   </button>`;
@@ -76,7 +76,7 @@ export function homeScreen() {
         <button class="home-nav__button" data-route="settings">${icon("settings")}<span>Settings</span></button>
       </nav>
       <div class="home-status" aria-label="System status">
-        <button class="home-status__coins" data-route="store" data-mock="true" aria-label="12,450 mock ParaPoints">${icon("coin")}<strong>12,450</strong></button>
+        <button class="home-status__coins" data-route="store" aria-label="12,450 ParaPoints">${icon("coin")}<strong>12,450</strong></button>
         <span class="home-status__divider" aria-hidden="true"></span>
         <button class="home-status__icon" data-route="network" aria-label="Network settings">${icon("wifi")}</button>
         <time class="home-status__clock" data-clock aria-label="Current time">--:--</time>
@@ -106,24 +106,24 @@ export function homeScreen() {
 
     <div class="home-lower">
       <section class="home-section home-recent" aria-labelledby="recent-heading">
-        <h2 id="recent-heading">Recent Activity <span>Mock activity</span></h2>
+        <h2 id="recent-heading">Recent Activity</h2>
         <div class="home-activity-strip">
           ${activity({ title: "Neon Drift", meta: "Played 1h ago", iconName: "gamepad", route: "games" })}
           ${activity({ title: "Project Aurora", meta: "Edited 3h ago", iconName: "file", route: "creator" })}
-          ${activity({ title: "Screenshot_0423", meta: "Captured 5h ago", iconName: "image", action: "dashboard-stub" })}
+          ${activity({ title: "Screenshot_0423", meta: "Captured 5h ago", iconName: "image", action: "unavailable" })}
         </div>
       </section>
 
       <section class="home-system-panel" aria-labelledby="overview-heading">
-        <h2 id="overview-heading">System Overview <span>Mock status</span></h2>
+        <h2 id="overview-heading">System Overview</h2>
         <div class="home-metrics">
-          <button class="home-metric" data-action="dashboard-stub" data-dashboard-label="Temperature" data-mock="true">
+          <button class="home-metric" data-action="unavailable" data-dashboard-label="Temperature">
             <span>${icon("temperature")}</span><strong>72°</strong><small>Temperature</small>
           </button>
-          <button class="home-metric" data-route="storage" data-mock="true">
+          <button class="home-metric" data-route="storage">
             <span>${icon("storage")}</span><strong>860 GB</strong><small>Free Space</small>
           </button>
-          <button class="home-metric" data-route="network" data-mock="true">
+          <button class="home-metric" data-route="network">
             <span>${icon("wifi")}</span><strong>Connected</strong><small>PulseWave 5G</small>
           </button>
         </div>
@@ -135,10 +135,10 @@ export function homeScreen() {
       <div class="home-shortcut-grid">
         ${shortcut({ title: "Profile", iconName: "profile", route: "account" })}
         ${shortcut({ title: "Messages", iconName: "messages", route: "social" })}
-        ${shortcut({ title: "Calendar", iconName: "calendar", action: "dashboard-stub" })}
-        ${shortcut({ title: "Achievements", iconName: "trophy", action: "dashboard-stub" })}
+        ${shortcut({ title: "Calendar", iconName: "calendar", action: "unavailable" })}
+        ${shortcut({ title: "Achievements", iconName: "trophy", action: "unavailable" })}
         ${shortcut({ title: "Library", iconName: "grid", route: "apps" })}
-        ${shortcut({ title: "Help", iconName: "help", action: "dashboard-stub" })}
+        ${shortcut({ title: "Help", iconName: "help", action: "unavailable" })}
       </div>
     </section>
   </section>`;

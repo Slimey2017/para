@@ -1,55 +1,47 @@
-import { mock } from "../mock-data.js";
-import { page, tile, stubNotice, listRow } from "../ui/components.js";
+import { content } from "../mock-data.js";
+import { page, tile, listRow, hints } from "../ui/components.js";
+
+function coverCard(item, index = 0, { store = false } = {}) {
+  const start = item.colors?.[0] || item.color || "#2a0d5f";
+  const end = item.colors?.[1] || "#a968ff";
+  return `<button class="cover-card" style="--cover-a:${start};--cover-b:${end}" data-action="${store ? "store-product" : "game-open"}" data-title="${item.title}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="cover-card__art cover-card__art--${item.art || "orbit"}" aria-hidden="true"><i></i><b>${item.title.split(" ")[0]}</b></span><span class="cover-card__copy"><strong>${item.title}</strong><small>${item.genre || item.kicker}</small><span class="cover-card__price">${store ? `${item.oldPrice ? `<s>${item.oldPrice}</s>` : ""}${item.price}` : item.status}</span></span></button>`;
+}
+
+function rail(title, items) {
+  return `<section class="content-rail"><div class="content-rail__head"><h2>${title}</h2><button data-action="browse-category" data-category="${title}">See all</button></div><div class="cover-strip">${items.map((item, index) => coverCard(item, index, { store: true })).join("")}</div></section>`;
+}
 
 export function gamesScreen() {
-  const body = `<div class="panel" style="margin-bottom:22px"><div class="panel__head"><div><h2>Installed & available</h2><p class="tile__meta">All titles are fictional development data.</p></div><div class="action-row"><button class="action-button action-button--ghost" data-action="filter-stub">Filter</button><button class="action-button" data-route="store">Find games</button></div></div></div><div class="tile-grid tile-grid--compact">${mock.games.map((game, index) => tile({ title: game.title, meta: game.meta, action: "game-stub", icon: index === 1 ? "▶" : "◇", badge: game.status, accent: game.color, autofocus: index === 0 })).join("")}</div>`;
-  return page({ title: "Games", description: "A controller-first library shell with space reserved for licenses, installs, compatibility, and Quick Resume.", eyebrow: "Library · Mock catalog", body });
+  const body = `<section class="library-hero"><div><span class="eyebrow">Ready to play</span><h2>Neon Drift</h2><p>Return to the midnight circuit.</p><button class="action-button" data-action="game-open" data-title="Neon Drift" data-autofocus="true">Play</button></div><span class="library-hero__planet" aria-hidden="true"></span></section><div class="library-tools"><div class="segmented"><button class="is-active" data-action="library-filter">All</button><button data-action="library-filter">Installed</button><button data-action="library-filter">Favorites</button></div><button class="action-button action-button--ghost" data-route="store">Find games</button></div><div class="cover-grid">${content.games.map((game, index) => coverCard(game, index)).join("")}</div>`;
+  return page({ title: "Games", description: "Your PARA and compatible PC game library.", eyebrow: "Library", body });
 }
 
 export function appsScreen() {
-  const body = `<div class="tile-grid">${mock.apps.map((app, index) => tile({ title: app.title, meta: app.meta, route: app.title === "Bear Home" ? "bear-home" : app.title === "Creator Mode" ? "creator" : undefined, action: app.title === "VR-US" ? "vrus-stub" : "app-stub", icon: app.icon, badge: app.status, autofocus: index === 0, disabled: app.title === "VR-US" })).join("")}</div>`;
-  return page({ title: "Apps", description: "A home for media, communication, creation, and future Linux application containers.", eyebrow: "Applications · Mock library", body });
+  const body = `<div class="library-tools"><div class="segmented"><button class="is-active" data-action="library-filter" data-autofocus="true">All apps</button><button data-action="library-filter">Entertainment</button><button data-action="library-filter">Tools</button></div><button class="action-button action-button--ghost" data-route="store">Get apps</button></div><div class="app-shelf">${content.apps.map((app) => tile({ title: app.title, meta: app.meta, route: app.route, action: app.action, icon: app.icon, className: "app-tile" })).join("")}</div>`;
+  return page({ title: "Apps", description: "Everything you use, from the couch or at your desk.", eyebrow: "Library", body });
 }
 
 export function storeScreen() {
-  const body = `${stubNotice("ParaStore commerce")}<div class="tile-grid tile-grid--wide" style="margin-top:22px">${tile({ title: "Fresh currents", meta: "Curated concept titles — no checkout", action: "store-stub", icon: "✦", badge: "Preview", className: "tile--hero", art: true, autofocus: true })}${tile({ title: "Games", meta: "Mock discovery rail", action: "store-stub", icon: "◇", badge: "Mock" })}${tile({ title: "Apps", meta: "Mock discovery rail", action: "store-stub", icon: "▦", badge: "Mock" })}${tile({ title: "Creator drops", meta: "UGC boundary only", action: "store-stub", icon: "✧", badge: "Stub" })}</div>`;
-  return page({ title: "ParaStore", description: "Discovery UI only. Purchases, licenses, refunds, ratings, and downloads need a real trusted backend.", eyebrow: "Storefront · No commerce", body });
+  const categories = ["Featured", "New Releases", "Popular", "Free to Play", "Apps", "UGC", "Creator Picks", "Deals"];
+  const popular = content.products.filter((item) => ["Popular", "Free to Play", "UGC"].includes(item.category));
+  const picks = content.products.filter((item) => ["Creator Picks", "Apps", "Deals"].includes(item.category));
+  return page({ title: "ParaStore", description: "Find your next game, app, or community creation.", eyebrow: "Discover", className: "store-page", body: `<div class="store-toolbar"><label class="store-search"><span>⌕</span><input aria-label="Search ParaStore" placeholder="Search games, apps, and creators" /><button data-action="store-search">Search</button></label><button class="store-tool" data-action="wishlist">♡ <span>Wishlist</span></button><button class="store-tool" data-action="cart">▱ <span>Cart</span></button></div><nav class="store-categories" aria-label="Store categories">${categories.map((category, index) => `<button class="${index === 0 ? "is-active" : ""}" data-action="browse-category" data-category="${category}" ${index === 0 ? "data-autofocus='true'" : ""}>${category}</button>`).join("")}</nav><section class="store-feature"><div class="store-feature__copy"><span>FEATURED</span><h2>Eclipse Run</h2><p>Race across a dying star in a cinematic adventure shaped by every decision.</p><div><button class="action-button" data-action="store-product" data-title="Eclipse Run">View game</button><strong>$59.99</strong></div></div><div class="store-feature__art" aria-hidden="true"><i></i><b>ECLIPSE<br>RUN</b></div></section>${rail("New Releases", content.products.slice(1, 6))}${rail("Popular & Free to Play", popular)}${rail("Creator Picks & Deals", picks)}` });
 }
 
 export function bearHomeScreen() {
-  const hotspot = ({ label, x, y, w, h, route, action = "bear-folder-stub", className = "", autofocus = false }) =>
-    `<button class="bear-hotspot ${className}" style="--x:${x}%;--y:${y}%;--w:${w}%;--h:${h}%" ${route ? `data-route="${route}"` : `data-action="${action}" data-collection="${label}"`} data-focus-label="${label}" aria-label="Open ${label}" ${autofocus ? "data-autofocus='true'" : ""}></button>`;
-
-  return `<section class="bear-home-room" aria-label="Bear Home visual file manager">
-    <div class="console-art-frame bear-home-room__frame">
-    <img class="console-art-frame__image bear-home-room__art" src="./assets/bear-home-room.png" alt="A warm illustrated wooden living room with a chibi PARA bear and glowing file-category signs" />
-    ${hotspot({ label: "PARA Home", x: 0, y: 0, w: 18, h: 10, route: "home", className: "bear-hotspot--brand" })}
-    ${hotspot({ label: "Videos", x: 2.7, y: 15.8, w: 10.2, h: 10.5, autofocus: true })}
-    ${hotspot({ label: "Discs", x: 28.2, y: 20.1, w: 8.2, h: 8.8 })}
-    ${hotspot({ label: "Music", x: 60.4, y: 14.8, w: 9.4, h: 9.3 })}
-    ${hotspot({ label: "Documents", x: 73.8, y: 18.7, w: 12.2, h: 9.6 })}
-    ${hotspot({ label: "External Drives", x: 88.3, y: 19.8, w: 10.4, h: 12.8 })}
-    ${hotspot({ label: "Downloads", x: 68.7, y: 74.1, w: 13.2, h: 12.5, route: "downloads" })}
-    ${hotspot({ label: "Settings", x: 10.2, y: 77.5, w: 9.5, h: 17.5, route: "settings", className: "bear-hotspot--round" })}
-    ${hotspot({ label: "More collections", x: 38.7, y: 48.4, w: 9.2, h: 25.5, action: "bear-more", className: "bear-hotspot--bear" })}
-    <time class="bear-live-clock" data-clock aria-label="Current time">--:--</time>
-    <span class="bear-room-mode">Interactive mock room</span>
-    <div class="bear-room-hints"><span><b>↕↔</b> Move</span><span><b>Enter</b> Open</span><span><b>Esc</b> Back</span><span><b>M</b> Quick</span></div>
-    <aside class="bear-drawer" data-bear-drawer hidden aria-label="More Bear Home collections">
-      <div class="panel__head"><div><span class="eyebrow">More rooms</span><h2 style="margin-top:12px">Bear’s other shelves</h2></div><button class="action-button action-button--ghost" data-action="bear-drawer-close" aria-label="Close more collections">×</button></div>
-      <p class="muted">These collections are reserved for the full file service. Selecting one explains its current development status.</p>
-      <div class="list">
-        ${listRow({ title: "Photos", meta: "Screenshots and albums · mock", icon: "▧", action: "bear-folder-stub", autofocus: true })}
-        ${listRow({ title: "Games / UGC", meta: "Mods and creator content · stub", icon: "◇", action: "bear-folder-stub" })}
-        ${listRow({ title: "Cloud", meta: "Provider boundary not connected", icon: "☁", action: "bear-folder-stub" })}
-        ${listRow({ title: "Trash", meta: "Deletion is not implemented", icon: "⌫", action: "bear-folder-stub" })}
-      </div>
-    </aside>
-    </div>
-  </section>`;
+  const hotspot = ({ label, x, y, w, h, route, action = "bear-folder", className = "", autofocus = false }) => `<button class="bear-hotspot ${className}" style="--x:${x}%;--y:${y}%;--w:${w}%;--h:${h}%" ${route ? `data-route="${route}"` : `data-action="${action}" data-collection="${label}"`} data-focus-label="${label}" aria-label="Open ${label}" ${autofocus ? "data-autofocus='true'" : ""}></button>`;
+  return `<section class="bear-home-room" aria-label="Bear Home file explorer"><div class="console-art-frame bear-home-room__frame"><img class="console-art-frame__image bear-home-room__art" src="./assets/bear-home-room.png" alt="A warm illustrated bear home where each part of the room opens a file collection" />${hotspot({ label: "PARA Home", x: 0, y: 0, w: 18, h: 10, route: "home", className: "bear-hotspot--brand" })}${hotspot({ label: "Videos", x: 2.7, y: 15.8, w: 10.2, h: 10.5, autofocus: true })}${hotspot({ label: "Discs", x: 28.2, y: 20.1, w: 8.2, h: 8.8 })}${hotspot({ label: "Music", x: 60.4, y: 14.8, w: 9.4, h: 9.3 })}${hotspot({ label: "Documents", x: 73.8, y: 18.7, w: 12.2, h: 9.6 })}${hotspot({ label: "External Drives", x: 88.3, y: 19.8, w: 10.4, h: 12.8 })}${hotspot({ label: "Downloads", x: 68.7, y: 74.1, w: 13.2, h: 12.5, route: "downloads" })}${hotspot({ label: "Settings", x: 10.2, y: 77.5, w: 9.5, h: 17.5, route: "settings", className: "bear-hotspot--round" })}${hotspot({ label: "More collections", x: 38.7, y: 48.4, w: 9.2, h: 25.5, action: "bear-more", className: "bear-hotspot--bear" })}<time class="bear-live-clock" data-clock aria-label="Current time">--:--</time><div class="bear-room-hints"><span><i class="control-dot control-dot--blue"></i>Open</span><span><i class="control-dot control-dot--red"></i>Back</span><span><i class="control-dot control-dot--yellow"></i>More</span></div><aside class="bear-drawer" data-bear-drawer hidden aria-label="More Bear Home collections"><div class="panel__head"><div><span class="eyebrow">More rooms</span><h2>Other shelves</h2></div><button class="action-button action-button--ghost" data-action="bear-drawer-close" aria-label="Close">×</button></div><div class="list">${listRow({ title: "Photos", meta: "Screenshots and albums", icon: "▧", action: "bear-folder", autofocus: true })}${listRow({ title: "Games / UGC", meta: "Mods and creator content", icon: "◇", action: "bear-folder" })}${listRow({ title: "Cloud", meta: "Files from your connected services", icon: "☁", action: "bear-folder" })}${listRow({ title: "Trash", meta: "Recently removed items", icon: "⌫", action: "bear-folder" })}</div></aside></div></section>`;
 }
 
 export function creatorScreen() {
-  const body = `<div class="tile-grid tile-grid--wide">${tile({ title: "Project dock", meta: "Open local development projects", action: "creator-stub", icon: "⌁", badge: "Stub", className: "tile--hero", art: true, autofocus: true })}${tile({ title: "PARA SDK", meta: "Protocol types and mock API", action: "creator-stub", icon: "{ }", badge: "Early" })}${tile({ title: "Device simulator", meta: "PulseWave and VR-US test data", action: "creator-stub", icon: "◎", badge: "Planned" })}${tile({ title: "Package validator", meta: "Manifest checks and signing boundary", action: "creator-stub", icon: "✓", badge: "Stub" })}${tile({ title: "Developer options", meta: "Safe local switches only", action: "creator-stub", icon: "⚙", badge: "Preview" })}</div>`;
-  return page({ title: "Creator Mode", description: "The future workspace for games, apps, packages, controller maps, and PARA-safe test environments.", eyebrow: "Developer tools · Early shell", body });
+  const tools = [
+    ["Blender", "3D design and animation", "B", "#f47721"], ["Godot Engine", "Build games and experiences", "G", "#478cbf"],
+    ["Unreal Engine", "Real-time 3D creation", "U", "#c9c9d2"], ["Code Studio", "Code, test, and collaborate", "{ }", "#52a7ff"],
+    ["Terminal", "Advanced Linux workspace", ">_", "#7de1a3"], ["Kdenlive", "Video editing", "K", "#64c8ff"],
+    ["OBS Studio", "Record and stream", "O", "#a985ff"], ["Audacity", "Audio editing", "A", "#ffcc49"],
+    ["Krita", "Digital painting", "K", "#ff5da8"], ["Steam", "PC games and tools", "S", "#62a4dc"],
+    ["PC Games", "Compatible Epic and Windows titles", "P", "#ffffff"], ["Files", "Open Bear Home", "▱", "#be86ff", "bear-home"],
+  ];
+  const cards = tools.map((tool, index) => `<button class="creator-app" style="--app-color:${tool[3]}" ${tool[4] ? `data-route="${tool[4]}"` : `data-action="creator-open" data-title="${tool[0]}"`} ${index === 0 ? "data-autofocus='true'" : ""}><span>${tool[2]}</span><strong>${tool[0]}</strong><small>${tool[1]}</small></button>`).join("");
+  return page({ title: "Creator Mode", description: "Your full PC workspace for making, editing, coding, and playing.", eyebrow: "Workspace", className: "creator-page", body: `<section class="creator-hero"><div><span>CREATOR SESSION</span><h2>Make something extraordinary</h2><p>Keyboard, mouse, controllers, displays, and standard PC peripherals are ready when you are.</p><div class="creator-hero__actions"><button class="action-button" data-action="creator-open" data-title="Continue Project Aurora">Continue Project Aurora</button><button class="action-button action-button--ghost" data-action="new-project">New project</button></div></div><div class="creator-window" aria-hidden="true"><i></i><i></i><i></i><b>PROJECT AURORA</b></div></section><div class="creator-section-head"><h2>Tools & applications</h2><div class="segmented"><button class="is-active" data-action="creator-filter">All</button><button data-action="creator-filter">Create</button><button data-action="creator-filter">Code</button><button data-action="creator-filter">Play</button></div></div><div class="creator-grid">${cards}</div><section class="creator-resources"><button data-action="creator-open" data-title="Projects"><span>12</span><strong>Projects</strong><small>Across internal and external storage</small></button><button data-action="creator-open" data-title="Workspaces"><span>3</span><strong>Workspaces</strong><small>Game, media, and software</small></button><button data-route="storage"><span>860 GB</span><strong>Free space</strong><small>Storage overview</small></button></section>` });
 }

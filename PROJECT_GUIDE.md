@@ -8,10 +8,11 @@ process isolation, graphics, input, networking, storage, audio, and power
 management. PARA adds a console-focused interaction layer above those services.
 
 The current deliverable is a working, dependency-light browser prototype that
-boots through the reserved PARA startup sequence, completes a local first-time
-setup, shows profile/login shells, enters PARA Home, and navigates every menu in
-the build brief. Backend, cloud, commerce, identity, privileged system actions,
-and most hardware integration are visibly marked as mock data or stubs.
+boots through the reserved PARA startup sequence, completes a calm seven-step
+first-time setup, shows profile/login screens, enters PARA Home, and navigates
+every menu in the build brief. Unfinished consumer actions are hidden, disabled,
+or presented with a normal unavailable state; engineering status never appears
+inside the consumer interface.
 
 ## 2. Safety promise
 
@@ -169,6 +170,7 @@ PARA/
 │   ├── test_api.py
 │   └── test_repository.py
 └── tools/
+    ├── audit_consumer_ui.mjs
     ├── package_release.py
     ├── paractl.py
     └── validate_project.py
@@ -209,21 +211,21 @@ PARA/
 | `apps/para-home/assets/bear-home-room.png` | The authoritative full-screen Bear Home room: warm wooden interior, chibi PARA bear, couch, media shelves, desk, glowing collection signs, settings paw, and downloads nook. | 1672×941 PNG illustration | Works as the visual file-manager surface. It is rendered uncropped in a centered 16:9 stage. | Final art optimization, alternate times of day, localization-safe signs, and layered/animated production assets. Used by `src/screens/libraries.js`. |
 | `apps/para-home/assets/para-home-background.png` | The approved purple planet, liquid-energy, stars, and reflective-floor scene. PARA needs a strong visual identity without baking menus into the artwork. | 1672×941 PNG illustration | Works as PARA Home’s independent full-screen background layer. It fills the viewport behind real controls and uses a restrained drift/pulse treatment. | Optimized AVIF/WebP variants, HDR grading, parallax layers, and production licensing/provenance records. Used by `src/screens/home.js`. |
 | `apps/para-home/assets/para-home-dashboard.png` | Preserves the approved dashboard composition as a design reference for spacing, hierarchy, and visual comparison. | 1672×941 PNG mockup | Reference only; it is deliberately not loaded by the application. | Move to formal design documentation when the component system is stable. |
-| `apps/para-home/styles.css` | PARA’s matte-black, white, purple, liquid/wave identity; live Home component system; exact Bear Home artwork stage; TV scaling; loading; disabled/focus states; startup effects. | Modern CSS | Works, including responsive real buttons, mouse-follow card lighting, controller focus animation, uncropped Bear Home, and reduced-motion modes. | Design tokens, local font assets, GPU performance budgets, localization stress tests, HDR/color calibration. |
-| `src/app.js` | Composes screens, global navigation, actions, startup routing, diagnostics, clock, state changes, and honest stub toasts. | JavaScript ES modules | Works. | Split action controllers, typed API client, error boundaries, telemetry consent, localization. Talks to all screen modules, router, input managers, state, and `/api/v1/health`. |
+| `apps/para-home/styles.css` | PARA’s matte-black, white, purple, liquid/wave identity; animated ambient backgrounds; spring-like focus; Store covers; Creator workspace; exact Bear Home artwork stage; TV scaling; loading; disabled states; startup effects. | Modern CSS | Works, including responsive real buttons, mouse-follow Home lighting, controller focus animation, card-to-page transitions, uncropped Bear Home, and reduced-motion modes. | Design tokens, local font assets, GPU performance budgets, localization stress tests, HDR/color calibration. |
+| `src/app.js` | Composes 31 screens, shared transitions, global navigation, consumer-safe unavailable states, setup choices, diagnostics, clock, and state changes. | JavaScript ES modules | Works. | Split action controllers, typed API client, error boundaries, telemetry consent, localization. Talks to all screen modules, router, input managers, state, and `/api/v1/health`. |
 | `src/router.js` | Hash router with a small in-app back stack so every menu is reachable without broken links. | JavaScript | Works. | Deep-link policy, route guards, suspended activities, transition lifecycle. Uses `screen-manifest.js`. |
 | `src/focus-manager.js` | Reusable spatial focus navigation based on element geometry. It prevents every page from inventing its own controller logic. | JavaScript + DOM APIs | Works for keyboard, pointer, and gamepad-directed movement. | Focus groups, wrap rules, virtualized lists, RTL direction, accessibility announcements. |
 | `src/gamepad.js` | Maps Browser Gamepad buttons, D-pad, stick, Menu, and shoulders into shared navigation actions. | JavaScript Browser Gamepad API | Works when the browser exposes a controller; it is not native PulseWave support. | Device identity, controller database, latency telemetry, remapping, haptics, native daemon bridge. Talks to `focus-manager.js` through `app.js`. |
-| `src/state.js` | Stores first-boot completion, local login flag, setup step, and visual preferences. | JavaScript + `localStorage` | Works only as local prototype state; not secure authentication. | Encrypted profile service, migrations, parental controls, cloud sync, transactional preferences. |
-| `src/mock-data.js` | Central labels for fictional games, apps, downloads, friends, networks, and notices. | JavaScript | Works as explicit display-only mock data. | Replace each dataset with its versioned service API; keep fixtures for tests. |
+| `src/state.js` | Stores first-boot completion, current profile, seven-step setup position, display/network selections, privacy choices, and accessibility preferences. | JavaScript + `localStorage` | Works for browser-session preferences; it is not an identity or credential store. | Encrypted profile service, migrations, parental controls, cloud sync, transactional preferences. |
+| `src/mock-data.js` | Supplies consumer-ready fictional games, Store products, apps, downloads, friends, networks, and notices without exposing engineering labels. | JavaScript | Works as display content. | Replace each dataset with its versioned service API; keep separate fixtures for tests. |
 | `src/screen-manifest.js` | Authoritative route inventory used by router validation and documentation. | JavaScript | Works. | Route capabilities, localization keys, parental ratings, analytics consent tags. |
-| `src/ui/components.js` | Reusable topbar, tiles, list rows, panels, progress, hints, and stub notices. | JavaScript HTML templates | Works. | Component tests, sanitization for remote content, virtual lists, theming API. Used by all screen modules. |
-| `src/screens/boot.js` | Implements startup placeholder, five-stage intro, and six-step setup wizard. Reserves asset replacement boundaries for fade, liquid mixing, splash/logo reveal, logo melt, beat-reactive orb, and setup. | JavaScript + CSS animation | Works as a placeholder sequence. | Replace stage visuals with signed rendered assets/WebGL and real audio-reactive timing without changing the state router. Talks to `state.js` and `app.js`. |
-| `src/screens/auth.js` | Profile selection, add-profile placeholder, guest entry, login, PIN placeholder, and recovery boundary. | JavaScript | Navigation works; identity and security are stubs. | Account backend, passkeys/PIN policy, controller assignment, recovery, parental controls. |
+| `src/ui/components.js` | Reusable branded backdrop, topbar, focus cards, list rows, toggles, progress, and PARA’s blue/red/green/yellow control legend. | JavaScript HTML templates | Works. | Component tests, sanitization for remote content, virtual lists, theming API. Used by all screen modules. |
+| `src/screens/boot.js` | Implements startup, the five-stage intro, and seven calm setup screens: Welcome, Display, Network, Accessibility, Privacy, Account/Profile, and Ready. The intro reserves replacement boundaries for fade, liquid mixing, splash/logo reveal, logo melt, and beat-reactive orb. | JavaScript + CSS animation | Navigation, preferences, progress, screen detection, and transitions work; final rendered intro assets and hardware calibration are future work. | Signed rendered assets/WebGL, accurate refresh detection, HDR calibration, safe-area tooling, and audio-reactive timing. Talks to `state.js` and `app.js`. |
+| `src/screens/auth.js` | Renders “Who’s playing?” profile cards, Guest, Add Profile, selected-profile login, PIN surface, Switch Profile, and Sign-in Options. | JavaScript | The navigation/session flow works; remote identity, PIN verification, and recovery services are placeholders behind normal unavailable states. | Account broker, passkeys/PIN policy, controller assignment, recovery, parental controls. |
 | `src/screens/home.js` | Renders PARA Home as real semantic components over the separate approved background. Every visible nav item, launcher, activity, metric, and shortcut is its own focusable control. | JavaScript HTML templates + inline SVG icons | Works with keyboard, mouse, and controller navigation, live clock/greeting, animated focus, and responsive layout. Calendar, Achievements, Help, and displayed activity/system values explicitly remain placeholders. | Service-driven widgets, Quick Resume, real thermal/storage/network state, personalization, and localization. Talks to the shared router/focus system through `app.js`. |
-| `src/screens/libraries.js` | Game/app libraries, ParaStore, Creator Mode, and the full illustrated Bear Home room. Bear Home uses spatial controller-focus hotspots over uncropped artwork and a More drawer for Photos, Games/UGC, Cloud, and Trash. | JavaScript | All screens navigate; the room interaction works while file operations remain honest stubs. | Package manager, licenses, app sandboxing, indexed files, commerce, UGC moderation, developer SDK, and animated/layered Bear Home assets. |
-| `src/screens/social.js` | Parties/friends and calls entry screens. | JavaScript | UI works; presence, voice, video, contacts, and history are stubs. | Identity, WebRTC/PipeWire, signaling, consent, block/report/moderation, child safety. |
-| `src/screens/system.js` | Notifications, downloads, quick menu, controllers, storage, settings, accessibility, network, account, subscription, power, and recovery. | JavaScript | Navigation and frontend preferences work; system actions remain disabled/stubbed. | One capability-scoped service per system domain; never direct privileged shell calls. |
+| `src/screens/libraries.js` | Game/app libraries, an artwork-led ParaStore with all eight category rails, Creator Mode’s PC/Linux applications, and the full illustrated Bear Home room. Bear Home uses spatial controller-focus hotspots over uncropped artwork and a More drawer for Photos, Games/UGC, Cloud, and Trash. | JavaScript | Every surface and focus path works; software launch, commerce, and file operations use consumer-safe unavailable or empty states. | Package manager, licenses, app sandboxing, indexed files, commerce, UGC moderation, application launching, and animated/layered Bear Home assets. |
+| `src/screens/social.js` | Consumer party, friends, messages, invitations, and calls surfaces. | JavaScript | Navigation and focus work; real presence and communication are pending services. | Identity, WebRTC/PipeWire, signaling, consent, block/report/moderation, child safety. |
+| `src/screens/system.js` | Notifications, downloads, quick menu, PARA-native controller mapping, storage, display, network, audio, VR-US, accounts, privacy, accessibility, updates, power, repair/health, and recovery. | JavaScript | All 16 system surfaces navigate; browser preferences and read-only checks work while privileged operations remain outside the UI process. | One capability-scoped service per system domain; never direct privileged shell calls. |
 
 ### Frontend navigation overview
 
@@ -233,32 +235,35 @@ The boot decision is implemented in `state.js` and `app.js`:
 Startup
    ↓
 First boot complete?
-   ├─ No → Intro animation → Setup Wizard → Login/Create Account
+   ├─ No → Intro animation → Setup Wizard → PARA Home
    └─ Yes
         ↓
 Logged in?
-   ├─ No → Login / Profile Selection
+   ├─ No → Profile Selection → Login
    └─ Yes → PARA Home
 ```
 
-PARA Home’s five large launcher cards expose `Games | ParaStore | Creator |
-Social | Settings`. Its top bar also opens ParaStore, Creator, and Settings,
-while the Library shortcut opens Apps. Bear Home is available from the Apps
-library, so all seven major sections remain reachable without adding controls
-that would conflict with the approved dashboard composition.
+PARA Home’s five large launcher cards are exactly `Continue | Explore | Create |
+Community | System`. They open Games, ParaStore, Creator Mode, Community, and
+System respectively. The top bar also opens ParaStore, Creator, and System,
+while the Library shortcut opens Apps. Bear Home is available only from the
+Apps library and Creator file access, keeping bear visuals inside its file
+explorer experience.
 
 Settings and home status panels connect the remaining screens: calls,
-notifications, downloads, quick menu, controller pairing, storage, system
-settings, accessibility, networking, accounts, subscriptions, power, and
-recovery. There are no dead links. Selecting an unfinished action shows an
-explicit preview-boundary message. Disabled risky actions remain visibly
-disabled.
+notifications, downloads, quick menu, controller pairing, storage, display,
+audio, VR-US, accessibility, networking, accounts, privacy, subscriptions,
+updates, power, repair/health, and recovery. There are no broken links.
+Unavailable actions use short consumer language and never expose internal
+implementation details.
 
 Input behavior:
 
 - D-pad / left stick or Arrow keys: spatial movement.
-- Confirm / controller A or Enter: activate the focused control.
-- Back / controller B or Escape: return through PARA history.
+- Blue / primary control or Enter: activate the focused control.
+- Red / back control or Escape: return or cancel.
+- Green: secondary or context action.
+- Yellow: options and additional actions.
 - Menu or keyboard `M`: open/close Quick Menu.
 - Shoulder buttons or Page Up/Page Down: move among major sections.
 - Tab and Shift+Tab: native focus cycle.
@@ -358,6 +363,7 @@ The validator makes sure each required domain has one.
 | `scripts/render-start.sh` | Reads Render's `PORT`, selects public-demo mode, and explicitly permits binding to `0.0.0.0`. Keeping this separate prevents hosted requirements from weakening `make dev`. | Bash | Works; used by `render.yaml`. | Add graceful shutdown tuning or a production server only if load requires it. Calls `server.py`. |
 | `scripts/render-smoke.sh` | Starts the public-demo launcher locally and verifies the mode plus security headers through loopback. | Bash + Python | Works and is non-destructive. | Add static asset, cache, and concurrency checks. |
 | `scripts/native-check.sh` | Compiles Rust/C++/C components when matching compilers exist and skips absent optional toolchains. | Bash | Works. | CMake presets, sanitizers, clippy, formatting, cross-compilation. |
+| `tools/audit_consumer_ui.mjs` | Renders every consumer route plus all seven setup states and fails if prohibited engineering language or non-PARA native button labels reach visible text. | JavaScript ES modules | Works and runs through `make check` when Node is installed. | DOM accessibility-tree auditing, localization checks, and browser screenshots. Imports all screen renderers and `state.js`. |
 | `tools/paractl.py` | Inspects status, services, components, and explains how to replay first boot. | Python | Works against a running dev server. | D-Bus transport, log/event viewing, device simulator control, authentication. |
 | `tools/validate_project.py` | Enforces screen/service/spec coverage, required files, and absence of destructive script patterns. | Python | Works. | JSON/TOML/OpenAPI schemas, cross-file link checking, package policies. |
 | `tools/package_release.py` | Creates a reproducible-layout ZIP while excluding caches/build output. | Python | Works. | Checksums, SBOM, signatures, deterministic timestamps, release channels. |

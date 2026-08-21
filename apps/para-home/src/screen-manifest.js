@@ -19,13 +19,18 @@ export const screens = [
   { id: "controller", label: "Controller pairing", group: "system" },
   { id: "storage", label: "Storage management", group: "system" },
   { id: "settings", label: "System settings", group: "system" },
+  { id: "display", label: "Display settings", group: "system" },
   { id: "accessibility", label: "Accessibility", group: "system" },
   { id: "network", label: "Network settings", group: "system" },
+  { id: "audio", label: "Audio settings", group: "system" },
+  { id: "privacy", label: "Privacy settings", group: "system" },
   { id: "account", label: "Account settings", group: "system" },
   { id: "subscription", label: "Subscription", group: "system" },
+  { id: "vrus", label: "VR-US integration", group: "system" },
+  { id: "updates", label: "System updates", group: "system" },
   { id: "power", label: "Power menu", group: "system" },
+  { id: "health", label: "Repair and health", group: "system" },
   { id: "recovery", label: "Recovery menu", group: "system" },
 ];
 
 export const screenIds = new Set(screens.map((screen) => screen.id));
-

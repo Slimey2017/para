@@ -1,12 +1,13 @@
 # PARA Development Skeleton
 
-PARA is an early, Linux-based home console/PC hybrid prototype. This repository
-contains a safe boot-to-PARA-Home development experience, a full console-style
-menu shell, a mock local API, native service probes, Linux user-service examples,
-and documented boundaries for future hardware integration.
+PARA is an early Linux-based home console/PC hybrid. This repository contains a
+safe boot-to-PARA-Home experience, a polished controller-first console
+interface, a local sample API, native service probes, Linux user-service
+examples, and documented boundaries for future hardware integration.
 
 PARA Home uses real responsive HTML/CSS controls over a separate full-screen
-purple planet background. Bear Home uses a centered 1672×941 room with spatial
+purple planet background. The five primary cards are Continue, Explore, Create,
+Community, and System. Bear Home uses a centered 1672×941 room with spatial
 focus controls and preserves its full composition without zooming or cropping.
 
 The prototype does **not** replace Linux, change a bootloader, install drivers,
@@ -35,7 +36,7 @@ GitHub, connect that repository in Render and create a Blueprint. Render will
 run the validation command, start the dependency-free Python service on its
 provided `PORT`, and use `/api/v1/health` for health checks.
 
-Public hosting enables only the same mock frontend and read-only mock API. It
+Public hosting enables only the same consumer interface and read-only sample API. It
 does not enable accounts, purchases, hardware access, Linux services, power
 controls, file access, or privileged system integration.
 
