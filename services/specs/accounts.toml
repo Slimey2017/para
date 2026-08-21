@@ -1,6 +1,7 @@
 id = "accounts"
-status = "local-session"
-frontend_routes = ["login", "profiles", "account"]
-current_provider = "apps/para-home/src/state.js"
+status = "stub"
+frontend_routes = ["login", "profiles", "account", "subscription"]
+development_provider = "services/mock-api/modules/endpoints.py"
 future_runtime = "Rust or Go identity broker plus remote account backend"
 security_note = "Never treat the current local profile card as authentication."
+

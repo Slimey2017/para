@@ -1,6 +1,7 @@
 id = "updates"
-status = "contract-only"
-frontend_routes = []
-current_provider = "none"
+status = "design-stub"
+frontend_routes = ["downloads", "recovery", "settings"]
+development_provider = "config/services.json"
 future_runtime = "Signed atomic updater with rollback and power-loss tolerance"
 linux_apis = ["systemd-sysupdate or OSTree", "fwupd as a separate opt-in boundary"]
+

@@ -1,43 +1,42 @@
 # PARA Project Guide
 
-## Purpose
+## 1. What this repository is
 
-PARA 0.2.0 is the first working skeleton of a Linux-powered home console/PC
-shell. Linux remains the operating system and supplies processes, graphics,
-input, filesystems, networking, device discovery, and drivers. PARA supplies a
-controller-first consumer interface and narrow service boundaries over those
-Linux capabilities.
+PARA `0.1.0-dev` is the first safe development skeleton for a Linux-based home
+console/PC hybrid. Linux remains the operating system and owns device drivers,
+process isolation, graphics, input, networking, storage, audio, and power
+management. PARA adds a console-focused interaction layer above those services.
 
-The current repository boots through the reserved PARA startup sequence,
-completes a seven-step first-time setup, supports local profile selection, opens
-PARA Home, lists only applications the current runtime can actually open, and
-provides a spatial Bear Home file explorer over real user directories and
-mounted media. No fictional catalog, application, download, network, storage,
-or success data is used.
+The current deliverable is a working, dependency-light browser prototype that
+boots through the reserved PARA startup sequence, completes a calm seven-step
+first-time setup, shows profile/login screens, enters PARA Home, and navigates
+every menu in the build brief. Unfinished consumer actions are hidden, disabled,
+or presented with a normal unavailable state; engineering status never appears
+inside the consumer interface.
 
-Features without an operational provider are kept out of the consumer route
-graph. Their service contracts remain documented for later implementation.
+## 2. Safety promise
 
-## Safety
+The repository is safe to run on a normal development PC:
 
-The normal launcher is safe to run on a development PC:
+- The development launcher binds only to a numeric loopback address. A separate
+  Render launcher must pass an explicit nonlocal opt-in flag and exposes only
+  the mock demo surface.
+- No script edits a bootloader, partition table, filesystem, firmware, BIOS/UEFI,
+  desktop session, graphics driver, kernel module, or system configuration.
+- No systemd unit is copied, installed, enabled, or started automatically.
+- Native prototypes either read public Linux metadata or print declared stub
+  capabilities. They do not claim hardware.
+- Power, formatting, factory reset, optical media, network configuration,
+  authentication, purchase, and update actions are disabled or honest stubs.
+- Browser `localStorage` is the only state written during the UI flow.
 
-- It binds to `127.0.0.1` by default.
-- It does not edit a bootloader, `/boot`, partitions, filesystems, firmware,
-  BIOS/UEFI, kernel modules, graphics drivers, or the existing desktop.
-- It does not install or enable systemd units.
-- It does not format, erase, mount, eject, copy, move, rename, or delete files.
-- The gateway reads unprivileged Linux information. Linux app launch is off
-  unless the developer explicitly sets `PARA_ENABLE_APP_LAUNCH=1`.
-- Hosted Render instances cannot launch host applications and cannot see files
-  from the viewer's computer.
-- Session preferences are the only browser data written by PARA Home.
+If a future feature needs elevated privileges, put the privileged operation in a
+small, separately reviewed service with a narrow D-Bus API and explicit polkit
+policy. PARA Home must never shell out to privileged commands.
 
-Any future privileged capability must live in a separately reviewed service,
-expose a narrow authenticated API, and use explicit Linux policy such as
-polkit. The UI process must never receive unrestricted root access.
+## 3. Architecture overview
 
-## Required architecture views
+The first required architecture view is:
 
 ```text
 Linux
@@ -49,6 +48,8 @@ PARA Home
 Games / Apps
 ```
 
+The hardware path is:
+
 ```text
 Hardware
   ↓
@@ -59,23 +60,25 @@ PARA hardware services
 Applications
 ```
 
-The implemented boundary is:
+The fuller development boundary is:
 
 ```mermaid
 flowchart TD
-    Linux["Linux and drivers"] --> Gateway["PARA Linux gateway"]
-    Gateway --> API["PARA APIs"]
+    Linux["Linux OS and drivers"] --> Services["PARA system and hardware services"]
+    Services --> API["Versioned PARA APIs"]
     API --> Home["PARA Home"]
-    Home --> Apps["Apps and Bear Home"]
+    Home --> Experiences["Games, apps, Bear Home, ParaStore, VR-US"]
 ```
 
-Linux is the source of truth. PARA does not maintain a second fictional view of
-installed software, user directories, storage, network interfaces, controllers,
-or system identity.
+Linux drivers remain authoritative. PARA services translate Linux APIs into
+stable, capability-scoped PARA APIs. The frontend consumes those APIs and never
+needs direct device or root access. Games and apps receive only the interfaces
+and permissions they need.
 
-## Repository tree
+## 4. Repository tree
 
-Build output, Git metadata, compiler targets, and Python caches are omitted.
+Generated files such as `__pycache__`, `.para-dev`, `target`, `build`, and `dist`
+are intentionally omitted.
 
 ```text
 PARA/
@@ -83,42 +86,51 @@ PARA/
 ├── Makefile
 ├── PROJECT_GUIDE.md
 ├── README.md
-├── VERSION
 ├── render.yaml
+├── VERSION
 ├── apps/
 │   └── para-home/
 │       ├── assets/
 │       │   ├── bear-home-room.png
-│       │   └── para-home-background.png
+│       │   ├── para-home-background.png
+│       │   └── para-home-dashboard.png
 │       ├── index.html
 │       ├── styles.css
 │       └── src/
 │           ├── app.js
 │           ├── focus-manager.js
 │           ├── gamepad.js
+│           ├── mock-data.js
 │           ├── router.js
 │           ├── screen-manifest.js
-│           ├── services/para-api.js
 │           ├── state.js
 │           ├── screens/
 │           │   ├── auth.js
 │           │   ├── boot.js
 │           │   ├── home.js
 │           │   ├── libraries.js
+│           │   ├── social.js
 │           │   └── system.js
-│           └── ui/components.js
-├── config/services.json
-├── interfaces/openapi.yaml
-├── packages/para-protocol/
-│   ├── package.json
-│   └── src/index.ts
-├── platform/linux/
-│   ├── session/para-home-session.sh
-│   └── systemd/user/
-│       ├── para-gateway.service
-│       └── para-home.target
-├── recovery/safe-recovery.sh
-├── schemas/accounts.sql
+│           └── ui/
+│               └── components.js
+├── config/
+│   └── services.json
+├── interfaces/
+│   └── openapi.yaml
+├── packages/
+│   └── para-protocol/
+│       ├── package.json
+│       └── src/index.ts
+├── platform/
+│   └── linux/
+│       ├── session/para-home-session.sh
+│       └── systemd/user/
+│           ├── para-home.target
+│           └── para-mock-api.service
+├── recovery/
+│   └── safe-recovery.sh
+├── schemas/
+│   └── accounts.sql
 ├── scripts/
 │   ├── check.sh
 │   ├── dev.sh
@@ -127,13 +139,21 @@ PARA/
 │   ├── render-start.sh
 │   └── smoke.sh
 ├── services/
-│   ├── gateway/
+│   ├── mock-api/
 │   │   ├── server.py
-│   │   └── system_layer.py
+│   │   └── modules/
+│   │       ├── __init__.py
+│   │       └── endpoints.py
 │   ├── native/
 │   │   ├── optical-disc/
+│   │   │   ├── CMakeLists.txt
+│   │   │   └── src/main.c
 │   │   ├── para-hardwared/
+│   │   │   ├── Cargo.toml
+│   │   │   └── src/main.rs
 │   │   └── pulsewave-controller/
+│   │       ├── CMakeLists.txt
+│   │       └── src/main.cpp
 │   └── specs/
 │       ├── accounts.toml
 │       ├── bear-home.toml
@@ -156,56 +176,60 @@ PARA/
     └── validate_project.py
 ```
 
-## Top-level folders
+## 5. Top-level folders
 
-| Folder | What it does / why PARA needs it | Technology | Status | Next work and communication |
+| Folder | What it does and why PARA needs it | Technology | Current status | What comes next / communication boundary |
 |---|---|---|---|---|
-| `apps/` | Contains the consumer shell. Keeping presentation separate prevents normal UI code from acquiring system privileges. | HTML, CSS, JavaScript ES modules | Working. | Package as a dedicated Linux session after compositor and sandbox decisions. Calls only `services/para-api.js`. |
-| `config/` | Machine-readable inventory of current and reserved service domains. | JSON | Working and validated. | Add a JSON Schema, dependency versions, and capability negotiation. Read by repository tooling. |
-| `interfaces/` | Language-neutral HTTP contract for the Linux gateway. | OpenAPI 3.1 YAML | Matches the current gateway. | Add schemas, error models, event streams, and a D-Bus contract. Communicates with client generation and tests. |
-| `packages/` | Shared type definitions for applications, controllers, services, and API paths. | TypeScript | Types are usable; no published package yet. | Generate types from OpenAPI and publish versioned internal packages. |
-| `platform/` | Opt-in Linux session and user-service examples. | systemd user units, Bash | Examples only; never installed automatically. | Add distro packaging, a dedicated Wayland session, sandboxing, and reviewed policies. |
-| `recovery/` | Keeps recovery as a separate trust boundary. | Bash | Harmless information command works. | Add signed offline repair and rollback only after dedicated-hardware testing. |
-| `schemas/` | Reserves structured local profile/preferences storage without mixing it into UI state. | SQL | Design contract only; not executed. | Add migrations, encryption decisions, retention policy, and a real account service. |
-| `scripts/` | Provides consistent run, validation, smoke, Render, and native checks. | Bash | Working without root. | Add CI, reproducible toolchains, linting, accessibility automation, and release signing. |
-| `services/` | Holds the working Linux gateway, native interface boundaries, and future service contracts. | Python, Rust, C++, C, TOML | Gateway works read-only; native boundaries are interface-only. | Move stable operations behind versioned D-Bus services and least-privilege policies. |
-| `tests/` | Protects API truthfulness, route coverage, assets, service safety, and removal of retired routes. | Python `unittest` | Working through `make check`. | Add browser interaction, accessibility-tree, visual-regression, fuzz, and hardware tests. |
-| `tools/` | Holds validation, auditing, packaging, and operator inspection outside the consumer shell. | Python, JavaScript | Working. | Add deterministic packages, SBOM/signatures, generated clients, and release metadata. |
+| `apps/` | Holds user-facing PARA experiences. Keeping UI out of system services prevents presentation code from acquiring hardware privileges. | HTML, CSS, JavaScript | PARA Home works as a navigable prototype. | A compositor-ready shell, packaged apps, media surfaces, and localization. Calls the versioned PARA API only. |
+| `config/` | Declares service names, status, type, and privilege expectations in one machine-readable registry. | JSON | Works and is used by validation and the mock API. | Add schema validation, capability versions, dependencies, and build-time generation. |
+| `interfaces/` | Defines public service contracts independent of implementation language. | OpenAPI YAML | Documents current GET-only development endpoints. | Add JSON schemas, D-Bus IDL, errors, auth scopes, events, and compatibility rules. |
+| `packages/` | Stores code contracts shared by frontend, tools, apps, and services. | TypeScript package | Types exist; no package publishing or code generation yet. | Generate clients from OpenAPI and version contracts semantically. |
+| `platform/` | Contains opt-in Linux integration examples while keeping the normal development path unprivileged. | systemd user units, Bash | Examples only; nothing is installed. | Dedicated Wayland session packaging, desktop entry, sandbox profiles, polkit policy, and distro packages after hardware testing. |
+| `recovery/` | Reserves recovery as a separate trust boundary instead of hiding destructive actions in PARA Home. | Bash | Harmless status-only shell works. | Signed recovery media, verified package repair, A/B rollback, backup/restore, and dedicated-hardware testing. |
+| `schemas/` | Defines local persistent data separately from API/UI code. | SQL (SQLite-compatible proposal) | Account preference schema is a design draft and is not executed. | Migrations, encryption decisions, parental controls, session records, and data-retention policy. |
+| `scripts/` | Gives developers consistent safe commands for run, validation, smoke testing, and optional compilation. | Bash | Works without root. | CI jobs, reproducible toolchains, distro matrices, and artifact signing. |
+| `services/` | Separates mock backends, native Linux adapters, and service declarations from PARA Home. | Python, Rust, C++, C, TOML | Mock API works; hardware probe is read-only; device services are stubs. | Real D-Bus services using existing Linux drivers and least privilege. |
+| `tests/` | Protects route coverage, mock honesty, API safety flags, and repository invariants. | Python `unittest` | Works through `make check`. | UI interaction tests, accessibility audits, contract tests, fuzzing, and dedicated-hardware integration suites. |
+| `tools/` | Holds developer-facing inspection, validation, and packaging utilities instead of mixing them into runtime services. | Python | Works without third-party modules. | Developer portal integration, structured logs, trace collection, package/signature tools, and release metadata. |
 
-## Important root files
+## 6. Important root files
 
-| File | What / why | Technology | Status | Next work / communicates with |
+| File | What / why | Technology | Status | Future additions / communicates with |
 |---|---|---|---|---|
-| `.gitignore` | Excludes caches, build directories, generated archives, and native check output. | Git patterns | Working. | Extend when new toolchains are added. |
-| `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
-| `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
-| `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.2.0`. | Automate from signed releases later. |
-| `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
+| `.gitignore` | Keeps builds, caches, and local developer state out of source control. | Git patterns | Works. | Extend for IDE/tool outputs as the toolchain grows. |
+| `Makefile` | Provides memorable `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package` entry points. | Make | Works; delegates to `scripts/` and `tools/`. | Add release, coverage, formatting, and generated-client targets. |
+| `README.md` | Gives the shortest safe path to running the prototype. | Markdown | Complete for this milestone. | Add screenshots, supported distro matrix, and contribution guide. |
+| `PROJECT_GUIDE.md` | Explains architecture, every important file, status, safety, and next work. | Markdown + Mermaid | Complete for this milestone. | Keep synchronized with service and screen manifests. |
+| `render.yaml` | Defines one Render Blueprint web service, validation build command, safe public-demo launcher, and health check. PARA needs this so GitHub-backed demos deploy consistently without changing local safety defaults. | Render Blueprint YAML | Ready for user-triggered deployment; it does not deploy itself. | Add custom-domain policy, preview environments, and production observability only when needed. Talks to `scripts/render-start.sh` and `/api/v1/health`. |
+| `VERSION` | Provides one repository version consumed by the API and packager. | Plain text | Works. | Replace with automated release/version policy when stable. |
 
-## PARA Home frontend
+## 7. PARA Home frontend files
 
-| File | What / why | Technology | Status | Next work / communicates with |
+| File | What / why | Technology | Status | Future additions / communicates with |
 |---|---|---|---|---|
-| `apps/para-home/index.html` | Minimal full-screen launch document and accessibility live regions. | HTML5 + ES modules | Working. | Add production preload/local font policy. Loads `styles.css` and `src/app.js`. |
-| `assets/para-home-background.png` | Independent purple planet artwork behind real Home controls. | PNG | Working. | Add optimized WebP/AVIF/HDR variants and licensed source records. Used only by `home.js`. |
-| `assets/bear-home-room.png` | Clean 1672×941 room + furniture + PARA bear with zero baked interface. | PNG | Working and preserved byte-for-byte from the supplied art. | Add separate animation layers when proper assets exist. Used only by `libraries.js`. |
-| `styles.css` | Complete consumer design system: black/purple atmosphere, translucent panels, console spacing, 180–250 ms focus motion, disabled states, setup, apps, Bear Home, and system pages. | Modern responsive CSS | Working. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
-| `src/app.js` | Runtime composition, route transitions, actions, live screen detection, controller prompts, and service activation. | JavaScript | Working. | Split domain controllers and add typed error boundaries. Talks to every screen, router, input, state, and API adapter. |
-| `src/router.js` | Restricts navigation to the screen manifest and keeps an in-shell back stack. | JavaScript + hash routing | Working. | Add route guards and activity suspension when real games/apps exist. |
-| `src/focus-manager.js` | Geometry-based directional focus, pointer focus, Tab compatibility, Enter, Escape, Menu, and shoulder navigation. | JavaScript DOM APIs | Working. | Add wrap policies, virtual lists, RTL, focus groups, and announcements. |
-| `src/gamepad.js` | Normalizes Browser Gamepad input and detects Xbox, PlayStation, Nintendo, or PARA/generic prompt styles. | JavaScript Gamepad API | Working when the browser exposes a controller. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
-| `src/state.js` | Stores first boot, local session, active profile, UI accessibility choices, display density, and selected Bear Home collection. | JavaScript `localStorage` | Working for local preferences; not an identity store. | Migrate to a versioned profile service with safe migrations. |
-| `src/screen-manifest.js` | Authoritative set of 21 reachable screens. Retired routes are absent. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
-| `src/services/para-api.js` | One client boundary for applications, app launch, system, storage, network, directories, files, and health. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
-| `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
-| `src/screens/boot.js` | Startup, five reserved intro stages, and Welcome → Display → Network → Accessibility → Privacy → Account/Profile → Ready setup. | JavaScript + CSS animation | Working. Display/network values are live; final rendered startup assets do not exist yet. | Replace each animation stage without changing routing; add real calibration providers. |
-| `src/screens/auth.js` | “Who’s playing?”, Player One, Guest, selected-profile Continue, and Switch Profile. | JavaScript | Working as a local session flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
-| `src/screens/home.js` | PARA Home with exactly Continue, Explore, Create, Community, and System; live storage/network/system data; apps/files/settings shortcuts. | JavaScript + inline SVG | Working. Explore and System route; unsupported primary cards are gracefully disabled. | Enable cards only when their providers return operational capabilities. |
-| `src/screens/libraries.js` | Installed Apps from the gateway, real launch routing, the clean Bear Home scene, seven spatial hotspots, and read-only file lists. | JavaScript | Working. Bear Home is one app, and no dead Get Apps control is shown. | Add file opening via portals, indexed media, thumbnails, and mounted-volume navigation after permission design. |
-| `src/screens/system.js` | Quick menu, controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. | JavaScript | Working with live/read-only information and local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
+| `apps/para-home/index.html` | Minimal launch document for the full-screen shell and animated background. PARA needs one deterministic entry point. | Semantic HTML + ES modules | Works. | CSP, production preload policy, compositor/session wrapper. Loads `styles.css` and `src/app.js`. |
+| `apps/para-home/assets/bear-home-room.png` | The authoritative full-screen Bear Home room: warm wooden interior, chibi PARA bear, couch, media shelves, desk, glowing collection signs, settings paw, and downloads nook. | 1672×941 PNG illustration | Works as the visual file-manager surface. It is rendered uncropped in a centered 16:9 stage. | Final art optimization, alternate times of day, localization-safe signs, and layered/animated production assets. Used by `src/screens/libraries.js`. |
+| `apps/para-home/assets/para-home-background.png` | The approved purple planet, liquid-energy, stars, and reflective-floor scene. PARA needs a strong visual identity without baking menus into the artwork. | 1672×941 PNG illustration | Works as PARA Home’s independent full-screen background layer. It fills the viewport behind real controls and uses a restrained drift/pulse treatment. | Optimized AVIF/WebP variants, HDR grading, parallax layers, and production licensing/provenance records. Used by `src/screens/home.js`. |
+| `apps/para-home/assets/para-home-dashboard.png` | Preserves the approved dashboard composition as a design reference for spacing, hierarchy, and visual comparison. | 1672×941 PNG mockup | Reference only; it is deliberately not loaded by the application. | Move to formal design documentation when the component system is stable. |
+| `apps/para-home/styles.css` | PARA’s matte-black, white, purple, liquid/wave identity; animated ambient backgrounds; spring-like focus; Store covers; Creator workspace; exact Bear Home artwork stage; TV scaling; loading; disabled states; startup effects. | Modern CSS | Works, including responsive real buttons, mouse-follow Home lighting, controller focus animation, card-to-page transitions, uncropped Bear Home, and reduced-motion modes. | Design tokens, local font assets, GPU performance budgets, localization stress tests, HDR/color calibration. |
+| `src/app.js` | Composes 31 screens, shared transitions, global navigation, consumer-safe unavailable states, setup choices, diagnostics, clock, and state changes. | JavaScript ES modules | Works. | Split action controllers, typed API client, error boundaries, telemetry consent, localization. Talks to all screen modules, router, input managers, state, and `/api/v1/health`. |
+| `src/router.js` | Hash router with a small in-app back stack so every menu is reachable without broken links. | JavaScript | Works. | Deep-link policy, route guards, suspended activities, transition lifecycle. Uses `screen-manifest.js`. |
+| `src/focus-manager.js` | Reusable spatial focus navigation based on element geometry. It prevents every page from inventing its own controller logic. | JavaScript + DOM APIs | Works for keyboard, pointer, and gamepad-directed movement. | Focus groups, wrap rules, virtualized lists, RTL direction, accessibility announcements. |
+| `src/gamepad.js` | Maps Browser Gamepad buttons, D-pad, stick, Menu, and shoulders into shared navigation actions. | JavaScript Browser Gamepad API | Works when the browser exposes a controller; it is not native PulseWave support. | Device identity, controller database, latency telemetry, remapping, haptics, native daemon bridge. Talks to `focus-manager.js` through `app.js`. |
+| `src/state.js` | Stores first-boot completion, current profile, seven-step setup position, display/network selections, privacy choices, and accessibility preferences. | JavaScript + `localStorage` | Works for browser-session preferences; it is not an identity or credential store. | Encrypted profile service, migrations, parental controls, cloud sync, transactional preferences. |
+| `src/mock-data.js` | Supplies consumer-ready fictional games, Store products, apps, downloads, friends, networks, and notices without exposing engineering labels. | JavaScript | Works as display content. | Replace each dataset with its versioned service API; keep separate fixtures for tests. |
+| `src/screen-manifest.js` | Authoritative route inventory used by router validation and documentation. | JavaScript | Works. | Route capabilities, localization keys, parental ratings, analytics consent tags. |
+| `src/ui/components.js` | Reusable branded backdrop, topbar, focus cards, list rows, toggles, progress, and PARA’s blue/red/green/yellow control legend. | JavaScript HTML templates | Works. | Component tests, sanitization for remote content, virtual lists, theming API. Used by all screen modules. |
+| `src/screens/boot.js` | Implements startup, the five-stage intro, and seven calm setup screens: Welcome, Display, Network, Accessibility, Privacy, Account/Profile, and Ready. The intro reserves replacement boundaries for fade, liquid mixing, splash/logo reveal, logo melt, and beat-reactive orb. | JavaScript + CSS animation | Navigation, preferences, progress, screen detection, and transitions work; final rendered intro assets and hardware calibration are future work. | Signed rendered assets/WebGL, accurate refresh detection, HDR calibration, safe-area tooling, and audio-reactive timing. Talks to `state.js` and `app.js`. |
+| `src/screens/auth.js` | Renders “Who’s playing?” profile cards, Guest, Add Profile, selected-profile login, PIN surface, Switch Profile, and Sign-in Options. | JavaScript | The navigation/session flow works; remote identity, PIN verification, and recovery services are placeholders behind normal unavailable states. | Account broker, passkeys/PIN policy, controller assignment, recovery, parental controls. |
+| `src/screens/home.js` | Renders PARA Home as real semantic components over the separate approved background. Every visible nav item, launcher, activity, metric, and shortcut is its own focusable control. | JavaScript HTML templates + inline SVG icons | Works with keyboard, mouse, and controller navigation, live clock/greeting, animated focus, and responsive layout. Calendar, Achievements, Help, and displayed activity/system values explicitly remain placeholders. | Service-driven widgets, Quick Resume, real thermal/storage/network state, personalization, and localization. Talks to the shared router/focus system through `app.js`. |
+| `src/screens/libraries.js` | Game/app libraries, an artwork-led ParaStore with all eight category rails, Creator Mode’s PC/Linux applications, and the full illustrated Bear Home room. Bear Home uses spatial controller-focus hotspots over uncropped artwork and a More drawer for Photos, Games/UGC, Cloud, and Trash. | JavaScript | Every surface and focus path works; software launch, commerce, and file operations use consumer-safe unavailable or empty states. | Package manager, licenses, app sandboxing, indexed files, commerce, UGC moderation, application launching, and animated/layered Bear Home assets. |
+| `src/screens/social.js` | Consumer party, friends, messages, invitations, and calls surfaces. | JavaScript | Navigation and focus work; real presence and communication are pending services. | Identity, WebRTC/PipeWire, signaling, consent, block/report/moderation, child safety. |
+| `src/screens/system.js` | Notifications, downloads, quick menu, PARA-native controller mapping, storage, display, network, audio, VR-US, accounts, privacy, accessibility, updates, power, repair/health, and recovery. | JavaScript | All 16 system surfaces navigate; browser preferences and read-only checks work while privileged operations remain outside the UI process. | One capability-scoped service per system domain; never direct privileged shell calls. |
 
-## Frontend navigation
+### Frontend navigation overview
+
+The boot decision is implemented in `state.js` and `app.js`:
 
 ```text
 Startup
@@ -219,136 +243,157 @@ Logged in?
    └─ Yes → PARA Home
 ```
 
-PARA Home retains the required five primary cards:
+PARA Home’s five large launcher cards are exactly `Continue | Explore | Create |
+Community | System`. They open Games, ParaStore, Creator Mode, Community, and
+System respectively. The top bar also opens ParaStore, Creator, and System,
+while the Library shortcut opens Apps. Bear Home is available only from the
+Apps library and Creator file access, keeping bear visuals inside its file
+explorer experience.
 
-- `Continue` — disabled until the system reports resumable activity.
-- `Explore` — opens the actual installed-app library.
-- `Create` — disabled until creator applications are available through the
-  application service.
-- `Community` — disabled until a real communication provider exists.
-- `System` — opens working settings and system information.
+Settings and home status panels connect the remaining screens: calls,
+notifications, downloads, quick menu, controller pairing, storage, display,
+audio, VR-US, accessibility, networking, accounts, privacy, subscriptions,
+updates, power, repair/health, and recovery. There are no broken links.
+Unavailable actions use short consumer language and never expose internal
+implementation details.
 
-Reachable screens are Startup, Intro, Setup, Login, Profiles, Home, Apps, Bear
-Home, Files, Downloads, Quick Menu, Controllers, Storage, Settings, Display,
-Accessibility, Network, Account, Power, Repair & Health, and Recovery.
+Input behavior:
 
-Input mapping:
+- D-pad / left stick or Arrow keys: spatial movement.
+- Blue / primary control or Enter: activate the focused control.
+- Red / back control or Escape: return or cancel.
+- Green: secondary or context action.
+- Yellow: options and additional actions.
+- Menu or keyboard `M`: open/close Quick Menu.
+- Shoulder buttons or Page Up/Page Down: move among major sections.
+- Tab and Shift+Tab: native focus cycle.
+- Pointer movement and clicks: mouse/touchpad support.
 
-- D-pad / left stick or Arrow keys: nearest control in that direction.
-- Connected controller primary control or Enter: select.
-- Connected controller back control or Escape: back.
-- Menu or keyboard `M`: quick menu.
-- Shoulder buttons or Page Up/Page Down: switch major sections.
-- Tab / Shift+Tab: browser focus order.
-- Pointer hover/click: the same controls as keyboard/controller.
+## 8. Backend and contract files
 
-Prompt labels are controller-aware. Xbox uses A/B/X/Y, PlayStation symbols are
-shown only for an identified PlayStation controller, Nintendo uses its layout,
-and generic/PARA controls use Blue/Red/Green/Yellow names.
-
-## Bear Home architecture
-
-The background image contains no controls. `libraries.js` overlays seven semantic
-buttons on TV, disc shelf, record player, desk, door, under-stairs storage, and
-the PARA bear. Their percentage coordinates remain aligned because the stage is
-locked to the artwork's 1672:941 aspect ratio and uses `object-fit: contain`.
-
-Labels are hidden until hover/focus. The shared focus manager compares element
-geometry, so directional input chooses the nearest object in the requested
-direction instead of walking an arbitrary list. Selecting a category asks the
-gateway for the corresponding XDG directory or mounted-media collection.
-
-## Backend and Linux gateway
-
-| File | What / why | Technology | Status | Next work / communicates with |
+| File | What / why | Technology | Status | Future additions / communicates with |
 |---|---|---|---|---|
-| `services/gateway/server.py` | Serves static PARA Home plus the versioned API, security headers, bind policy, request validation, and optional app launch. | Python standard library HTTP server | Working. | Replace the server transport for production scale while retaining the API and safety policy. Calls `system_layer.py`. |
-| `services/gateway/system_layer.py` | Reads platform identity, disk usage, `/proc/mounts`, `/sys/class/net`, XDG directories, `.desktop` entries, icons, and exact app launch targets. | Python standard library + Linux files/APIs + `gio` | Working read-only; app launch is explicit local opt-in. | Move domains to narrow D-Bus services, portals, udev/udisks2, and event-driven updates. |
-| `interfaces/openapi.yaml` | Contract for all gateway endpoints. | OpenAPI 3.1 | Current. | Add complete component schemas and generated clients. |
-| `packages/para-protocol/src/index.ts` | Shared API/controller/application types. | TypeScript | Current source package. | Generate from OpenAPI and publish internally. |
-| `config/services.json` | Declares operational and contract-only domains. | JSON | Working. | Add schema validation and runtime capability discovery. |
+| `services/mock-api/server.py` | Serves PARA Home and its JSON API. Normal development is loopback-only; public binding requires an explicit launcher flag. It also adds CSP, clickjacking, MIME-sniffing, referrer, and browser-permission headers and disables directory listings. | Python standard library HTTP server | Works in local-development and public-demo modes. | Production ASGI/D-Bus gateway, structured logging, request limits, and stronger caching. Calls `modules/endpoints.py` and serves `apps/para-home`. |
+| `services/mock-api/modules/__init__.py` | Marks the endpoint module boundary. | Python | Works. | Domain packages and generated contract bindings. |
+| `services/mock-api/modules/endpoints.py` | Supplies health, status, service, hardware, Bear Home, account, store, and component-status data. | Python | Works with explicit mock/read-only results. | Split into real clients per service, validate output against OpenAPI/TypeScript contracts. Reads `config/services.json` and `VERSION`. |
+| `interfaces/openapi.yaml` | Documents URL paths and guarantees that current endpoints are read-only development contracts. | OpenAPI 3.1 YAML | Useful documentation; not yet used for generation. | Full schemas, version negotiation, event stream, errors, auth scopes, generated clients. |
+| `packages/para-protocol/package.json` | Names the private shared contract package without introducing a frontend build dependency. | JSON/npm metadata | Metadata works; package is not built or published. | TypeScript build, exports, tests, generated types, semantic versioning. |
+| `packages/para-protocol/src/index.ts` | Defines service, system, storage, and PulseWave data contracts plus API paths. | TypeScript | Useful compile-time proposal; frontend is not yet consuming the compiled package. | Generate from the authoritative API schema and share with app SDKs. |
+| `schemas/accounts.sql` | Proposes local profile/preferences tables and deliberately excludes secrets and payment data. | SQL for SQLite | Placeholder; never executed automatically. | Migration runner, encryption threat model, retention, parent/child relationships, transactions. |
 
-Application discovery is intentionally conservative. Linux `.desktop` entries
-are returned only when all of these are true:
+### Backend overview
 
-1. PARA is bound locally.
-2. `PARA_ENABLE_APP_LAUNCH=1` was explicitly set.
-3. `gio` exists.
-4. The entry is visible, identifies an application, and satisfies `TryExec`.
+The current backend is deliberately small: one local Python process serves the
+static shell and truthful mock data. It has no write API and no user secrets.
+`config/services.json` is the canonical implementation-status inventory.
+`interfaces/openapi.yaml` and `packages/para-protocol` reserve language-neutral
+and TypeScript contracts for the point when services move into separate
+processes.
 
-The server stores the exact discovered desktop-file path internally. The client
-submits only the returned identifier, and the gateway launches only a currently
-rediscovered exact entry. It does not execute shell text from the UI.
+## 9. Native and Linux integration files
 
-## Native and service-boundary files
-
-| File | PARA role | Language | Status | Eventual addition / communication |
+| File | What / why | Technology | Status | Future additions / communicates with |
 |---|---|---|---|---|
-| `services/native/para-hardwared/src/main.rs` | Demonstrates safe procfs/sysfs discovery without writes. | Rust | Working read-only probe. | D-Bus hardware capability service over udev, hwmon, and UPower. |
-| `services/native/para-hardwared/Cargo.toml` | Rust crate definition. | TOML/Cargo | Working. | Add dependencies only when a real daemon is designed. |
-| `services/native/pulsewave-controller/src/main.cpp` | Declares the native controller boundary without claiming devices. | C++17 | Interface-only executable. | BlueZ/evdev/hidraw adapter, SDL mappings, permissions, haptics, and firmware policy. |
-| `services/native/pulsewave-controller/CMakeLists.txt` | Builds the controller boundary. | CMake | Working. | Tests, sanitizers, packaging, and daemon install rules after implementation. |
-| `services/native/optical-disc/src/main.c` | Declares the optical boundary while reusing Linux optical drivers. | C11 | Interface-only executable. | udev/udisks2 discovery, safe mount/eject policy, media handoff, and error reporting. |
-| `services/native/optical-disc/CMakeLists.txt` | Builds the optical boundary. | CMake | Working. | Tests and packaging after operations exist. |
+| `services/native/para-hardwared/Cargo.toml` | Defines a dependency-free Rust hardware-probe crate. | Cargo/Rust | Builds when Rust is installed. | D-Bus, async device events, hwmon/UPower/udev adapters, policy tests. |
+| `services/native/para-hardwared/src/main.rs` | Reads counts from procfs/sysfs and emits honest JSON with writes disabled. | Rust | Working read-only probe. | Stable device model, permissions, hotplug, thermal/storage/display capabilities. Reuse Linux APIs rather than drivers. |
+| `services/native/pulsewave-controller/CMakeLists.txt` | Defines the native PulseWave stub build. | CMake/C++17 | Works when CMake is used; direct compiler check is in `native-check.sh`. | Link a reviewed input/transport abstraction, not a custom kernel driver. |
+| `services/native/pulsewave-controller/src/main.cpp` | Reports controller boundary status and refuses undeclared operations. | C++17 | Compiling stub; no pairing/haptics/firmware. | BlueZ, hidraw/evdev permissions, SDL mapping database, haptics, firmware signing. |
+| `services/native/optical-disc/CMakeLists.txt` | Defines the optical stub build. | CMake/C11 | Works when CMake is used. | Link a media coordinator to udev/udisks2. |
+| `services/native/optical-disc/src/main.c` | Declares reuse of Linux optical/block/UDF services and performs no media action. | C11 | Compiling stub. | Read-only media discovery first, safe eject, mount mediation, region/DRM legal review, error recovery. |
+| `platform/linux/systemd/user/para-home.target` | Shows how PARA user services may be grouped without altering the system boot target. | systemd user unit | Example only; not installed/enabled. | Packaging-owned installation, lifecycle tests, session integration. |
+| `platform/linux/systemd/user/para-mock-api.service` | Demonstrates a sandboxed user service with no new privileges and loopback binding. | systemd user unit | Template only; its `%h/PARA` path is illustrative. | Generated install paths, hardening review, socket activation, resource limits. |
+| `platform/linux/session/para-home-session.sh` | Documents that the current desktop remains untouched. | Bash | Runs and prints guidance only. | Dedicated Wayland session launcher after compositor selection and testing. |
+| `recovery/safe-recovery.sh` | Reports which destructive recovery capabilities are disabled. | Bash | Works and changes nothing. | Signed offline recovery implementation on dedicated hardware. |
 
-Service specs are honest design contracts and are not rendered in the consumer
-UI:
+### System-service overview
 
-| Spec | Current status | Eventually communicates with |
-|---|---|---|
-| `accounts.toml` | Local session | Identity broker, encrypted tokens, parental controls. |
-| `bear-home.toml` | Read-only | XDG directories, udisks2, indexing, portals. |
-| `hardware.toml` | Read-only | udev, sysfs, procfs, UPower, hwmon. |
-| `network.toml` | Read-only | Permission-aware network service when configuration is allowed. |
-| `optical.toml` | Mounted-media read-only | udev, udisks2, existing SCSI/UDF drivers. |
-| `pulsewave.toml` | Browser Gamepad | Native controller daemon and shared mapping database. |
-| `recovery.toml` | Interface actions | Signed recovery image and verified rollback. |
-| `parastore.toml` | Contract only; no route | Signed catalog, packages, entitlements, payments, moderation. |
-| `security.toml` | Contract only; no route | polkit, systemd sandboxing, Landlock/bubblewrap, signature verification. |
-| `updates.toml` | Contract only; no route | Signed atomic updater with rollback. |
-| `vrus.toml` | Contract only; no route | OpenXR, PipeWire, Wayland, and capability-scoped Bear Home data. |
+Production PARA should prefer user services for account-specific features and
+small system services only where hardware or platform policy requires them.
+System services should expose versioned D-Bus APIs, use Linux driver stacks,
+drop privileges, declare systemd hardening, validate all caller input, and emit
+auditable events. PARA Home should be restartable without restarting Linux or
+interrupting games.
 
-## Other important platform files
+### Hardware abstraction overview
 
-| File | What / why | Technology | Status | Next work / communicates with |
+`para-hardwared` is the start of the reusable hardware layer. Future adapters
+should consume:
+
+- udev for discovery and hotplug;
+- sysfs/procfs for read-only capabilities;
+- UPower and hwmon for battery/thermal data;
+- BlueZ, evdev, hidraw, and the SDL controller database for PulseWave;
+- udisks2 and existing SCSI/UDF drivers for optical/external media;
+- NetworkManager/iwd for connectivity;
+- PipeWire for audio/video routing;
+- Wayland/DRM through an established compositor stack;
+- OpenXR for VR-US.
+
+PARA should create a custom kernel driver only if hardware truly cannot be
+supported through an upstream Linux interface, and even then the preferred path
+is upstream contribution and review.
+
+## 10. Service specification files
+
+Every TOML file is a small source-of-truth proposal: service id, present status,
+frontend routes, current provider, future runtime, and Linux/security boundary.
+The validator makes sure each required domain has one.
+
+| File | PARA role | Present status | Future communication |
+|---|---|---|---|
+| `services/specs/accounts.toml` | Login, profiles, account, subscriptions | Stub | Identity broker, encrypted session tokens, remote account backend. |
+| `services/specs/bear-home.toml` | File collections shared by desktop shell and later VR-US | Mock | xdg user dirs, indexed metadata, udisks2, cloud-provider adapters. |
+| `services/specs/hardware.toml` | Stable device/thermal/storage/display capability view | Read-only probe | Rust D-Bus service over udev, sysfs, hwmon, and UPower. |
+| `services/specs/network.toml` | Scans, connections, status, offline mode | Stub | Permission-aware NetworkManager/iwd D-Bus adapter. |
+| `services/specs/optical.toml` | Disc discovery, mount/eject, media handoff | C stub | udev/udisks2 and existing kernel optical drivers. |
+| `services/specs/parastore.toml` | Catalog, packages, licenses, commerce | Mock | Signed catalog/CDN, commerce, entitlement, refund, moderation services. |
+| `services/specs/pulsewave.toml` | Controller pairing, input, battery, remap, haptics | Browser prototype + C++ stub | Native daemon over BlueZ/evdev/hidraw/udev. |
+| `services/specs/recovery.toml` | Diagnostics, repair, rollback, reset policy | Harmless shell only | Signed recovery environment and verified A/B updates. |
+| `services/specs/security.toml` | Sandboxing, signatures, permissions, secrets | Design stub | polkit, systemd sandboxing, Landlock/bubblewrap, signature verifier. |
+| `services/specs/updates.toml` | App/system package checks, atomic install, rollback | Design stub | OSTree or systemd-sysupdate evaluation, signed metadata, staged rollout. |
+| `services/specs/vrus.toml` | VR-US runtime and Bear Home data reuse | Stub | OpenXR, PipeWire, Wayland, capability-scoped data bridge. |
+
+## 11. Developer, test, and build files
+
+| File | What / why | Technology | Status | Future additions / communicates with |
 |---|---|---|---|---|
-| `platform/linux/systemd/user/para-gateway.service` | Hardened user-service template for a future local install. | systemd | Template only and never enabled automatically. | Package with reviewed paths and desktop-session integration. Starts the gateway locally. |
-| `platform/linux/systemd/user/para-home.target` | Groups future PARA user services. | systemd | Template only. | Add explicit dependencies after services exist. |
-| `platform/linux/session/para-home-session.sh` | States that the current desktop remains untouched. | Bash | Working information command. | Replace with a dedicated opt-in Wayland session launcher after testing. |
-| `recovery/safe-recovery.sh` | Lists destructive categories kept disabled and points to repository diagnostics. | Bash | Working and non-destructive. | Signed offline repair tooling. |
-| `schemas/accounts.sql` | Proposed local profile and preference tables without secrets/payment data. | SQL | Not executed. | Migration runner, encryption policy, ownership, and retention rules. |
+| `scripts/dev.sh` | Resolves the repository path and starts the loopback server. | Bash | Works. | Optional live reload and structured dev config. Calls `server.py`. |
+| `scripts/check.sh` | Runs project validation, unit tests, shell syntax, and Python compilation. | Bash | Works. | JS linter, CSS audit, generated-contract diff, coverage. |
+| `scripts/smoke.sh` | Starts an isolated local server, polls health, verifies mock mode, then cleans up. | Bash + Python | Works and is non-destructive. | More route checks and browser automation. |
+| `scripts/render-start.sh` | Reads Render's `PORT`, selects public-demo mode, and explicitly permits binding to `0.0.0.0`. Keeping this separate prevents hosted requirements from weakening `make dev`. | Bash | Works; used by `render.yaml`. | Add graceful shutdown tuning or a production server only if load requires it. Calls `server.py`. |
+| `scripts/render-smoke.sh` | Starts the public-demo launcher locally and verifies the mode plus security headers through loopback. | Bash + Python | Works and is non-destructive. | Add static asset, cache, and concurrency checks. |
+| `scripts/native-check.sh` | Compiles Rust/C++/C components when matching compilers exist and skips absent optional toolchains. | Bash | Works. | CMake presets, sanitizers, clippy, formatting, cross-compilation. |
+| `tools/audit_consumer_ui.mjs` | Renders every consumer route plus all seven setup states and fails if prohibited engineering language or non-PARA native button labels reach visible text. | JavaScript ES modules | Works and runs through `make check` when Node is installed. | DOM accessibility-tree auditing, localization checks, and browser screenshots. Imports all screen renderers and `state.js`. |
+| `tools/paractl.py` | Inspects status, services, components, and explains how to replay first boot. | Python | Works against a running dev server. | D-Bus transport, log/event viewing, device simulator control, authentication. |
+| `tools/validate_project.py` | Enforces screen/service/spec coverage, required files, and absence of destructive script patterns. | Python | Works. | JSON/TOML/OpenAPI schemas, cross-file link checking, package policies. |
+| `tools/package_release.py` | Creates a reproducible-layout ZIP while excluding caches/build output. | Python | Works. | Checksums, SBOM, signatures, deterministic timestamps, release channels. |
+| `tests/test_api.py` | Verifies health/mock declaration, privileged-action safety, and honest 404s. | Python `unittest` | Works. | Contract fixtures, errors, performance, fuzzing. |
+| `tests/test_repository.py` | Verifies route renderers, service status labels, and styled focusable UI conventions. | Python `unittest` | Works. | DOM interaction, visual regression, accessibility, gamepad simulations. |
 
-## Developer and validation files
+## 12. Build and run instructions
 
-| File | What / why | Technology | Status | Next work / communicates with |
-|---|---|---|---|---|
-| `scripts/dev.sh` | Starts the loopback gateway; optional app launch requires an environment flag. | Bash | Working. | Live reload and structured logging. |
-| `scripts/render-start.sh` | Binds to Render's `PORT` with explicit nonlocal permission and no app launching. | Bash | Working. | Replace transport only if traffic requires it. |
-| `scripts/check.sh` | Runs structural validation, consumer-copy audit, unit tests, shell syntax, and Python compilation. | Bash | Working. | Add CSS/JS lint, browser accessibility, and contract diffs. |
-| `scripts/smoke.sh` | Starts a temporary local gateway and checks health. | Bash + Python | Working. | Add endpoint and concurrency checks. |
-| `scripts/render-smoke.sh` | Tests the hosted start path and security headers on loopback. | Bash + Python | Working. | Add static cache and graceful-shutdown checks. |
-| `scripts/native-check.sh` | Compiles native boundaries when compilers are installed. | Bash | Working; skips absent optional compilers. | Add CMake presets, clippy, sanitizers, and cross-builds. |
-| `tools/validate_project.py` | Enforces routes, services, specs, required files, and absence of destructive script patterns. | Python | Working. | Validate JSON/OpenAPI schemas and cross-file links. |
-| `tools/audit_consumer_ui.mjs` | Renders every screen and setup step, then rejects engineering copy or dead-action markers. | JavaScript | Working when Node is installed. | Add browser accessibility-tree and localization audits. |
-| `tools/paractl.py` | Reads health, system, storage, network, apps, and directory endpoints. | Python | Working against a running gateway. | Add D-Bus/event inspection once native services exist. |
-| `tools/package_release.py` | Produces a source archive while excluding Git, caches, builds, and prior archives. | Python | Working. | Add reproducible timestamps, checksums, SBOM, and signatures. |
-| `tests/test_api.py` | Verifies gateway health, host-backed values, hidden app launch, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, concurrency, and fuzz tests. |
-| `tests/test_repository.py` | Verifies route renderers, exact clean Bear art, seven hotspots, five Home cards, Render wiring, and retired-code removal. | Python `unittest` | Working. | Add DOM interaction and visual-regression tests. |
+### Required development dependencies
 
-## Build and run
-
-### Required dependencies
-
-- Python 3.11 or newer.
+- Linux, macOS, or Windows with WSL for the supplied shell commands.
+- Python 3.11 or newer. Python 3.11 is used because the validator reads TOML
+  with the standard-library `tomllib` module.
 - Bash 4+ and Make.
-- A current browser with JavaScript modules.
+- A current browser with ES module support. Chromium, Firefox, and WebKit-based
+  browsers are suitable; Gamepad API details vary.
 
-Node is optional and enables the consumer-copy audit. Rust/Cargo, a C11
-compiler, a C++17 compiler, and CMake are optional for native checks. No npm
-install, database, Supabase project, secret, root access, or kernel headers are
-required for PARA Home.
+No npm install, database, root permission, kernel headers, or global package
+installation is required for the frontend and mock API.
 
-### Run locally
+Optional native dependencies:
+
+- Rust and Cargo for `para-hardwared`.
+- A C11 compiler for the optical service stub.
+- A C++17 compiler for the PulseWave service stub.
+- CMake 3.16+ for normal native project generation. The current check script
+  can compile the small C/C++ sources directly.
+- Node.js for optional `node --check` syntax checks; it is not needed at runtime.
+
+### Run PARA Home
 
 ```bash
 cd PARA
@@ -357,31 +402,24 @@ make dev
 
 Open `http://127.0.0.1:4173`.
 
-Replay first boot:
+To replay the entire first-boot flow, open:
 
 ```text
 http://127.0.0.1:4173/?reset=1
 ```
 
-The reserved startup sequence is:
+The reserved sequence is:
 
 ```text
-fade-in → purple and white liquid mixing → water splash revealing the PARA logo
-→ logo melting into a circle → 3D circle reacting to a beat → setup screen
+fade-in → purple and white liquid mixing → water splash revealing PARA →
+logo melting into a circle → beat-reactive 3D circle → setup screen
 ```
 
-### Show and launch installed Linux desktop apps
+The present visuals are CSS placeholders designed to be replaced stage by
+stage. `activateIntro()` controls stage timing; final video/WebGL assets can be
+plugged into the same lifecycle without rewriting startup routing.
 
-This is local-only and explicitly opt-in:
-
-```bash
-PARA_ENABLE_APP_LAUNCH=1 make dev
-```
-
-Without that flag, Apps contains only working built-in PARA applications, which
-currently means Bear Home. Render never enables Linux application launching.
-
-### Validate
+### Validate and smoke test
 
 ```bash
 make check
@@ -390,60 +428,110 @@ make render-check
 make native-check
 ```
 
-### Package
+`native-check` is optional; it skips a language when that compiler is absent.
+
+### Deploy from GitHub to Render
+
+Render web services must listen on `0.0.0.0` and should use the platform-provided
+`PORT`. The repository keeps that requirement inside `scripts/render-start.sh`;
+`make dev` continues to refuse a public bind. Render also recognizes a root
+`render.yaml` Blueprint and can use its declared build, start, and health-check
+commands.
+
+1. Push the `PARA` repository to GitHub.
+2. In Render, choose **New → Blueprint** and connect the GitHub repository.
+3. Review the single `para-home-prototype` web service from `render.yaml`.
+4. Deploy the Blueprint. No database, secret, persistent disk, or privileged
+   service is needed for this prototype.
+5. Verify `/api/v1/health` reports `public-demo` and open the generated
+   `onrender.com` address.
+
+Official references: [Render Blueprints](https://render.com/docs/infrastructure-as-code),
+[Blueprint YAML reference](https://render.com/docs/blueprint-spec), and
+[web-service port binding](https://render.com/docs/web-services).
+
+The public demo contains fictional profile and catalog data only. It cannot see
+the host PC's controllers, files, network credentials, discs, desktop, Linux
+services, or power controls.
+
+### Use the developer CLI
+
+With `make dev` running in another terminal:
+
+```bash
+python3 tools/paractl.py status
+python3 tools/paractl.py services
+python3 tools/paractl.py component pulsewave
+python3 tools/paractl.py replay-first-boot
+```
+
+### Package a source snapshot
 
 ```bash
 make package
 ```
 
-The archive is written to `dist/PARA-0.2.0.zip`.
+The ZIP is written under `dist/` and excludes caches, compiler outputs, and Git
+metadata.
 
-## Render deployment
+## 13. Current limitations
 
-Push the repository to GitHub, create a Render Blueprint, and select this repo.
-The included settings are:
+- The UI is a browser shell, not a dedicated Wayland console session.
+- Startup audio and final liquid/splash/logo assets do not exist; CSS reserves
+  their timing and replacement points.
+- Browser local state is not authentication. PIN, passkeys, recovery, child
+  profiles, controller ownership, and cloud sync are absent.
+- Games and apps are fictional mock entries; there is no package runtime,
+  sandbox, license, compatibility, or Quick Resume implementation.
+- ParaStore has no real catalog, commerce, payments, downloads, entitlements,
+  refunds, reviews, or moderation.
+- Bear Home does not scan, open, copy, move, delete, mount, eject, or upload files.
+- Calls, friends, parties, notifications, and presence are mock/stub data.
+- Network scans and storage/temperature readings are mock in the frontend API.
+- PulseWave native pairing, firmware, haptics, battery, and secure transport are
+  absent; browser gamepad navigation is the only working controller layer.
+- Optical-disc discovery, mounting, playback, encryption/DRM, and ejection are
+  absent.
+- VR-US and the 3D Bear Home walk-around are not implemented.
+- Updates, package signing, sandboxing, recovery, sleep, restart, shutdown, and
+  factory reset are not implemented.
+- Accessibility includes useful semantics, keyboard focus, reduced motion,
+  large text, and high contrast, but no console TTS or native remapping service.
 
-- Build command: `python3 tools/validate_project.py`
-- Start command: `./scripts/render-start.sh`
-- Health check: `/api/v1/health`
+## 14. Next development milestones
 
-No environment variables or Supabase keys are required. Render supplies `PORT`
-automatically. The hosted interface can show Bear Home and its layout, but it
-cannot read a viewer's directories or launch a viewer's Linux applications;
-those capabilities require the local gateway on that machine.
+1. **Contract hardening:** make OpenAPI authoritative, add schemas/errors/event
+   streams, generate the TypeScript client, and version D-Bus interfaces.
+2. **UI verification:** add Playwright navigation tests, controller simulations,
+   WCAG audits, 720p/1080p/4K visual regressions, and local font assets.
+3. **Dedicated shell experiment:** evaluate a mature Wayland compositor and
+   create a separate login-session entry that never replaces an existing desktop.
+4. **Read-only hardware services:** expand Rust udev/hwmon/UPower discovery and
+   expose it through an unprivileged, testable D-Bus API.
+5. **PulseWave prototype:** define HID reports and threat model, use BlueZ and
+   evdev/hidraw with udev permissions, contribute mappings upstream where possible.
+6. **Bear Home index:** implement read-only XDG directory indexing and external
+   media discovery before any write/delete/cloud action.
+7. **Application sandbox:** evaluate Flatpak, bubblewrap, portals, cgroups, and
+   Landlock; define PARA manifests, permissions, lifecycle, and parental controls.
+8. **Identity and social:** design real authentication, passkeys/PIN boundaries,
+   encrypted tokens, recovery, child safety, blocking/reporting, and WebRTC media.
+9. **Store/package trust:** implement signed manifests, content-addressed
+   downloads, license policy, moderation, and a no-commerce development catalog.
+10. **Atomic updates and recovery:** choose an established Linux atomic update
+    stack, design A/B rollback, sign metadata, and test power-loss/recovery on
+    dedicated hardware before exposing any privileged UI action.
 
-## Current limitations
+## 15. Rules for future contributors
 
-- PARA Home currently runs in a browser, not a dedicated Wayland session.
-- The intro reserves the required stages with CSS; final rendered audio/video or
-  WebGL assets do not exist.
-- Local profiles are session preferences, not authenticated identities.
-- Bear Home reads directory names and file metadata but does not open or mutate
-  files.
-- External and optical media are shown only after Linux has mounted them.
-- Linux application discovery/launch is intentionally disabled unless explicitly
-  enabled on a loopback run.
-- Continue, Create, and Community remain disabled until operational activity,
-  creator-app, and communication providers exist.
-- ParaStore, remote accounts, purchases, downloads/installation, updates,
-  VR-US, social communication, native PulseWave operations, optical controls,
-  and privileged recovery are not exposed.
-- Screen reader, captions, controller assistance, HDR calibration, safe-area
-  calibration, and native controller remapping need real system providers before
-  they can be offered.
-
-## Next milestones
-
-1. Replace the standard-library HTTP transport with a typed local D-Bus/portal
-   boundary while preserving the OpenAPI-compatible client contract.
-2. Add safe document portals for opening selected files without broad filesystem
-   access.
-3. Build the installed-app service around desktop portals, application lifecycle,
-   sandbox permissions, and capability reporting.
-4. Add real media indexing/thumbnails and hotplug events for Bear Home.
-5. Implement a native controller service using existing Linux input stacks and a
-   shared mapping database.
-6. Design signed package, update, entitlement, security, and recovery systems
-   before exposing ParaStore or privileged controls.
-7. Package PARA Home as an opt-in dedicated Linux session and test it on target
-   hardware without replacing existing desktop sessions.
+- Label mock, unavailable, and placeholder behavior in code and UI.
+- Never convert a disabled system control into a fake success message.
+- Reuse upstream Linux APIs and drivers before considering device-specific code.
+- Keep PARA Home unprivileged; place hardware/system work behind narrow services.
+- Do not install or enable services from `make dev`, tests, or app startup.
+- Do not write outside the repository from test or development tooling, except
+  ordinary browser-local state and operating-system temporary files.
+- Require explicit user confirmation, authorization, integrity verification,
+  rollback, and dedicated-hardware testing before destructive features exist.
+- Update `config/services.json`, the matching `services/specs/*.toml`, API
+  contracts, tests, and this guide together when a stub becomes functional.

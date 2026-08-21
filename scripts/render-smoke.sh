@@ -28,7 +28,7 @@ for attempt in range(30):
             payload = json.load(response)
             headers = response.headers
         assert payload["status"] == "ok"
-        assert payload["name"] == "para-gateway"
+        assert payload["mode"] == "public-demo"
         assert headers["X-Content-Type-Options"] == "nosniff"
         assert headers["X-Frame-Options"] == "DENY"
         print("PARA Render-mode smoke check passed")
@@ -37,3 +37,4 @@ for attempt in range(30):
         time.sleep(0.1)
 raise SystemExit("PARA Render-mode smoke check failed")
 PY
+

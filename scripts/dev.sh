@@ -5,12 +5,5 @@ PARA_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARA_DEV_HOST="${PARA_DEV_HOST:-127.0.0.1}"
 PARA_DEV_PORT="${PARA_DEV_PORT:-4173}"
 
-PARA_LAUNCH_ARGS=()
-if [[ "${PARA_ENABLE_APP_LAUNCH:-0}" == "1" ]]; then
-  PARA_LAUNCH_ARGS+=(--enable-app-launch)
-fi
+exec python3 "$PARA_REPO_ROOT/services/mock-api/server.py" --host "$PARA_DEV_HOST" --port "$PARA_DEV_PORT"
 
-exec python3 "$PARA_REPO_ROOT/services/gateway/server.py" \
-  --host "$PARA_DEV_HOST" \
-  --port "$PARA_DEV_PORT" \
-  "${PARA_LAUNCH_ARGS[@]}"

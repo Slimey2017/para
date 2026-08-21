@@ -1,6 +1,7 @@
 id = "recovery"
-status = "interface-actions"
+status = "safe-shell-only"
 frontend_routes = ["recovery", "power"]
-current_provider = "apps/para-home/src/screens/system.js"
+development_provider = "recovery/safe-recovery.sh"
 future_runtime = "Signed offline recovery image and verified A/B update integration"
 security_note = "No repair, reset, partition, bootloader, or firmware operation exists here."
+

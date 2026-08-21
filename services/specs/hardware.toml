@@ -1,6 +1,7 @@
 id = "hardware"
-status = "read-only"
+status = "read-only-probe"
 frontend_routes = ["home", "storage", "settings"]
-current_provider = "services/gateway/system_layer.py"
+development_provider = "services/native/para-hardwared"
 future_runtime = "Rust D-Bus service"
 linux_apis = ["sysfs", "procfs", "udev", "UPower", "hwmon"]
+

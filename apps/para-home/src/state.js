@@ -8,8 +8,15 @@ const defaults = {
   reducedMotion: false,
   highContrast: false,
   largeText: false,
+  screenReader: false,
+  captions: false,
+  controllerAssist: false,
+  diagnosticsSharing: true,
+  personalization: true,
+  locationServices: false,
+  soundEnabled: true,
+  selectedNetwork: "PulseWave 5G",
   displayMode: "Living room",
-  fileCollection: "downloads",
 };
 
 function load() {
@@ -35,5 +42,4 @@ export function applyPreferences() {
   document.documentElement.dataset.reducedMotion = String(state.reducedMotion);
   document.documentElement.dataset.highContrast = String(state.highContrast);
   document.documentElement.dataset.largeText = String(state.largeText);
-  document.documentElement.dataset.displayMode = state.displayMode;
 }

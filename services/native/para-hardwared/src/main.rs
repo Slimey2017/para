@@ -1,4 +1,4 @@
-//! Safe read-only Linux hardware probe for PARA.
+//! Safe read-only Linux hardware probe for PARA development.
 //!
 //! It demonstrates the hardware-service boundary by reading public procfs and
 //! sysfs metadata. It does not load modules, claim devices, write sysfs, or need root.
@@ -18,7 +18,8 @@ fn main() {
     let input_nodes = count_entries("/sys/class/input");
 
     println!(
-        "{{\"service\":\"para-hardwared\",\"mode\":\"read-only\",\"cpu_threads_seen\":{},\"drm_entries\":{},\"input_entries\":{},\"writes_enabled\":false}}",
+        "{{\"service\":\"para-hardwared\",\"mode\":\"read-only-development-probe\",\"cpu_threads_seen\":{},\"drm_entries\":{},\"input_entries\":{},\"writes_enabled\":false}}",
         cpu_models, drm_cards, input_nodes
     );
 }
+

@@ -1,4 +1,4 @@
--- Reserved local profile schema. Nothing runs this file automatically.
+-- Development schema proposal only. Nothing runs this file automatically.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -19,3 +19,4 @@ CREATE TABLE IF NOT EXISTS profile_preferences (
 
 -- Authentication secrets, payment data, tokens, and recovery credentials do
 -- not belong in this local UI database and are intentionally absent.
+
