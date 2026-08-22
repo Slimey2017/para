@@ -9,9 +9,10 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_SCREENS = {
-    "startup", "intro", "setup", "login", "profiles", "home", "games", "apps", "store",
-    "bear-home", "creator", "calls", "social", "notifications", "downloads", "quick", "controller",
-    "storage", "settings", "accessibility", "network", "account", "subscription", "power", "recovery",
+    "startup", "intro", "setup", "login", "profiles", "home", "apps", "bear-home", "files",
+    "downloads", "controller", "storage", "settings", "display", "accessibility",
+    "network", "account", "power", "health", "recovery", "personalization", "background",
+    "control-center-settings",
 }
 REQUIRED_SERVICES = {"accounts", "bear-home", "hardware", "network", "optical", "parastore", "pulsewave", "recovery", "security", "updates", "vrus"}
 
@@ -51,9 +52,9 @@ def main() -> int:
         ROOT / "PROJECT_GUIDE.md",
         ROOT / "apps/para-home/index.html",
         ROOT / "apps/para-home/assets/bear-home-room.png",
-        ROOT / "apps/para-home/assets/para-home-dashboard.png",
         ROOT / "apps/para-home/assets/para-home-background.png",
-        ROOT / "services/mock-api/server.py",
+        ROOT / "services/gateway/server.py",
+        ROOT / "services/gateway/system_layer.py",
         ROOT / "interfaces/openapi.yaml",
         ROOT / "render.yaml",
         ROOT / "scripts/render-start.sh",

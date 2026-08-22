@@ -1,7 +1,6 @@
 id = "optical"
-status = "stub"
-frontend_routes = ["bear-home", "apps"]
-development_provider = "services/native/optical-disc"
+status = "mounted-media-read-only"
+frontend_routes = ["bear-home", "files"]
+current_provider = "services/gateway/system_layer.py"
 future_runtime = "C or Rust media coordinator using existing Linux drivers"
 linux_apis = ["udev", "udisks2", "sr_mod", "sg", "UDF"]
-

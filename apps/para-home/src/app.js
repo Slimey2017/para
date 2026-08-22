@@ -1,43 +1,76 @@
 import { Router } from "./router.js";
 import { FocusManager } from "./focus-manager.js";
-import { GamepadNavigation } from "./gamepad.js";
-import { applyPreferences, getState, resetState, setState, startupDestination } from "./state.js";
-import { startupScreen, introScreen, setupScreen, activateIntro } from "./screens/boot.js";
+import { GamepadNavigation, keyboardController } from "./gamepad.js";
+import { applyPreferences, getProfilePreferences, getState, replaceProfilePreferences, resetState, setProfilePreferences, setState, startupDestination } from "./state.js";
+import { startupScreen, introScreen, setupScreen, activateIntro, activateSetupNetwork } from "./screens/boot.js";
 import { profilesScreen, loginScreen } from "./screens/auth.js";
-import { homeScreen } from "./screens/home.js";
-import { gamesScreen, appsScreen, storeScreen, bearHomeScreen, creatorScreen } from "./screens/libraries.js";
-import { socialScreen, callsScreen } from "./screens/social.js";
+import { homeScreen, activateHome } from "./screens/home.js";
 import {
-  notificationsScreen, downloadsScreen, quickScreen, controllerScreen, storageScreen,
-  settingsScreen, displayScreen, accessibilityScreen, networkScreen, audioScreen,
-  privacyScreen, accountScreen, subscriptionScreen, vrusScreen, updatesScreen,
-  powerScreen, healthScreen, recoveryScreen,
+  appsScreen, activateApps, filterApps, bearHomeScreen, activateBearHome, filesScreen,
+  downloadsScreen, activateFiles, launchLinuxApplication,
+} from "./screens/libraries.js";
+import {
+  controllerScreen, updateControllerScreen, storageScreen, activateStorage,
+  settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
+  accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen,
 } from "./screens/system.js";
+import {
+  personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
+  cancelBackgroundPreview, applyCustomBackground,
+  controlCenterSettingsScreen, activateControlCenterSettings,
+} from "./screens/personalization.js";
+import { controlCenterShell, populateControlCenter } from "./ui/control-center.js";
+import { paraApi } from "./services/para-api.js";
 
 const root = document.querySelector("#para-app");
+const overlay = document.querySelector("#para-overlay");
 const toastRegion = document.querySelector("#toast-region");
 const renderers = {
-  startup: startupScreen, intro: introScreen, setup: setupScreen, login: loginScreen,
-  profiles: profilesScreen, home: homeScreen, games: gamesScreen, apps: appsScreen,
-  store: storeScreen, "bear-home": bearHomeScreen, creator: creatorScreen, calls: callsScreen,
-  social: socialScreen, notifications: notificationsScreen, downloads: downloadsScreen,
-  quick: quickScreen, controller: controllerScreen, storage: storageScreen, settings: settingsScreen,
-  display: displayScreen, accessibility: accessibilityScreen, network: networkScreen, audio: audioScreen,
-  privacy: privacyScreen, account: accountScreen, subscription: subscriptionScreen, vrus: vrusScreen,
-  updates: updatesScreen, power: powerScreen, health: healthScreen, recovery: recoveryScreen,
+  startup: startupScreen,
+  intro: introScreen,
+  setup: setupScreen,
+  login: loginScreen,
+  profiles: profilesScreen,
+  home: homeScreen,
+  apps: appsScreen,
+  "bear-home": bearHomeScreen,
+  files: filesScreen,
+  downloads: downloadsScreen,
+  controller: controllerScreen,
+  storage: storageScreen,
+  settings: settingsScreen,
+  display: displayScreen,
+  accessibility: accessibilityScreen,
+  network: networkScreen,
+  account: accountScreen,
+  power: powerScreen,
+  health: healthScreen,
+  recovery: recoveryScreen,
+  personalization: personalizationScreen,
+  background: backgroundScreen,
+  "control-center-settings": controlCenterSettingsScreen,
 };
-const majorSections = ["games", "apps", "store", "bear-home", "creator", "social", "settings"];
+const majorSections = ["home", "apps", "settings"];
 
 let cleanupScreen = null;
 let navigating = false;
-let controllerStatus = { connected: false, name: "PulseWave Controller" };
+let controllerStatus = keyboardController();
+let overlayReturnFocus = null;
+let preferenceTimer = null;
 
-function toast(title, message) {
+function toast(title, message = "") {
   const node = document.createElement("div");
   node.className = "toast";
-  node.innerHTML = `<strong>${title}</strong>${message}`;
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+  node.append(heading);
+  if (message) {
+    const detail = document.createElement("span");
+    detail.textContent = message;
+    node.append(detail);
+  }
   toastRegion.append(node);
-  setTimeout(() => node.remove(), 3600);
+  setTimeout(() => node.remove(), 3200);
 }
 
 function updateClock() {
@@ -48,29 +81,39 @@ function updateClock() {
   document.querySelectorAll("[data-greeting]").forEach((node) => { node.textContent = greeting; });
 }
 
-function updateDisplayInfo() {
+function updateControllerPrompts() {
+  document.documentElement.dataset.controller = controllerStatus.type;
+  document.querySelectorAll("[data-prompt]").forEach((node) => {
+    node.textContent = controllerStatus.prompts[node.dataset.prompt] || "";
+  });
+  if (router.current() === "controller") updateControllerScreen(controllerStatus);
+}
+
+async function estimateRefreshRate() {
+  const samples = [];
+  let previous = 0;
+  return new Promise((resolve) => {
+    const frame = (time) => {
+      if (previous) samples.push(time - previous);
+      previous = time;
+      if (samples.length < 24) requestAnimationFrame(frame);
+      else {
+        const average = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+        resolve(Math.round(1000 / average));
+      }
+    };
+    requestAnimationFrame(frame);
+  });
+}
+
+async function updateDisplayInfo() {
   const width = window.screen?.width || window.innerWidth;
   const height = window.screen?.height || window.innerHeight;
   const hdr = window.matchMedia?.("(dynamic-range: high)")?.matches;
   document.querySelectorAll("[data-display-resolution]").forEach((node) => { node.textContent = `${width} × ${height}`; });
-  document.querySelectorAll("[data-refresh-rate]").forEach((node) => { node.textContent = "60 Hz"; });
   document.querySelectorAll("[data-hdr-status]").forEach((node) => { node.textContent = hdr ? "HDR available" : "Standard range"; });
-}
-
-function activateHomeMotion() {
-  const cards = [...document.querySelectorAll(".home-launcher")];
-  const cleanups = cards.map((card) => {
-    const move = (event) => {
-      const bounds = card.getBoundingClientRect();
-      card.style.setProperty("--mx", `${((event.clientX - bounds.left) / bounds.width) * 100}%`);
-      card.style.setProperty("--my", `${((event.clientY - bounds.top) / bounds.height) * 100}%`);
-    };
-    const leave = () => { card.style.setProperty("--mx", "50%"); card.style.setProperty("--my", "35%"); };
-    card.addEventListener("pointermove", move);
-    card.addEventListener("pointerleave", leave);
-    return () => { card.removeEventListener("pointermove", move); card.removeEventListener("pointerleave", leave); };
-  });
-  return () => cleanups.forEach((cleanup) => cleanup());
+  const refresh = await estimateRefreshRate();
+  document.querySelectorAll("[data-refresh-rate]").forEach((node) => { node.textContent = `${refresh} Hz`; });
 }
 
 function render(route) {
@@ -82,24 +125,47 @@ function render(route) {
   requestAnimationFrame(() => root.classList.remove("is-entering"));
   navigating = false;
   updateClock();
+  updateControllerPrompts();
   updateDisplayInfo();
   focus.focusFirst();
+
   if (route === "startup") {
     const timer = setTimeout(() => router.go(startupDestination(), { replace: true }), 850);
     cleanupScreen = () => clearTimeout(timer);
   } else if (route === "intro") {
     cleanupScreen = activateIntro(() => router.go("setup", { replace: true }));
-  } else if (route === "home") cleanupScreen = activateHomeMotion();
+  } else if (route === "home") {
+    cleanupScreen = activateHome({ focus, controller: controllerStatus });
+  } else if (route === "apps") {
+    activateApps({ focus });
+  } else if (route === "files" || route === "downloads") {
+    activateFiles();
+  } else if (route === "storage") {
+    activateStorage();
+  } else if (route === "network") {
+    activateNetwork();
+  } else if (route === "health") {
+    activateHealth();
+  } else if (route === "controller") {
+    updateControllerScreen(controllerStatus);
+  } else if (route === "background") {
+    activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
+  } else if (route === "control-center-settings") {
+    activateControlCenterSettings({ focus, controller: controllerStatus });
+  } else if (route === "setup" && getState().setupStep === 2) {
+    activateSetupNetwork();
+  }
 }
 
 const router = new Router(render);
 
 function navigate(route, options = {}, target = null) {
+  closeControlCenter(false);
   if (navigating || route === router.current()) return;
   navigating = true;
   target?.classList.add("is-activating");
   root.classList.add("is-leaving");
-  setTimeout(() => router.go(route, options), getState().reducedMotion ? 1 : 170);
+  setTimeout(() => router.go(route, options), getState().reducedMotion ? 1 : 190);
 }
 
 function confirm(target = focus.current) {
@@ -107,35 +173,100 @@ function confirm(target = focus.current) {
 }
 
 function back() {
-  const bearDrawer = document.querySelector("[data-bear-drawer]");
-  if (bearDrawer && !bearDrawer.hidden) {
-    bearDrawer.hidden = true;
-    const bear = document.querySelector("[data-action='bear-more']");
-    if (bear) focus.setCurrent(bear, true);
+  if (!overlay.hidden) {
+    closeControlCenter();
+    return;
+  }
+  const bearMenu = document.querySelector("[data-bear-menu]");
+  if (bearMenu && !bearMenu.hidden) {
+    bearMenu.hidden = true;
+    focus.setCurrent(document.querySelector("[data-action='bear-menu']"), true);
     return;
   }
   if (["startup", "intro", "setup", "profiles"].includes(router.current())) return;
   root.classList.add("is-leaving");
-  setTimeout(() => router.back(), getState().reducedMotion ? 1 : 140);
+  setTimeout(() => router.back(), getState().reducedMotion ? 1 : 150);
 }
 
-function quick() { if (router.current() === "quick") back(); else navigate("quick"); }
+async function openControlCenter() {
+  if (!overlay.hidden) return;
+  overlayReturnFocus = focus.current;
+  overlay.innerHTML = controlCenterShell();
+  overlay.hidden = false;
+  updateControllerPrompts();
+  focus.setCurrent(overlay.querySelector(".control-center-close"), true);
+  await populateControlCenter({ overlay, controller: controllerStatus, focus });
+}
+
+function closeControlCenter(restore = true) {
+  if (overlay.hidden) return;
+  overlay.hidden = true;
+  overlay.innerHTML = "";
+  if (restore && overlayReturnFocus?.isConnected) focus.setCurrent(overlayReturnFocus, true);
+  overlayReturnFocus = null;
+}
+
+function paraTap() {
+  if (overlay.hidden) openControlCenter();
+  else closeControlCenter();
+}
+
+function paraHold() {
+  closeControlCenter(false);
+  if (router.current() === "home") focus.focusFirst();
+  else navigate("home", { replace: true });
+}
+
 function shoulder(direction) {
   const currentIndex = majorSections.indexOf(router.current());
   if (currentIndex < 0) return;
   navigate(majorSections[(currentIndex + direction + majorSections.length) % majorSections.length]);
 }
 
-const focus = new FocusManager({ confirm, back, quick, shoulder });
+const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder });
 const gamepad = new GamepadNavigation({
-  move: (direction) => focus.move(direction), confirm: () => confirm(), back, quick, shoulder,
-  connected: (connected, name) => {
-    controllerStatus = { connected, name: name || "PulseWave Controller" };
-    toast(connected ? "Controller connected" : "Controller disconnected", connected ? `${controllerStatus.name} is ready.` : "Reconnect a controller or continue with keyboard and mouse.");
+  move: (direction) => focus.move(direction),
+  confirm: () => confirm(),
+  back,
+  paraTap,
+  paraHold,
+  shoulder,
+  connected: (controller) => {
+    const hadController = controllerStatus.connected;
+    controllerStatus = controller;
+    updateControllerPrompts();
+    document.dispatchEvent(new CustomEvent("para-controllerchange", { detail: controller }));
+    if (controller.connected && !hadController) toast("Controller connected", `${controller.typeLabel} controls active`);
   },
 });
 
-function rerender() { render(router.current()); }
+function rerender() {
+  render(router.current());
+}
+
+async function hydrateProfile(profile) {
+  try {
+    const payload = await paraApi.personalization(profile);
+    if (payload.preferences) replaceProfilePreferences(payload.preferences, profile);
+  } catch {
+    // Local preferences remain available when the host does not provide profile storage.
+  }
+}
+
+function schedulePreferenceSave() {
+  clearTimeout(preferenceTimer);
+  preferenceTimer = setTimeout(async () => {
+    const profile = getState().activeProfile || "Player One";
+    try { await paraApi.savePersonalization(profile, getProfilePreferences(profile)); } catch { /* local state remains active */ }
+  }, 240);
+}
+
+async function loginToHome(profile, target) {
+  setState({ loggedIn: true, activeProfile: profile });
+  await hydrateProfile(profile);
+  navigate("home", { replace: true }, target);
+}
+
 function toggle(key, label) {
   const state = getState();
   const next = !state[key];
@@ -144,70 +275,187 @@ function toggle(key, label) {
   rerender();
 }
 
-async function runDiagnostics() {
+async function openLinuxApplication(target) {
+  const name = target.dataset.appName || "Application";
   try {
-    const response = await fetch("/api/v1/health", { signal: AbortSignal.timeout(1800) });
-    if (!response.ok) throw new Error("Health check failed");
-    toast("System check complete", "No issues were found.");
-  } catch { toast("Couldn’t finish the system check", "Try again in a moment."); }
+    await launchLinuxApplication(target.dataset.appId);
+    toast(`Opening ${name}`);
+  } catch {
+    toast(`${name} couldn’t be opened`);
+  }
 }
 
-function unavailable(title = "Unavailable") { toast(title, "This option isn’t available right now."); }
-
-function handleAction(action, target) {
+async function handleAction(action, target) {
   const state = getState();
-  const title = target?.dataset.title || target?.dataset.collection || target?.dataset.category || "This option";
   switch (action) {
-    case "skip-intro": navigate("setup", { replace: true }, target); break;
-    case "setup-next": setState({ setupStep: Math.min(6, state.setupStep + 1) }); rerender(); break;
-    case "setup-back": setState({ setupStep: Math.max(0, state.setupStep - 1) }); rerender(); break;
-    case "finish-setup": setState({ firstBootComplete: true, loggedIn: true, activeProfile: state.activeProfile || "Player One", setupStep: 6 }); navigate("home", { replace: true }, target); break;
-    case "setup-profile": setState({ activeProfile: target?.dataset.profile || "Player One" }); toast("Profile selected", target?.dataset.profile || "Player One"); rerender(); break;
-    case "setup-guest": setState({ activeProfile: "Guest" }); toast("Guest selected", "You can add a profile later."); rerender(); break;
-    case "select-profile": setState({ activeProfile: target?.dataset.profile || "Player One" }); navigate("login", {}, target); break;
-    case "profile-login": setState({ loggedIn: true, activeProfile: target?.dataset.profile || state.activeProfile || "Player One" }); navigate("home", { replace: true }, target); break;
-    case "guest-login": setState({ loggedIn: true, activeProfile: "Guest" }); navigate("home", { replace: true }, target); break;
-    case "sign-out": setState({ loggedIn: false, activeProfile: null }); navigate("profiles", { replace: true }, target); break;
-    case "restart-shell": location.reload(); break;
-    case "reset-first-boot": resetState(); navigate("intro", { replace: true }, target); break;
-    case "toggle-reduced": toggle("reducedMotion", "Reduce motion"); break;
-    case "toggle-large": toggle("largeText", "Larger text"); break;
-    case "toggle-contrast": toggle("highContrast", "High contrast"); break;
-    case "toggle-screen-reader": toggle("screenReader", "Screen reader"); break;
-    case "toggle-captions": toggle("captions", "Captions"); break;
-    case "toggle-controller-assist": toggle("controllerAssist", "Controller assistance"); break;
-    case "toggle-diagnostics-sharing": toggle("diagnosticsSharing", "Share diagnostics"); break;
-    case "toggle-personalization": toggle("personalization", "Personalized recommendations"); break;
-    case "toggle-location": toggle("locationServices", "Location services"); break;
-    case "select-tv": setState({ displayMode: "Living room" }); toast("Display layout", "Living room selected."); rerender(); break;
-    case "select-monitor": setState({ displayMode: "Desk" }); toast("Display layout", "Desk selected."); rerender(); break;
-    case "choose-network": case "network-select": setState({ selectedNetwork: target?.querySelector?.(".list-row__title")?.textContent || "PulseWave 5G" }); toast("Connected", "Your internet connection is ready."); rerender(); break;
-    case "choose-ethernet": toast("Ethernet", "Connect a network cable to continue."); break;
-    case "choose-offline": setState({ selectedNetwork: null }); toast("Offline mode", "You can connect later in Settings."); break;
-    case "diagnostics": runDiagnostics(); break;
-    case "controller-test": toast("Input test", controllerStatus.connected ? `${controllerStatus.name} is responding.` : "Press a button on your controller to connect it."); break;
-    case "home-current": toast("PARA Home", "You’re already home."); break;
-    case "bear-more": {
-      const drawer = document.querySelector("[data-bear-drawer]");
-      if (drawer) { drawer.hidden = false; requestAnimationFrame(() => focus.setCurrent(drawer.querySelector("[data-autofocus='true']") || drawer.querySelector("button"), true)); }
+    case "skip-intro":
+      navigate("setup", { replace: true }, target);
+      break;
+    case "setup-next":
+      setState({ setupStep: Math.min(6, state.setupStep + 1) });
+      rerender();
+      break;
+    case "setup-back":
+      setState({ setupStep: Math.max(0, state.setupStep - 1) });
+      rerender();
+      break;
+    case "finish-setup":
+      setState({ firstBootComplete: true, activeProfile: state.activeProfile || "Player One", setupStep: 6 });
+      loginToHome(state.activeProfile || "Player One", target);
+      break;
+    case "setup-profile":
+      setState({ activeProfile: target.dataset.profile || "Player One" });
+      rerender();
+      break;
+    case "setup-guest":
+      setState({ activeProfile: "Guest" });
+      rerender();
+      break;
+    case "select-profile":
+      setState({ activeProfile: target.dataset.profile || "Player One" });
+      navigate("login", {}, target);
+      break;
+    case "profile-login":
+      loginToHome(target.dataset.profile || state.activeProfile || "Player One", target);
+      break;
+    case "guest-login":
+      loginToHome("Guest", target);
+      break;
+    case "sign-out":
+      setState({ loggedIn: false, activeProfile: null });
+      navigate("profiles", { replace: true }, target);
+      break;
+    case "restart-shell":
+      location.reload();
+      break;
+    case "reset-first-boot":
+      resetState();
+      navigate("intro", { replace: true }, target);
+      break;
+    case "toggle-reduced":
+      toggle("reducedMotion", "Reduce motion");
+      break;
+    case "toggle-large":
+      toggle("largeText", "Larger text");
+      break;
+    case "toggle-contrast":
+      toggle("highContrast", "High contrast");
+      break;
+    case "select-tv":
+      setState({ displayMode: "Living room" });
+      rerender();
+      break;
+    case "select-monitor":
+      setState({ displayMode: "Desk" });
+      rerender();
+      break;
+    case "cycle-display-mode":
+      setState({ displayMode: state.displayMode === "Living room" ? "Desk" : "Living room" });
+      rerender();
+      break;
+    case "filter-apps":
+      filterApps(target.dataset.appFilter || "All Apps");
+      focus.focusFirst();
+      break;
+    case "reload-apps":
+      activateApps({ focus });
+      break;
+    case "launch-linux-app":
+      openLinuxApplication(target);
+      break;
+    case "open-collection":
+      setState({ fileCollection: target.dataset.collection || "downloads" });
+      navigate("files", {}, target);
+      break;
+    case "bear-menu": {
+      const menu = document.querySelector("[data-bear-menu]");
+      if (menu) {
+        menu.hidden = false;
+        requestAnimationFrame(() => focus.setCurrent(menu.querySelector("[data-autofocus='true']"), true));
+      }
       break;
     }
-    case "bear-drawer-close": back(); break;
-    case "bear-folder": toast(title, "There are no items here yet."); break;
-    case "clear-notifications": document.querySelectorAll(".os-row").forEach((row) => row.remove()); toast("Notifications cleared", "You’re all caught up."); break;
-    case "check-updates": toast("You’re up to date", "No new updates are available."); break;
-    case "library-filter": case "creator-filter": target?.parentElement?.querySelectorAll("button").forEach((button) => button.classList.toggle("is-active", button === target)); break;
-    case "browse-category": toast(title, `Browsing ${title}.`); break;
-    case "add-profile": case "sign-in-options": case "store-product": case "wishlist": case "cart": case "store-search":
-    case "game-open": case "creator-open": case "new-project": case "friend-open": case "join-friend": case "messages-open":
-    case "invitations-open": case "party-start": case "find-friends": case "call-start": case "call-options":
-    case "notification-open": case "download-open": case "download-options": case "pair-controller": case "controller-assign":
-    case "controller-vibration": case "storage-open": case "display-option": case "network-refresh": case "network-details":
-    case "network-test": case "audio-select": case "audio-option": case "privacy-option": case "account-option":
-    case "plan-select": case "vr-connect": case "vr-option": case "update-option": case "update-history": case "system-power":
-    case "unavailable": unavailable(title); break;
-    default: unavailable(title);
+    case "bear-menu-close":
+      back();
+      break;
+    case "open-control-center":
+      openControlCenter();
+      break;
+    case "close-control-center":
+      closeControlCenter();
+      break;
+    case "toggle-microphone": {
+      try {
+        await paraApi.setAudio("microphone", { muted: target.dataset.microphoneMuted !== "true" });
+        await populateControlCenter({ overlay, controller: controllerStatus, focus });
+      } catch { /* the control disappears when the host capability is unavailable */ }
+      break;
+    }
+    case "open-background-picker":
+      openBackgroundPicker();
+      break;
+    case "cancel-background-preview":
+      cancelBackgroundPreview(focus);
+      break;
+    case "apply-custom-background":
+      if (await applyCustomBackground(focus)) {
+        schedulePreferenceSave();
+        rerender();
+      } else toast("That image couldn’t be applied");
+      break;
+    case "select-background":
+      setProfilePreferences({ background: { selection: target.dataset.backgroundId } });
+      schedulePreferenceSave();
+      rerender();
+      break;
+    case "set-background-fit":
+      setProfilePreferences({ background: { fit: target.dataset.backgroundFit } });
+      schedulePreferenceSave();
+      rerender();
+      break;
+    case "reset-background":
+      setProfilePreferences({ background: { selection: "para-default", fit: "fill", dim: 42, blur: 18, revision: 0 } });
+      schedulePreferenceSave();
+      rerender();
+      break;
+    case "move-control-center-item":
+      movePreferenceItem("controlCenter", target.dataset.itemId, Number(target.dataset.direction));
+      break;
+    case "toggle-control-center-item":
+      togglePreferenceItem("controlCenter", target.dataset.itemId);
+      break;
+    case "refresh-network":
+      activateNetwork();
+      break;
+    case "run-health-check":
+      activateHealth();
+      break;
+    default:
+      break;
   }
+}
+
+function movePreferenceItem(section, id, direction) {
+  const preferences = getProfilePreferences();
+  const visibleOrder = [...document.querySelectorAll("[data-arrangement-id]")].map((row) => row.dataset.arrangementId);
+  const order = visibleOrder.length ? visibleOrder : [...preferences[section].order];
+  const index = order.indexOf(id);
+  const destination = index + direction;
+  if (index < 0 || destination < 0 || destination >= order.length) return;
+  [order[index], order[destination]] = [order[destination], order[index]];
+  const completeOrder = [...order, ...preferences[section].order.filter((item) => !order.includes(item))];
+  setProfilePreferences({ [section]: { order: completeOrder } });
+  schedulePreferenceSave();
+  rerender();
+}
+
+function togglePreferenceItem(section, id) {
+  const preferences = getProfilePreferences();
+  const hidden = new Set(preferences[section].hidden);
+  hidden.has(id) ? hidden.delete(id) : hidden.add(id);
+  setProfilePreferences({ [section]: { hidden: [...hidden] } });
+  schedulePreferenceSave();
+  rerender();
 }
 
 document.addEventListener("click", (event) => {
@@ -217,12 +465,35 @@ document.addEventListener("click", (event) => {
   else handleAction(target.dataset.action, target);
 });
 
+document.addEventListener("change", async (event) => {
+  if (!event.target.matches("[data-audio-volume]")) return;
+  try {
+    const audio = await paraApi.setAudio("output", { volume: Number(event.target.value) });
+    const output = overlay.querySelector("[data-audio-output]");
+    if (output && audio.output) output.textContent = `${audio.output.volume}%`;
+  } catch { /* the control will be refreshed on the next open */ }
+});
+
+document.addEventListener("input", (event) => {
+  if (!event.target.matches("[data-audio-volume]")) return;
+  const output = overlay.querySelector("[data-audio-output]");
+  if (output) output.textContent = `${event.target.value}%`;
+});
+
 if (new URLSearchParams(location.search).get("reset") === "1") {
   resetState();
   history.replaceState({}, "", `${location.pathname}#/startup`);
 }
 
-applyPreferences();
-gamepad.start();
-setInterval(updateClock, 30_000);
-router.resolve();
+async function start() {
+  applyPreferences();
+  const state = getState();
+  if (state.loggedIn && state.activeProfile) await hydrateProfile(state.activeProfile);
+  gamepad.start();
+  setInterval(updateClock, 30_000);
+  router.resolve();
+}
+
+start();
+  } else if (route === "bear-home") {
+    activateBearHome({ focus });

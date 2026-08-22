@@ -12,16 +12,15 @@ else
 fi
 
 if command -v c++ >/dev/null 2>&1; then
-  c++ -std=c++17 -Wall -Wextra -Wpedantic "$PARA_REPO_ROOT/services/native/pulsewave-controller/src/main.cpp" -o "$PARA_NATIVE_BUILD/pulsewave-controller-stub"
-  "$PARA_NATIVE_BUILD/pulsewave-controller-stub" --describe
+  c++ -std=c++17 -Wall -Wextra -Wpedantic "$PARA_REPO_ROOT/services/native/pulsewave-controller/src/main.cpp" -o "$PARA_NATIVE_BUILD/pulsewave-controller-service"
+  "$PARA_NATIVE_BUILD/pulsewave-controller-service" --describe
 else
-  printf '%s\n' "C++ compiler not installed; PulseWave stub skipped"
+  printf '%s\n' "C++ compiler not installed; PulseWave interface check skipped"
 fi
 
 if command -v cc >/dev/null 2>&1; then
-  cc -std=c11 -Wall -Wextra -Wpedantic "$PARA_REPO_ROOT/services/native/optical-disc/src/main.c" -o "$PARA_NATIVE_BUILD/para-optical-stub"
-  "$PARA_NATIVE_BUILD/para-optical-stub" --describe
+  cc -std=c11 -Wall -Wextra -Wpedantic "$PARA_REPO_ROOT/services/native/optical-disc/src/main.c" -o "$PARA_NATIVE_BUILD/para-optical-service"
+  "$PARA_NATIVE_BUILD/para-optical-service" --describe
 else
-  printf '%s\n' "C compiler not installed; optical stub skipped"
+  printf '%s\n' "C compiler not installed; optical interface check skipped"
 fi
-

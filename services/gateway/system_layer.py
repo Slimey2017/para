@@ -3,20 +3,31 @@ from __future__ import annotations
 from base64 import b64encode
 import configparser
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 from pathlib import Path
 import platform
 import shutil
 import subprocess
+import tempfile
+import time
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _launch_enabled = False
+_controls_enabled = False
+
+BACKGROUND_SELECTIONS = {"para-default", "para-aurora", "para-horizon", "para-midnight", "solid-black", "custom"}
+BACKGROUND_FITS = {"fill", "fit", "center", "stretch"}
+HOME_WIDGETS = {"network", "storage", "system"}
+CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"}
 
 
-def configure(*, launch_enabled: bool) -> None:
-    global _launch_enabled
+def configure(*, launch_enabled: bool, controls_enabled: bool = False) -> None:
+    global _launch_enabled, _controls_enabled
     _launch_enabled = launch_enabled
+    _controls_enabled = controls_enabled
 
 
 def health() -> dict[str, Any]:
@@ -36,6 +47,219 @@ def system_information() -> dict[str, Any]:
         "hostname": platform.node(),
         "cpu_count": os.cpu_count(),
     }
+
+
+def _profile_key(profile: str) -> str:
+    return hashlib.sha256(profile.strip().encode("utf-8")).hexdigest()[:20]
+
+
+def _config_root() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "para" / "profiles"
+
+
+def _data_root() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "para" / "backgrounds"
+
+
+def _preferences_path(profile: str) -> Path:
+    return _config_root() / _profile_key(profile) / "personalization.json"
+
+
+def _safe_profile(profile: str) -> bool:
+    return 0 < len(profile.strip()) <= 80
+
+
+def capabilities() -> dict[str, Any]:
+    audio_state = audio()
+    return {
+        "personalization": _controls_enabled,
+        "custom_backgrounds": _controls_enabled,
+        "audio": audio_state["available"],
+        "microphone": audio_state["available"] and audio_state.get("microphone") is not None,
+        "network": Path("/sys/class/net").exists(),
+        "storage": True,
+        "controllers": "browser-gamepad",
+        "notifications": False,
+        "switcher": False,
+        "power": "session",
+    }
+
+
+def personalization(profile: str) -> tuple[int, dict[str, Any]]:
+    if not _safe_profile(profile):
+        return 400, {"error": "invalid_profile"}
+    path = _preferences_path(profile)
+    if not path.is_file():
+        return 200, {"writable": _controls_enabled, "preferences": None}
+    try:
+        preferences = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 503, {"error": "preferences_unavailable"}
+    return 200, {"writable": _controls_enabled, "preferences": preferences}
+
+
+def _string_list(value: Any, allowed: set[str], fallback: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return fallback
+    result = []
+    for item in value:
+        if isinstance(item, str) and item in allowed and item not in result:
+            result.append(item)
+    return result
+
+
+def _validated_preferences(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    background = value.get("background", {})
+    home = value.get("home", {})
+    control_center = value.get("controlCenter", {})
+    if not all(isinstance(section, dict) for section in [background, home, control_center]):
+        return None
+    selection = background.get("selection", "para-default")
+    fit = background.get("fit", "fill")
+    if selection not in BACKGROUND_SELECTIONS or fit not in BACKGROUND_FITS:
+        return None
+    try:
+        dim = max(0, min(80, int(background.get("dim", 42))))
+        blur = max(0, min(24, int(background.get("blur", 18))))
+        revision = max(0, int(background.get("revision", 0)))
+    except (TypeError, ValueError):
+        return None
+    return {
+        "background": {"selection": selection, "fit": fit, "dim": dim, "blur": blur, "revision": revision},
+        "home": {
+            "order": _string_list(home.get("order"), HOME_WIDGETS, ["network", "storage", "system"]),
+            "hidden": _string_list(home.get("hidden"), HOME_WIDGETS, []),
+        },
+        "controlCenter": {
+            "order": _string_list(control_center.get("order"), CONTROL_CENTER_ITEMS, ["home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"]),
+            "hidden": _string_list(control_center.get("hidden"), CONTROL_CENTER_ITEMS, []),
+        },
+    }
+
+
+def save_personalization(profile: str, value: Any) -> tuple[int, dict[str, Any]]:
+    if not _controls_enabled:
+        return 403, {"error": "write_unavailable"}
+    if not _safe_profile(profile):
+        return 400, {"error": "invalid_profile"}
+    preferences = _validated_preferences(value)
+    if preferences is None:
+        return 400, {"error": "invalid_preferences"}
+    if preferences["background"]["selection"] == "custom" and custom_background_path(profile)[0] is None:
+        return 409, {"error": "custom_background_missing"}
+    path = _preferences_path(profile)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as target:
+            json.dump(preferences, target, separators=(",", ":"))
+            target.flush()
+            os.fsync(target.fileno())
+            temporary = Path(target.name)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except OSError:
+        return 503, {"error": "preferences_unavailable"}
+    return 200, {"saved": True, "preferences": preferences}
+
+
+def _image_type(content_type: str, data: bytes) -> tuple[str, str] | None:
+    if content_type == "image/png" and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png", "image/png"
+    if content_type in {"image/jpeg", "image/jpg"} and data.startswith(b"\xff\xd8\xff"):
+        return ".jpg", "image/jpeg"
+    if content_type == "image/webp" and len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp", "image/webp"
+    return None
+
+
+def save_custom_background(profile: str, content_type: str, data: bytes) -> tuple[int, dict[str, Any]]:
+    if not _controls_enabled:
+        return 403, {"error": "write_unavailable"}
+    if not _safe_profile(profile) or not data or len(data) > 12_000_000:
+        return 400, {"error": "invalid_image"}
+    image_type = _image_type(content_type, data)
+    if image_type is None:
+        return 415, {"error": "unsupported_image"}
+    extension, mime = image_type
+    root = _data_root()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    key = _profile_key(profile)
+    destination = root / f"{key}{extension}"
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=root, delete=False) as target:
+            target.write(data)
+            target.flush()
+            os.fsync(target.fileno())
+            temporary = Path(target.name)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+        for suffix in [".png", ".jpg", ".webp"]:
+            previous = root / f"{key}{suffix}"
+            if previous != destination and previous.exists():
+                previous.unlink()
+    except OSError:
+        return 503, {"error": "image_unavailable"}
+    return 201, {"saved": True, "mime_type": mime, "revision": int(time.time() * 1000)}
+
+
+def custom_background_path(profile: str) -> tuple[Path | None, str | None]:
+    if not _safe_profile(profile):
+        return None, None
+    root = _data_root()
+    key = _profile_key(profile)
+    for suffix, mime in [(".png", "image/png"), (".jpg", "image/jpeg"), (".webp", "image/webp")]:
+        path = root / f"{key}{suffix}"
+        if path.is_file():
+            return path, mime
+    return None, None
+
+
+def _wpctl_status(target: str) -> dict[str, Any] | None:
+    executable = shutil.which("wpctl")
+    if not _controls_enabled or not executable:
+        return None
+    try:
+        result = subprocess.run([executable, "get-volume", target], capture_output=True, text=True, timeout=1, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    words = result.stdout.strip().split()
+    try:
+        volume = round(float(words[1]) * 100)
+    except (IndexError, ValueError):
+        return None
+    return {"volume": max(0, min(100, volume)), "muted": "[MUTED]" in result.stdout}
+
+
+def audio() -> dict[str, Any]:
+    output = _wpctl_status("@DEFAULT_AUDIO_SINK@")
+    microphone = _wpctl_status("@DEFAULT_AUDIO_SOURCE@")
+    return {"available": output is not None or microphone is not None, "output": output, "microphone": microphone}
+
+
+def set_audio(kind: str, *, volume: Any = None, muted: Any = None) -> tuple[int, dict[str, Any]]:
+    executable = shutil.which("wpctl")
+    targets = {"output": "@DEFAULT_AUDIO_SINK@", "microphone": "@DEFAULT_AUDIO_SOURCE@"}
+    target = targets.get(kind)
+    if not _controls_enabled or not executable or target is None:
+        return 404, {"error": "audio_unavailable"}
+    command: list[str] | None = None
+    if volume is not None:
+        try:
+            level = max(0, min(100, int(volume)))
+        except (TypeError, ValueError):
+            return 400, {"error": "invalid_volume"}
+        command = [executable, "set-volume", target, f"{level}%"]
+    elif isinstance(muted, bool):
+        command = [executable, "set-mute", target, "1" if muted else "0"]
+    if command is None:
+        return 400, {"error": "invalid_audio_action"}
+    try:
+        subprocess.run(command, capture_output=True, timeout=1, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return 503, {"error": "audio_action_failed"}
+    return 200, audio()
 
 
 def _gb(value: int) -> float:
@@ -236,6 +460,24 @@ def _category(raw: str) -> str:
     return "Tools"
 
 
+def _application_roles(raw: str, name: str) -> list[str]:
+    categories = set(filter(None, raw.split(";")))
+    normalized_name = name.casefold()
+    creator_names = {
+        "blender", "godot", "unity", "unreal", "krita", "gimp", "inkscape",
+        "kdenlive", "davinci resolve", "openshot", "shotcut", "audacity", "ardour",
+        "obs studio", "visual studio code", "vscodium", "kate", "geany",
+    }
+    roles: list[str] = []
+    if "Game" in categories:
+        roles.append("game")
+    creator_category = bool(categories & {"Development", "IDE", "AudioVideoEditing", "2DGraphics", "3DGraphics", "VectorGraphics", "RasterGraphics"})
+    creator_name = any(normalized_name == candidate or normalized_name.startswith(f"{candidate} ") for candidate in creator_names)
+    if creator_category or creator_name:
+        roles.append("creator")
+    return roles
+
+
 def _desktop_entries() -> dict[str, dict[str, Any]]:
     entries: dict[str, dict[str, Any]] = {}
     if not _launch_enabled or not shutil.which("gio"):
@@ -261,10 +503,12 @@ def _desktop_entries() -> dict[str, dict[str, Any]]:
             try_exec = entry.get("TryExec", "").strip()
             if try_exec and not shutil.which(try_exec):
                 continue
+            raw_categories = entry.get("Categories", "")
             entries[identifier] = {
                 "id": identifier,
                 "name": name,
-                "category": _category(entry.get("Categories", "")),
+                "category": _category(raw_categories),
+                "roles": _application_roles(raw_categories, name),
                 "icon": _icon_data(entry.get("Icon", "").strip()),
                 "launch": {"kind": "linux"},
                 "_desktop_file": str(path),
@@ -273,7 +517,7 @@ def _desktop_entries() -> dict[str, dict[str, Any]]:
 
 
 def applications() -> dict[str, Any]:
-    built_in = {"id": "para:bear-home", "name": "Bear Home", "category": "Tools", "icon": None, "launch": {"kind": "route", "route": "bear-home"}}
+    built_in = {"id": "para:bear-home", "name": "Bear Home", "category": "Tools", "roles": [], "icon": None, "launch": {"kind": "route", "route": "bear-home"}}
     linux = [{key: value for key, value in item.items() if not key.startswith("_")} for item in _desktop_entries().values()]
     apps = [built_in, *linux]
     categories = [name for name in ["All Apps", "Entertainment", "Tools"] if name == "All Apps" or any(item["category"] == name for item in apps)]

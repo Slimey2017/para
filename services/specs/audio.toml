@@ -1,0 +1,7 @@
+id = "audio"
+status = "local-session"
+frontend_routes = ["control-center-settings"]
+current_provider = "services/gateway/system_layer.py"
+future_runtime = "PipeWire session service with event subscriptions"
+linux_apis = ["PipeWire", "WirePlumber", "wpctl"]
+security_note = "Expose only the active user session's default sink and source through fixed non-shell operations."

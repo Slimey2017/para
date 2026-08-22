@@ -28,13 +28,16 @@ for attempt in range(30):
             payload = json.load(response)
             headers = response.headers
         assert payload["status"] == "ok"
-        assert payload["mode"] == "public-demo"
+        assert payload["name"] == "para-gateway"
         assert headers["X-Content-Type-Options"] == "nosniff"
         assert headers["X-Frame-Options"] == "DENY"
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/capabilities", timeout=1) as response:
+            capabilities = json.load(response)
+        assert capabilities["personalization"] is False
+        assert capabilities["custom_backgrounds"] is False
         print("PARA Render-mode smoke check passed")
         raise SystemExit(0)
     except Exception:
         time.sleep(0.1)
 raise SystemExit("PARA Render-mode smoke check failed")
 PY
-

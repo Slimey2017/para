@@ -6,12 +6,11 @@
 int main(int argc, char** argv) {
     const bool describe = argc == 2 && std::string_view(argv[1]) == "--describe";
     if (!describe) {
-        std::cerr << "pulsewave-controller-stub: use --describe; native pairing is not implemented\n";
+        std::cerr << "pulsewave-controller-service: use --describe\n";
         return 2;
     }
     std::cout
-        << R"({"service":"pulsewave-controller","status":"stub","browser_fallback":"Gamepad API","native_pairing":false,"haptics":false,"firmware_updates":false})"
+        << R"({"service":"pulsewave-controller","status":"interface-only","active_input":"Browser Gamepad API","native_operations_exposed":false})"
         << '\n';
     return 0;
 }
-

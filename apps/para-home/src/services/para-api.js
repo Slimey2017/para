@@ -1,6 +1,6 @@
 async function request(path, options = {}) {
   const response = await fetch(path, {
-    headers: { "Accept": "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}) },
+    headers: { "Accept": "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
     signal: AbortSignal.timeout(4000),
     ...options,
   });
@@ -10,14 +10,30 @@ async function request(path, options = {}) {
 }
 
 export const paraApi = {
+  capabilities: () => request("/api/v1/capabilities"),
   applications: () => request("/api/v1/apps"),
   launchApplication: (id) => request("/api/v1/apps/launch", { method: "POST", body: JSON.stringify({ id }) }),
   system: () => request("/api/v1/system"),
   storage: () => request("/api/v1/storage"),
   network: () => request("/api/v1/network"),
+  audio: () => request("/api/v1/audio"),
+  setAudio: (kind, patch) => request("/api/v1/audio", { method: "POST", body: JSON.stringify({ kind, ...patch }) }),
   directories: () => request("/api/v1/directories"),
   collection: (id) => request(`/api/v1/files?collection=${encodeURIComponent(id)}`),
   health: () => request("/api/v1/health"),
+  personalization: (profile) => request(`/api/v1/personalization?profile=${encodeURIComponent(profile)}`),
+  savePersonalization: (profile, preferences) => request("/api/v1/personalization", { method: "POST", body: JSON.stringify({ profile, preferences }) }),
+  uploadBackground: async (profile, file) => {
+    const response = await fetch(`/api/v1/backgrounds/custom?profile=${encodeURIComponent(profile)}`, {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": file.type },
+      body: file,
+      signal: AbortSignal.timeout(12_000),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
+    return payload;
+  },
 };
 
 export function escapeHtml(value) {

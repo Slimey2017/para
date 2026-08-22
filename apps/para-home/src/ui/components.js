@@ -14,17 +14,20 @@ export function head(title, description, eyebrow = "") {
   return `<div class="screen-head"><div class="screen-head__copy">${eyebrow ? `<span class="eyebrow">${eyebrow}</span>` : ""}<h1>${title}</h1>${description ? `<p class="lede">${description}</p>` : ""}</div></div>`;
 }
 
-export function tile({ title, meta = "", route, action = "unavailable", icon = "✦", badge = "", className = "", accent = "#9d5cff", disabled = false, autofocus = false, art = false }) {
-  const destination = route ? `data-route="${route}"` : `data-action="${action}"`;
-  return `<button class="tile os-card ${className}" style="--tile-accent:${accent}" ${destination} ${disabled ? "disabled aria-disabled='true'" : ""} ${autofocus ? "data-autofocus='true'" : ""}>
+export function tile({ title, meta = "", route, action, icon = "✦", badge = "", className = "", accent = "#9d5cff", disabled = false, autofocus = false, art = false }) {
+  const destination = route ? `data-route="${route}"` : action ? `data-action="${action}"` : "";
+  const inactive = disabled || (!route && !action);
+  return `<button type="button" class="tile os-card ${className}" style="--tile-accent:${accent}" ${destination} ${inactive ? "disabled aria-disabled='true'" : ""} ${autofocus && !inactive ? "data-autofocus='true'" : ""}>
     ${art ? `<span class="tile__art" aria-hidden="true"></span>` : ""}
     <span class="tile__top"><span class="tile__icon" aria-hidden="true">${icon}</span>${badge ? `<span class="badge">${badge}</span>` : ""}</span>
     <span class="tile__bottom"><span><span class="tile__title">${title}</span>${meta ? `<span class="tile__meta">${meta}</span>` : ""}</span><span class="card-arrow" aria-hidden="true">›</span></span>
   </button>`;
 }
 
-export function listRow({ title, meta = "", route, action = "unavailable", icon = "•", end = "", disabled = false, autofocus = false, selected = false }) {
-  return `<button class="list-row os-row ${selected ? "is-selected" : ""}" ${route ? `data-route="${route}"` : `data-action="${action}"`} ${disabled ? "disabled aria-disabled='true'" : ""} ${autofocus ? "data-autofocus='true'" : ""}>
+export function listRow({ title, meta = "", route, action, icon = "•", end = "", disabled = false, autofocus = false, selected = false }) {
+  const destination = route ? `data-route="${route}"` : action ? `data-action="${action}"` : "";
+  const inactive = disabled || (!route && !action);
+  return `<button type="button" class="list-row os-row ${selected ? "is-selected" : ""}" ${destination} ${inactive ? "disabled aria-disabled='true'" : ""} ${autofocus && !inactive ? "data-autofocus='true'" : ""}>
     <span class="list-row__icon" aria-hidden="true">${icon}</span><span class="list-row__body"><span class="list-row__title">${title}</span>${meta ? `<span class="list-row__meta">${meta}</span>` : ""}</span>${end ? `<span class="list-row__end">${end}</span>` : ""}
   </button>`;
 }
@@ -37,14 +40,10 @@ export function toggleRow({ title, meta, action, value, icon = "◉", autofocus 
   return `<button class="list-row os-row" data-action="${action}" ${autofocus ? "data-autofocus='true'" : ""}><span class="list-row__icon" aria-hidden="true">${icon}</span><span class="list-row__body"><span class="list-row__title">${title}</span><span class="list-row__meta">${meta}</span></span><span class="os-toggle ${value ? "is-on" : ""}" aria-label="${value ? "On" : "Off"}"><i></i></span></button>`;
 }
 
-export function hints({ back = true, context = true, options = true } = {}) {
-  return `<footer class="bottom-nav control-legend"><span><i class="control-dot control-dot--blue"></i>Select</span>${back ? `<span><i class="control-dot control-dot--red"></i>Back</span>` : ""}${context ? `<span><i class="control-dot control-dot--green"></i>Context</span>` : ""}${options ? `<span><i class="control-dot control-dot--yellow"></i>Options</span>` : ""}</footer>`;
+export function hints({ back = true, context = false, options = false } = {}) {
+  return `<footer class="bottom-nav control-legend"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span>${back ? `<span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span>` : ""}${context ? `<span><b class="prompt-key prompt-key--green" data-prompt="secondary">C</b>Context</span>` : ""}${options ? `<span><b class="prompt-key prompt-key--yellow" data-prompt="options">M</b>Options</span>` : ""}</footer>`;
 }
 
 export function page({ title, description = "", eyebrow = "", body, className = "", back = true, section = "" }) {
   return `<section class="screen os-page ${className}">${livingBackground()}${topbar({ section: section || title })}${head(title, description, eyebrow)}<div class="content-scroll">${body}</div>${hints({ back })}</section>`;
-}
-
-export function unavailableState(label = "This option") {
-  return `<div class="unavailable-state"><span aria-hidden="true">◌</span><h2>${label} isn’t available right now</h2><p>Try again later.</p></div>`;
 }

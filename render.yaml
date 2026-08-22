@@ -1,12 +1,8 @@
 services:
   - type: web
-    name: para-home-prototype
+    name: para-home
     runtime: python
     plan: free
     buildCommand: python3 tools/validate_project.py
     startCommand: ./scripts/render-start.sh
     healthCheckPath: /api/v1/health
-    envVars:
-      - key: PARA_RUNTIME_MODE
-        value: public-demo
-

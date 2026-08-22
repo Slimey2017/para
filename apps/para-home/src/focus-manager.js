@@ -1,11 +1,14 @@
 const FOCUSABLE = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
 export class FocusManager {
-  constructor({ confirm, back, quick, shoulder }) {
-    this.handlers = { confirm, back, quick, shoulder };
+  constructor({ confirm, back, paraTap, paraHold, shoulder }) {
+    this.handlers = { confirm, back, paraTap, paraHold, shoulder };
     this.current = null;
+    this.paraKeyDown = false;
+    this.paraHoldTimer = null;
     this.onKeyDown = this.onKeyDown.bind(this);
     document.addEventListener("keydown", this.onKeyDown);
+    document.addEventListener("keyup", (event) => this.onKeyUp(event));
     document.addEventListener("focusin", (event) => this.setCurrent(event.target));
     document.addEventListener("pointermove", (event) => {
       const target = event.target.closest?.(FOCUSABLE);
@@ -14,14 +17,16 @@ export class FocusManager {
   }
 
   candidates() {
-    return [...document.querySelectorAll(FOCUSABLE)].filter((node) => {
+    const scope = document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
+    return [...scope.querySelectorAll(FOCUSABLE)].filter((node) => {
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && node.getAttribute("aria-disabled") !== "true";
     });
   }
 
   focusFirst() {
-    const preferred = document.querySelector("[data-autofocus='true']");
+    const scope = document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
+    const preferred = scope.querySelector("[data-autofocus='true']");
     const target = preferred || this.candidates()[0];
     if (target) requestAnimationFrame(() => this.setCurrent(target, true));
   }
@@ -41,6 +46,12 @@ export class FocusManager {
     const items = this.candidates();
     if (!items.length) return;
     if (!this.current || !items.includes(this.current)) return this.setCurrent(items[0], true);
+    if (this.current.matches("input[type='range']") && (direction === "left" || direction === "right")) {
+      direction === "left" ? this.current.stepDown() : this.current.stepUp();
+      this.current.dispatchEvent(new Event("input", { bubbles: true }));
+      this.current.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
     const currentRect = this.current.getBoundingClientRect();
     const origin = { x: currentRect.left + currentRect.width / 2, y: currentRect.top + currentRect.height / 2 };
     const ranked = items
@@ -72,14 +83,28 @@ export class FocusManager {
     } else if (event.key === "Escape") {
       event.preventDefault();
       this.handlers.back();
-    } else if (event.key.toLowerCase() === "m") {
+    } else if (event.key.toLowerCase() === "m" && !this.paraKeyDown) {
       event.preventDefault();
-      this.handlers.quick();
+      this.paraKeyDown = true;
+      this.paraHoldTimer = setTimeout(() => {
+        this.paraHoldTimer = null;
+        if (this.paraKeyDown) this.handlers.paraHold();
+      }, 650);
     } else if (event.key === "PageUp") {
       this.handlers.shoulder(-1);
     } else if (event.key === "PageDown") {
       this.handlers.shoulder(1);
     }
   }
-}
 
+  onKeyUp(event) {
+    if (event.key.toLowerCase() !== "m" || !this.paraKeyDown) return;
+    event.preventDefault();
+    this.paraKeyDown = false;
+    if (this.paraHoldTimer) {
+      clearTimeout(this.paraHoldTimer);
+      this.paraHoldTimer = null;
+      this.handlers.paraTap();
+    }
+  }
+}
