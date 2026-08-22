@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.4.4 is the first working skeleton of a Linux-powered home console/PC
+PARA 0.4.5 is the first working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -34,6 +34,9 @@ The normal launcher is safe to run on a development PC:
 - The gateway uses unprivileged Linux information and local session controls.
   Linux app launch is off
   unless the developer explicitly sets `PARA_ENABLE_APP_LAUNCH=1`.
+- Suspend, reboot, and poweroff are visual session actions by default. Fixed
+  Linux `systemctl` calls remain off unless a local operator deliberately starts
+  PARA with `PARA_ENABLE_POWER_ACTIONS=1`; Render never enables them.
 - Hosted Render instances cannot launch host applications and cannot see files
   from the viewer's computer.
 - First-boot/session state remains in browser storage. Personalization is also
@@ -109,7 +112,9 @@ PARA/
 │           ├── gamepad.js
 │           ├── router.js
 │           ├── screen-manifest.js
-│           ├── services/para-api.js
+│           ├── services/
+│           │   ├── para-api.js
+│           │   └── power-adapter.js
 │           ├── state.js
 │           ├── screens/
 │           │   ├── auth.js
@@ -120,7 +125,8 @@ PARA/
 │           │   └── system.js
 │           └── ui/
 │               ├── components.js
-│               └── control-center.js
+│               ├── control-center.js
+│               └── power-experience.js
 ├── config/services.json
 ├── interfaces/openapi.yaml
 ├── packages/para-protocol/
@@ -157,6 +163,7 @@ PARA/
 │       ├── optical.toml
 │       ├── parastore.toml
 │       ├── personalization.toml
+│       ├── power.toml
 │       ├── pulsewave.toml
 │       ├── recovery.toml
 │       ├── security.toml
@@ -196,7 +203,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.4`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.5`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -209,24 +216,26 @@ PARA/
 | `assets/background-midnight-flow.png` | Supplied Midnight Flow built-in wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add licensed source records and optimized display variants. Read by `state.js` and `personalization.js`. |
 | `assets/background-matte-black.png` | Supplied Matte Black built-in wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add licensed source records and optimized display variants. Read by `state.js` and `personalization.js`. |
 | `assets/para-home-background.png` | Earlier independent purple planet source artwork retained for project history; it is not a selectable wallpaper. | PNG | Asset only. | Remove in a later asset cleanup after release migration review. No runtime file communicates with it. |
-| `assets/para-logo.png` | Official PARA logo supplied by the project owner and used byte-for-byte for system branding. | PNG with alpha | Working; proportions and colors are unchanged. | Add vector/export variants only from the official source artwork. Used by `components.js`, `home.js`, and the startup sequence in `boot.js`. |
+| `assets/para-logo.png` | Official PARA logo supplied by the project owner and used byte-for-byte for system branding and power transitions. | PNG with alpha | Working; proportions and colors are unchanged. | Add vector/export variants only from the official source artwork. Used by `components.js`, `home.js`, `boot.js`, and `power-experience.js`. |
 | `assets/bear-home-room.png` | Clean 1672×941 room + furniture + PARA bear with zero baked interface. | PNG | Working and preserved byte-for-byte from the supplied art. | Add separate animation layers when proper assets exist. Used only by `libraries.js`. |
-| `styles.css` | Complete consumer design system: black/purple atmosphere, translucent panels, console spacing, 180–250 ms focus motion, disabled states, setup, apps, Bear Home, and system pages. | Modern responsive CSS | Working. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
-| `src/app.js` | Runtime composition, route transitions, Control Center lifecycle, profile hydration, actions, controller prompts, and service activation. | JavaScript | Working. | Split domain controllers and add typed error boundaries. Talks to every screen, router, input, state, overlay, and API adapter. |
+| `styles.css` | Complete consumer design system: black/purple atmosphere, translucent panels, console spacing, 180–250 ms focus motion, disabled states, setup, apps, Bear Home, system pages, power confirmation, and full-screen power sequences. | Modern responsive CSS | Working. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
+| `src/app.js` | Runtime composition, route transitions, Control Center lifecycle, profile hydration, actions, controller prompts, service activation, and power-input locking. | JavaScript | Working. | Split domain controllers and add typed error boundaries. Talks to every screen, router, input, state, overlay, and API adapter. |
 | `src/router.js` | Restricts navigation to the screen manifest and keeps an in-shell back stack. | JavaScript + hash routing | Working. | Add route guards and activity suspension when real games/apps exist. |
 | `src/focus-manager.js` | Geometry-based directional focus, pointer focus, range adjustment, Tab compatibility, Enter, Escape, PARA tap/hold, and shoulder navigation. | JavaScript DOM APIs | Working. | Add wrap policies, virtual lists, RTL, focus groups, and announcements. |
 | `src/gamepad.js` | Normalizes Browser Gamepad input, detects controller families, and maps a dedicated or fallback button to PARA tap/hold. | JavaScript Gamepad API | Working when the browser exposes a controller. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
 | `src/state.js` | Stores first boot, local session, accessibility, selected Bear collection, and separate background/Control Center preferences for every profile. It maps the four built-in wallpaper ids to the supplied image files and still reads older profile ids safely. | JavaScript `localStorage` plus gateway synchronization | Working; selected wallpaper, fitting, and dimming survive navigation and restart. It is not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
 | `src/screen-manifest.js` | Authoritative set of 23 reachable screens. The Control Center is an overlay, not a route. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
-| `src/services/para-api.js` | One client boundary for capabilities, applications, host state, PipeWire controls, profile personalization, files, and custom-image upload. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
+| `src/services/para-api.js` | One client boundary for capabilities, applications, host state, PipeWire controls, profile personalization, files, custom-image upload, and fixed power requests. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
+| `src/services/power-adapter.js` | Separates session visuals from optional Linux suspend/reboot/poweroff requests. It also performs the browser restart handoff and graceful close attempt. | JavaScript Fetch, session storage, window lifecycle APIs | Working. Hosted poweroff ends permanently black if the window cannot close; local host actions require the gateway capability. | Replace browser lifecycle fallbacks with a dedicated installed shell bridge. Communicates with `para-api.js` and `power-experience.js`. |
 | `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
 | `src/screens/boot.js` | Startup, five reserved intro stages, and Welcome → Display → Network → Accessibility → Privacy → Account/Profile → Ready setup. | JavaScript + CSS animation | Working. Display/network values are live; final rendered startup assets do not exist yet. | Replace each animation stage without changing routing; add real calibration providers. |
 | `src/screens/auth.js` | “Who’s playing?”, Player One, Guest, selected-profile Continue, and Switch Profile. | JavaScript | Working as a local session flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
 | `src/screens/home.js` | Wallpaper-first PARA Home with exactly Continue, Explore, Create, Community, and System as a single horizontal tab row. Focus replaces one contextual strip; Explore and Create consume discovered applications, while System exposes only capability-backed actions. | JavaScript + inline SVG | Working. No Home dashboard cards, permanent widgets, fictional activity, or invented statistics are rendered. | Add resumable-activity and community providers; their existing quiet states will then be replaced with real content. Communicates with `para-api.js`, `state.js`, controller state, and the shared focus manager. |
 | `src/screens/libraries.js` | Installed Apps from the gateway, launch routing, clean Bear Home art, capability-gated spatial hotspots, and read-only file lists. | JavaScript | Working. Bear Home is one app; room controls exist only for readable folders or mounted media. | Add file opening via portals, indexed media, thumbnails, and mounted-volume navigation after permission design. |
 | `src/screens/personalization.js` | Renders the four supplied built-ins first, live focus preview, click/confirm selection, staged Apply/Cancel, fitting, dimming, default restoration, then the separate custom-background chooser. It also owns Control Center arrangement. | JavaScript DOM events + platform file input | Working. A card press moves focus to the always-visible Apply action; built-ins work everywhere. The PNG/JPEG/WebP system chooser and upload appear only in a writable local Linux session. | Add approved-background policy once the account permission service exists. Communicates with `state.js`, `para-api.js`, and the shared focus manager. |
-| `src/screens/system.js` | Controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. | JavaScript | Working with live information and safe local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
+| `src/screens/system.js` | Controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. Its Power screen exposes Return Home, Sleep, Restart PARA, Turn Off PARA, Sign Out, and Recovery, with a focused shutdown confirmation. | JavaScript | Working with live information and safe local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
 | `src/ui/control-center.js` | Builds the overlay without leaving the active route and filters controls against actual gateway/controller capability. | JavaScript templates + Fetch | Working. Notifications and app switching are absent because no provider exists. | Add providers for running apps and notifications, then expose them automatically. |
+| `src/ui/power-experience.js` | Owns the Sleep state, controller/input lock, shutdown confirmation support, and the exact 8000 ms restart/shutdown timeline using the official logo. | JavaScript timers + DOM/CSS state | Working. Sleep restores the current session surface; shutdown remains black if closing is unavailable; restart re-enters the startup sequence. | Synchronize against native session lifecycle events once PARA runs as an installed shell. Communicates with `power-adapter.js`, `app.js`, and `styles.css`. |
 
 ## Frontend navigation
 
@@ -281,6 +290,16 @@ Prompt labels are controller-aware. Xbox uses A/B/X/Y, PlayStation symbols are
 shown only for an identified PlayStation controller, Nintendo uses its layout,
 and generic/PARA controls use Blue/Red/Green/Yellow names.
 
+The Power route uses the same focus manager. Sleep fades to the official logo,
+then to black; the next keyboard, pointer, or controller input restores the
+previous screen when the host session resumes. Turn Off requires a Cancel-first
+confirmation. Restart and confirmed Turn Off lock all normal input and share an
+8000 ms sequence: interface fade from 0–1 seconds, logo arrival from 1–2,
+message/pulse from 2–5.5, message and glow contraction from 5.5–7, and logo fade
+from 7–8. At exactly 8 seconds the rendered state is solid black. A browser
+restart waits briefly on black, then enters the startup sequence; a refused
+window-close leaves shutdown black without an error surface.
+
 ## Control Center and personalization
 
 A short PARA action opens `#para-overlay` above the current route; closing it
@@ -330,8 +349,8 @@ gateway for the corresponding XDG directory or mounted-media collection.
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `services/gateway/server.py` | Serves PARA Home plus versioned JSON/image endpoints, security headers, bind policy, bounded request validation, and optional app launch. | Python standard library HTTP server | Working. Hosted binds disable local writes and controls. | Replace transport for production scale while retaining the API and safety policy. Calls `system_layer.py`. |
-| `services/gateway/system_layer.py` | Reads identity, storage, network, XDG folders, apps, and mounts; classifies detected application roles from real desktop metadata; controls PipeWire through exact `wpctl` arguments; validates and atomically persists per-profile settings and PNG/JPEG/WebP backgrounds. | Python standard library + Linux files/APIs + `gio`/`wpctl` | Working for unprivileged local sessions; app launch remains explicit opt-in. | Split domains into narrow D-Bus/portal services, add account authorization, udev/udisks2 events, and transactional migrations. |
+| `services/gateway/server.py` | Serves PARA Home plus versioned JSON/image endpoints, security headers, bind policy, bounded request validation, optional app launch, and optional fixed power actions. | Python standard library HTTP server | Working. Hosted binds disable local writes, application launch, and Linux power calls. | Replace transport for production scale while retaining the API and safety policy. Calls `system_layer.py`. |
+| `services/gateway/system_layer.py` | Reads identity, storage, network, XDG folders, apps, and mounts; classifies detected application roles; controls PipeWire; persists per-profile settings/images; and exposes only fixed `systemctl suspend`, `reboot`, or `poweroff` argument arrays after explicit local opt-in. | Python standard library + Linux files/APIs + `gio`/`wpctl`/`systemctl` | Working for local sessions; application launch and Linux power actions remain separate explicit opt-ins. | Split domains into narrow D-Bus/portal services, add polkit authorization, account authorization, udev/udisks2 events, and transactional migrations. |
 | `interfaces/openapi.yaml` | Contract for all gateway endpoints. | OpenAPI 3.1 | Current. | Add complete component schemas and generated clients. |
 | `packages/para-protocol/src/index.ts` | Shared API/controller/application types. | TypeScript | Current source package. | Generate from OpenAPI and publish internally. |
 | `config/services.json` | Declares operational and contract-only domains. | JSON | Working. | Add schema validation and runtime capability discovery. |
@@ -374,6 +393,7 @@ UI:
 | `recovery.toml` | Interface actions | Signed recovery image and verified rollback. |
 | `parastore.toml` | Contract only; no route | Signed catalog, packages, entitlements, payments, moderation. |
 | `personalization.toml` | Local session | Account-authorized per-profile settings portal and family policy. |
+| `power.toml` | Local opt-in | Dedicated session power broker over systemd-logind and polkit. |
 | `security.toml` | Contract only; no route | polkit, systemd sandboxing, Landlock/bubblewrap, signature verification. |
 | `updates.toml` | Contract only; no route | Signed atomic updater with rollback. |
 | `vrus.toml` | Contract only; no route | OpenXR, PipeWire, Wayland, and capability-scoped Bear Home data. |
@@ -392,7 +412,7 @@ UI:
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `scripts/dev.sh` | Starts the loopback gateway; optional app launch requires an environment flag. | Bash | Working. | Live reload and structured logging. |
+| `scripts/dev.sh` | Starts the loopback gateway; optional app launch and Linux power operations require separate environment flags. | Bash | Working. | Live reload and structured logging. |
 | `scripts/render-start.sh` | Binds to Render's `PORT` with explicit nonlocal permission and no app launching. | Bash | Working. | Replace transport only if traffic requires it. |
 | `scripts/check.sh` | Runs structural validation, consumer-copy audit, browser entry-module parsing, unit tests, shell syntax, and Python compilation. | Bash | Working. | Add CSS lint, browser accessibility, and contract diffs. |
 | `scripts/smoke.sh` | Starts a temporary local gateway and checks health. | Bash + Python | Working. | Add endpoint and concurrency checks. |
@@ -402,8 +422,8 @@ UI:
 | `tools/audit_consumer_ui.mjs` | Renders every screen and setup step, then rejects engineering copy or dead-action markers. | JavaScript | Working when Node is installed. | Add browser accessibility-tree and localization audits. |
 | `tools/paractl.py` | Reads health, capabilities, system, storage, network, audio, apps, directories, and one profile's personalization. | Python | Working against a running gateway. | Add D-Bus/event inspection once native services exist. |
 | `tools/package_release.py` | Produces a source archive while excluding Git, caches, builds, and prior archives. | Python | Working. | Add reproducible timestamps, checksums, SBOM, and signatures. |
-| `tests/test_api.py` | Verifies gateway health, host-backed values, hidden app launch, desktop-metadata application roles, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, concurrency, and fuzz tests. |
-| `tests/test_repository.py` | Verifies route renderers, exact clean Bear art, capability-gated hotspots, the five-item contextual Home, PARA tap/hold, consumer copy, Render wiring, and retired-code removal. | Python `unittest` | Working. | Add DOM interaction and visual-regression tests. |
+| `tests/test_api.py` | Verifies gateway health, host-backed values, hidden app launch, desktop-metadata application roles, fixed power commands, opt-in policy, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, concurrency, and fuzz tests. |
+| `tests/test_repository.py` | Verifies route renderers, official assets, Bear hotspots, contextual Home, PARA tap/hold, complete Power actions, exact timeline constants, local opt-in safety, consumer copy, Render wiring, and retired-code removal. | Python `unittest` | Working. | Add DOM interaction and visual-regression tests. |
 
 ## Build and run
 
@@ -451,6 +471,19 @@ PARA_ENABLE_APP_LAUNCH=1 make dev
 Without that flag, Apps contains only working built-in PARA applications, which
 currently means Bear Home. Render never enables Linux application launching.
 
+### Enable real Linux power actions
+
+The normal run keeps system suspend, reboot, and shutdown calls off. To test
+them on a loopback Linux session, deliberately start:
+
+```bash
+PARA_ENABLE_POWER_ACTIONS=1 make dev
+```
+
+This flag makes the Power screen call the real machine's `systemctl suspend`,
+`systemctl reboot`, and `systemctl poweroff` operations. Use it only on a system
+you intend to suspend, restart, or shut down. Render never sets this flag.
+
 ### Validate
 
 ```bash
@@ -466,7 +499,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.4.4.zip`.
+The archive is written to `dist/PARA-0.4.5.zip`.
 
 ## Render deployment
 
@@ -498,6 +531,9 @@ those capabilities require the local gateway on that machine.
   creator applications when local application discovery is explicitly enabled.
 - Running-application switching and notifications are omitted from Control
   Center until real lifecycle and notification providers exist.
+- Browser Sleep is a black rest surface and session restore; only an explicitly
+  enabled local Linux run requests actual suspend. Browser shutdown cannot
+  guarantee tab closure, so its permanent black state is the supported result.
 - Static backgrounds, fit, and dimming work; animated backgrounds are
   intentionally deferred until native shell lifecycle and resource limits exist.
 - ParaStore, remote accounts, purchases, downloads/installation, updates,

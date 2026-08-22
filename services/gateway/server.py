@@ -41,7 +41,7 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
 
 
 class ParaHandler(SimpleHTTPRequestHandler):
-    server_version = "PARA/0.4.4"
+    server_version = "PARA/0.4.5"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(HOME_ROOT), **kwargs)
@@ -141,6 +141,8 @@ class ParaHandler(SimpleHTTPRequestHandler):
             status, result = system_layer.set_audio(str(payload.get("kind", "")), volume=payload.get("volume"), muted=payload.get("muted"))
         elif request.path == "/api/v1/personalization":
             status, result = system_layer.save_personalization(str(payload.get("profile", "")), payload.get("preferences"))
+        elif request.path == "/api/v1/power":
+            status, result = system_layer.request_power_action(str(payload.get("action", "")))
         else:
             self._send_json(404, {"error": "not_found"})
             return
@@ -153,6 +155,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=4173)
     parser.add_argument("--allow-nonlocal", action="store_true", help="Permit a hosted public bind")
     parser.add_argument("--enable-app-launch", action="store_true", help="Expose and launch discovered Linux desktop applications")
+    parser.add_argument("--enable-power-actions", action="store_true", help="Permit fixed suspend, reboot, and poweroff requests on a local bind")
     return parser.parse_args()
 
 
@@ -170,11 +173,13 @@ def main() -> int:
     args = parse_args()
     validate_bind(args.host, args.allow_nonlocal)
     launch_enabled = args.enable_app_launch and not args.allow_nonlocal
+    power_enabled = args.enable_power_actions and not args.allow_nonlocal
     controls_enabled = not args.allow_nonlocal
-    system_layer.configure(launch_enabled=launch_enabled, controls_enabled=controls_enabled)
+    system_layer.configure(launch_enabled=launch_enabled, controls_enabled=controls_enabled, power_enabled=power_enabled)
     server = ThreadingHTTPServer((args.host, args.port), ParaHandler)
     print(f"PARA Home: http://{args.host}:{args.port}")
     print("Linux application launch is enabled." if launch_enabled else "Linux application launch is off.")
+    print("Linux power actions are enabled." if power_enabled else "Linux power actions are off.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

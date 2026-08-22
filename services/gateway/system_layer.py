@@ -17,6 +17,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _launch_enabled = False
 _controls_enabled = False
+_power_enabled = False
 
 BACKGROUND_SELECTIONS = {"para-default", "para-aurora", "para-horizon", "para-midnight", "solid-black", "custom"}
 BACKGROUND_FITS = {"fill", "fit", "center", "stretch"}
@@ -24,10 +25,11 @@ HOME_WIDGETS = {"network", "storage", "system"}
 CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"}
 
 
-def configure(*, launch_enabled: bool, controls_enabled: bool = False) -> None:
-    global _launch_enabled, _controls_enabled
+def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False) -> None:
+    global _launch_enabled, _controls_enabled, _power_enabled
     _launch_enabled = launch_enabled
     _controls_enabled = controls_enabled
+    _power_enabled = power_enabled
 
 
 def health() -> dict[str, Any]:
@@ -71,6 +73,7 @@ def _safe_profile(profile: str) -> bool:
 
 def capabilities() -> dict[str, Any]:
     audio_state = audio()
+    power_available = _power_enabled and shutil.which("systemctl") is not None
     return {
         "personalization": _controls_enabled,
         "custom_backgrounds": _controls_enabled,
@@ -81,8 +84,35 @@ def capabilities() -> dict[str, Any]:
         "controllers": "browser-gamepad",
         "notifications": False,
         "switcher": False,
-        "power": "session",
+        "power": "system" if power_available else "session",
+        "power_actions": ["suspend", "reboot", "poweroff"] if power_available else [],
     }
+
+
+def request_power_action(action: str) -> tuple[int, dict[str, Any]]:
+    operations = {
+        "suspend": ["systemctl", "suspend"],
+        "reboot": ["systemctl", "reboot"],
+        "poweroff": ["systemctl", "poweroff"],
+    }
+    command = operations.get(action)
+    executable = shutil.which("systemctl")
+    if not _power_enabled or not executable:
+        return 403, {"error": "power_unavailable"}
+    if command is None:
+        return 400, {"error": "invalid_power_action"}
+    command[0] = executable
+    try:
+        subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return 503, {"error": "power_action_failed"}
+    return 202, {"accepted": True, "action": action}
 
 
 def personalization(profile: str) -> tuple[int, dict[str, Any]]:

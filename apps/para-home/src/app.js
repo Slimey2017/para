@@ -22,6 +22,11 @@ import {
 } from "./screens/personalization.js";
 import { controlCenterShell, populateControlCenter } from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
+import { takeRestartSequence } from "./services/power-adapter.js";
+import {
+  beginPowerSequence, beginSleep, cancelTurnOffConfirmation, confirmTurnOff,
+  consumePowerInput, openTurnOffConfirmation,
+} from "./ui/power-experience.js";
 
 const root = document.querySelector("#para-app");
 const overlay = document.querySelector("#para-overlay");
@@ -134,7 +139,8 @@ function render(route) {
     const timer = setTimeout(() => router.go(startupDestination(), { replace: true }), 850);
     cleanupScreen = () => clearTimeout(timer);
   } else if (route === "intro") {
-    cleanupScreen = activateIntro(() => router.go("setup", { replace: true }));
+    const restarting = takeRestartSequence();
+    cleanupScreen = activateIntro(() => router.go(restarting ? startupDestination() : "setup", { replace: true }));
   } else if (route === "home") {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
@@ -163,6 +169,7 @@ function render(route) {
 const router = new Router(render);
 
 function navigate(route, options = {}, target = null) {
+  if (consumePowerInput()) return;
   closeControlCenter(false);
   if (navigating || route === router.current()) return;
   navigating = true;
@@ -172,10 +179,13 @@ function navigate(route, options = {}, target = null) {
 }
 
 function confirm(target = focus.current) {
+  if (consumePowerInput()) return;
   if (target && !target.disabled && target.getAttribute("aria-disabled") !== "true") target.click();
 }
 
 function back() {
+  if (consumePowerInput()) return;
+  if (cancelTurnOffConfirmation(focus)) return;
   if (!overlay.hidden) {
     closeControlCenter();
     return;
@@ -192,6 +202,7 @@ function back() {
 }
 
 async function openControlCenter() {
+  if (consumePowerInput()) return;
   if (!overlay.hidden) return;
   overlayReturnFocus = focus.current;
   overlay.innerHTML = controlCenterShell();
@@ -210,17 +221,20 @@ function closeControlCenter(restore = true) {
 }
 
 function paraTap() {
+  if (consumePowerInput()) return;
   if (overlay.hidden) openControlCenter();
   else closeControlCenter();
 }
 
 function paraHold() {
+  if (consumePowerInput()) return;
   closeControlCenter(false);
   if (router.current() === "home") focus.focusFirst();
   else navigate("home", { replace: true });
 }
 
 function shoulder(direction) {
+  if (consumePowerInput()) return;
   const currentIndex = majorSections.indexOf(router.current());
   if (currentIndex < 0) return;
   navigate(majorSections[(currentIndex + direction + majorSections.length) % majorSections.length]);
@@ -228,7 +242,7 @@ function shoulder(direction) {
 
 const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder });
 const gamepad = new GamepadNavigation({
-  move: (direction) => focus.move(direction),
+  move: (direction) => { if (!consumePowerInput()) focus.move(direction); },
   confirm: () => confirm(),
   back,
   paraTap,
@@ -329,7 +343,23 @@ async function handleAction(action, target) {
       navigate("profiles", { replace: true }, target);
       break;
     case "restart-shell":
-      location.reload();
+      closeControlCenter(false);
+      beginPowerSequence("reboot", { returnFocus: target });
+      break;
+    case "enter-sleep":
+      closeControlCenter(false);
+      beginSleep({ returnFocus: target });
+      break;
+    case "confirm-turn-off":
+      openTurnOffConfirmation(focus, target);
+      break;
+    case "cancel-turn-off":
+      cancelTurnOffConfirmation(focus);
+      break;
+    case "turn-off-para":
+      confirmTurnOff();
+      closeControlCenter(false);
+      beginPowerSequence("poweroff", { returnFocus: target });
       break;
     case "reset-first-boot":
       resetState();

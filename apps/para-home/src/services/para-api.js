@@ -18,6 +18,7 @@ export const paraApi = {
   network: () => request("/api/v1/network"),
   audio: () => request("/api/v1/audio"),
   setAudio: (kind, patch) => request("/api/v1/audio", { method: "POST", body: JSON.stringify({ kind, ...patch }) }),
+  power: (action) => request("/api/v1/power", { method: "POST", body: JSON.stringify({ action }) }),
   directories: () => request("/api/v1/directories"),
   collection: (id) => request(`/api/v1/files?collection=${encodeURIComponent(id)}`),
   health: () => request("/api/v1/health"),

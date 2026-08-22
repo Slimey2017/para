@@ -49,6 +49,21 @@ choice previews its supplied artwork live; Apply commits it, while Cancel
 returns to the profile's saved choice. A writable local Linux session also
 offers the system file chooser for a PNG, JPEG, or WebP custom background.
 
+Power includes Return Home, Sleep, Restart PARA, Turn Off PARA, Sign Out, and
+Recovery. Confirmed restart and shutdown use the official logo in an exact
+eight-second sequence. Browser shutdown safely remains black when the tab
+cannot close; browser Sleep restores the current PARA screen on the next input.
+
+Real Linux suspend, reboot, and poweroff calls are off by default. On a local
+machine that you intentionally want PARA to control, enable the fixed
+`systemctl` actions with:
+
+```bash
+PARA_ENABLE_POWER_ACTIONS=1 make dev
+```
+
+This can suspend, restart, or shut down that computer. Render never enables it.
+
 ## Check and package
 
 ```bash

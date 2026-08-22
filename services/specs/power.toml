@@ -1,0 +1,7 @@
+id = "power"
+status = "local-opt-in"
+frontend_routes = ["power", "recovery"]
+current_provider = "services/gateway/system_layer.py"
+future_runtime = "Dedicated session power broker with polkit authorization"
+linux_apis = ["systemd-logind", "systemctl", "polkit"]
+security_note = "The gateway exposes only fixed suspend, reboot, and poweroff operations, on loopback, after an explicit launch flag."

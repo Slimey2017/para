@@ -78,7 +78,30 @@ export function accountScreen() {
 }
 
 export function powerScreen() {
-  return page({ title: "Power", description: "Controls for the PARA session.", eyebrow: "System", body: `<div class="power-grid">${tile({ title: "Return Home", meta: "Go back to PARA Home", route: "home", icon: "⌂", autofocus: true })}${tile({ title: "Restart PARA", meta: "Reload the PARA interface", action: "restart-shell", icon: "↻" })}${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}${tile({ title: "Recovery", meta: "Open PARA recovery choices", route: "recovery", icon: "+" })}</div>` });
+  return page({
+    title: "Power",
+    description: "Choose what PARA should do next.",
+    eyebrow: "System",
+    body: `<div class="power-grid">
+      ${tile({ title: "Return Home", meta: "Return to PARA Home", route: "home", icon: "⌂", autofocus: true, className: "power-tile" })}
+      ${tile({ title: "Sleep", meta: "Enter a low-power rest state", action: "enter-sleep", icon: "◒", className: "power-tile power-tile--primary" })}
+      ${tile({ title: "Restart PARA", meta: "Restart PARA and begin again", action: "restart-shell", icon: "↻", className: "power-tile" })}
+      ${tile({ title: "Turn Off PARA", meta: "Shut down PARA", action: "confirm-turn-off", icon: "○", className: "power-tile power-tile--primary" })}
+      ${tile({ title: "Sign Out", meta: "Return to profile selection", action: "sign-out", icon: "↗", className: "power-tile" })}
+      ${tile({ title: "Recovery", meta: "Open PARA Recovery", route: "recovery", icon: "+", className: "power-tile" })}
+    </div>
+    <div class="power-confirm" data-power-confirm hidden>
+      <section class="power-confirm__card" role="alertdialog" aria-modal="true" aria-labelledby="power-confirm-title" aria-describedby="power-confirm-copy">
+        <span class="power-confirm__symbol" aria-hidden="true">○</span>
+        <h2 id="power-confirm-title">Turn off PARA?</h2>
+        <p id="power-confirm-copy">Any unsaved work may be lost.</p>
+        <div class="power-confirm__actions">
+          <button type="button" class="action-button" data-action="cancel-turn-off" data-autofocus="true">Cancel</button>
+          <button type="button" class="action-button action-button--purple" data-action="turn-off-para">Turn Off</button>
+        </div>
+      </section>
+    </div>`,
+  });
 }
 
 export function healthScreen() {

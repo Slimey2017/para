@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: PARA Linux Gateway API
-  version: 0.4.4
-  description: Linux system information, local profile personalization, safe media controls, and an explicitly enabled local application launcher.
+  version: 0.4.5
+  description: Linux system information, local profile personalization, safe session controls, and explicitly enabled local application and power actions.
 servers:
   - url: http://127.0.0.1:4173/api/v1
 paths:
@@ -52,6 +52,22 @@ paths:
       responses:
         '200': { description: Updated host audio state }
         '404': { description: Audio control is unavailable }
+  /power:
+    post:
+      summary: Request one fixed Linux power operation when local power actions are explicitly enabled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [suspend, reboot, poweroff] }
+      responses:
+        '202': { description: Power request accepted }
+        '400': { description: Unknown power action }
+        '403': { description: System power actions are not enabled }
   /personalization:
     get:
       summary: Read personalization for one PARA profile

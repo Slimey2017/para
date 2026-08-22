@@ -54,6 +54,30 @@ class ApiContractTests(unittest.TestCase):
         self.assertFalse(payload["switcher"])
         self.assertFalse(payload["notifications"])
 
+    def test_power_actions_are_off_until_explicitly_enabled(self):
+        status, payload = resolve("/api/v1/capabilities")
+        action_status, result = system_layer.request_power_action("poweroff")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["power"], "session")
+        self.assertEqual(payload["power_actions"], [])
+        self.assertEqual(action_status, 403)
+        self.assertEqual(result["error"], "power_unavailable")
+
+    def test_power_actions_use_only_fixed_systemctl_arguments(self):
+        system_layer.configure(launch_enabled=False, controls_enabled=True, power_enabled=True)
+        with patch("system_layer.shutil.which", return_value="/usr/bin/systemctl"), patch("system_layer.subprocess.Popen") as process:
+            status, payload = system_layer.request_power_action("suspend")
+            self.assertEqual(status, 202)
+            self.assertTrue(payload["accepted"])
+            process.assert_called_once()
+            self.assertEqual(process.call_args.args[0], ["/usr/bin/systemctl", "suspend"])
+            self.assertNotIn("shell", process.call_args.kwargs)
+
+        with patch("system_layer.shutil.which", return_value="/usr/bin/systemctl"), patch("system_layer.subprocess.Popen") as process:
+            status, _ = system_layer.request_power_action("anything-else")
+            self.assertEqual(status, 400)
+            process.assert_not_called()
+
     def test_profile_personalization_is_separate_and_persistent(self):
         with tempfile.TemporaryDirectory() as temporary:
             environment = {"XDG_CONFIG_HOME": os.path.join(temporary, "config"), "XDG_DATA_HOME": os.path.join(temporary, "data")}

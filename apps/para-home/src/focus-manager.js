@@ -17,7 +17,7 @@ export class FocusManager {
   }
 
   candidates() {
-    const scope = document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
+    const scope = document.querySelector(".power-confirm:not([hidden])") || document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
     return [...scope.querySelectorAll(FOCUSABLE)].filter((node) => {
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && node.getAttribute("aria-disabled") !== "true";
@@ -25,7 +25,7 @@ export class FocusManager {
   }
 
   focusFirst() {
-    const scope = document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
+    const scope = document.querySelector(".power-confirm:not([hidden])") || document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
     const preferred = scope.querySelector("[data-autofocus='true']");
     const target = preferred || this.candidates()[0];
     if (target) requestAnimationFrame(() => this.setCurrent(target, true));

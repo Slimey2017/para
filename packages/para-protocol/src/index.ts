@@ -50,7 +50,8 @@ export interface ParaCapabilities {
   controllers: "browser-gamepad";
   notifications: false;
   switcher: false;
-  power: "session";
+  power: "session" | "system";
+  power_actions: Array<"suspend" | "reboot" | "poweroff">;
 }
 
 export interface ParaProfilePreferences {
@@ -72,6 +73,7 @@ export const apiPaths = {
   storage: "/api/v1/storage",
   network: "/api/v1/network",
   audio: "/api/v1/audio",
+  power: "/api/v1/power",
   personalization: "/api/v1/personalization",
   customBackground: "/api/v1/backgrounds/custom",
   directories: "/api/v1/directories",

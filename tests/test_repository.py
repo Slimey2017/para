@@ -105,6 +105,40 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("paraHold", focus)
         self.assertIn("controlCenterShell", app)
 
+    def test_power_screen_has_real_routes_and_exact_shutdown_timeline(self):
+        system_screen = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
+        screen = system_screen.split("export function powerScreen()", 1)[1].split("export function healthScreen()", 1)[0]
+        experience = (ROOT / "apps/para-home/src/ui/power-experience.js").read_text(encoding="utf-8")
+        adapter = (ROOT / "apps/para-home/src/services/power-adapter.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        gateway = (ROOT / "services/gateway/system_layer.py").read_text(encoding="utf-8")
+        for title in ["Return Home", "Sleep", "Restart PARA", "Turn Off PARA", "Sign Out", "Recovery"]:
+            self.assertEqual(screen.count(f'title: "{title}"'), 1)
+        self.assertIn("Turn off PARA?", screen)
+        self.assertIn("Any unsaved work may be lost.", screen)
+        self.assertIn("POWER_SEQUENCE_DURATION_MS = 8000", experience)
+        for marker in ["FADE_END: 1000", "LOGO_END: 2000", "MESSAGE_OUT: 5500", "GLOW_CONTRACT: 7000"]:
+            self.assertIn(marker, experience)
+        self.assertIn('./assets/para-logo.png', experience)
+        self.assertIn('"Turning off PARA"', experience)
+        self.assertIn('"Entering Sleep"', experience)
+        self.assertIn('"Restarting PARA"', experience)
+        self.assertIn("window.close()", adapter)
+        self.assertIn('location.replace(destination)', adapter)
+        for action in ["enter-sleep", "confirm-turn-off", "cancel-turn-off", "turn-off-para", "restart-shell"]:
+            self.assertIn(f'case "{action}"', app)
+        self.assertIn('["systemctl", "suspend"]', gateway)
+        self.assertIn('["systemctl", "reboot"]', gateway)
+        self.assertIn('["systemctl", "poweroff"]', gateway)
+        self.assertIn("if not _power_enabled", gateway)
+
+    def test_host_power_requires_local_opt_in(self):
+        launcher = (ROOT / "scripts/dev.sh").read_text(encoding="utf-8")
+        hosted = (ROOT / "scripts/render-start.sh").read_text(encoding="utf-8")
+        self.assertIn("PARA_ENABLE_POWER_ACTIONS", launcher)
+        self.assertIn("--enable-power-actions", launcher)
+        self.assertNotIn("--enable-power-actions", hosted)
+
     def test_banned_consumer_terms_are_absent(self):
         banned = re.compile(r"\b(mock|stub|prototype|frontend|backend|simulated)\b", re.IGNORECASE)
         for path in (ROOT / "apps/para-home").rglob("*"):

@@ -14,7 +14,7 @@ REQUIRED_SCREENS = {
     "network", "account", "power", "health", "recovery", "personalization", "background",
     "control-center-settings",
 }
-REQUIRED_SERVICES = {"accounts", "bear-home", "hardware", "network", "optical", "parastore", "pulsewave", "recovery", "security", "updates", "vrus"}
+REQUIRED_SERVICES = {"accounts", "bear-home", "hardware", "network", "optical", "parastore", "power", "pulsewave", "recovery", "security", "updates", "vrus"}
 
 
 def fail(message: str) -> None:
@@ -58,6 +58,8 @@ def main() -> int:
         ROOT / "apps/para-home/assets/background-violet-horizon.png",
         ROOT / "apps/para-home/assets/background-midnight-flow.png",
         ROOT / "apps/para-home/assets/background-matte-black.png",
+        ROOT / "apps/para-home/src/services/power-adapter.js",
+        ROOT / "apps/para-home/src/ui/power-experience.js",
         ROOT / "services/gateway/server.py",
         ROOT / "services/gateway/system_layer.py",
         ROOT / "interfaces/openapi.yaml",

@@ -6,6 +6,7 @@
     { "id": "accounts", "name": "Local Profiles", "kind": "system", "status": "local-session", "privileged": false },
     { "id": "personalization", "name": "Profile Personalization", "kind": "system", "status": "local-session", "privileged": false },
     { "id": "audio", "name": "Session Audio", "kind": "system", "status": "local-session", "privileged": false },
+    { "id": "power", "name": "System Power", "kind": "system", "status": "local-opt-in", "privileged": true },
     { "id": "bear-home", "name": "Bear Home Files", "kind": "system", "status": "read-only", "privileged": false },
     { "id": "hardware", "name": "Hardware Information", "kind": "hardware", "status": "read-only", "privileged": false },
     { "id": "network", "name": "Networking", "kind": "system", "status": "read-only", "privileged": false },
