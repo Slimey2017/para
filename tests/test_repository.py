@@ -85,12 +85,14 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(artwork.read_bytes()).hexdigest(), digest)
         state = (ROOT / "apps/para-home/src/state.js").read_text(encoding="utf-8")
         screen = (ROOT / "apps/para-home/src/screens/personalization.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
         self.assertNotIn('kind: "gradient"', state)
         self.assertNotIn('kind: "solid"', state)
         for name in ["Aurora Current", "Violet Horizon", "Midnight Flow", "Matte Black"]:
             self.assertIn(f'name: "{name}"', state)
-        for action in ["apply-background", "cancel-background-selection", "restore-background-default", "open-background-picker"]:
+        for action in ["preview-background", "apply-background", "cancel-background-selection", "restore-background-default", "open-background-picker"]:
             self.assertIn(f'data-action="{action}"', screen)
+            self.assertIn(f'case "{action}"', app)
         self.assertIn("Add Custom Background", screen)
 
     def test_para_button_supports_tap_and_hold(self):

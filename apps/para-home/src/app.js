@@ -17,7 +17,7 @@ import {
 import {
   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
   cancelBackgroundPreview, applyCustomBackground, applyBackgroundSelection,
-  cancelBackgroundSelection, setBackgroundFit, restoreDefaultBackground,
+  cancelBackgroundSelection, selectBackgroundPreview, setBackgroundFit, restoreDefaultBackground,
   controlCenterSettingsScreen, activateControlCenterSettings,
 } from "./screens/personalization.js";
 import { controlCenterShell, populateControlCenter } from "./ui/control-center.js";
@@ -405,6 +405,9 @@ async function handleAction(action, target) {
         schedulePreferenceSave();
         rerender();
       } else toast("That image couldn’t be applied");
+      break;
+    case "preview-background":
+      selectBackgroundPreview(target.dataset.backgroundId, focus);
       break;
     case "apply-background":
       if (applyBackgroundSelection()) {

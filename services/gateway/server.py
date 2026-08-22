@@ -41,7 +41,7 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
 
 
 class ParaHandler(SimpleHTTPRequestHandler):
-    server_version = "PARA/0.4.3"
+    server_version = "PARA/0.4.4"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(HOME_ROOT), **kwargs)
@@ -50,6 +50,8 @@ class ParaHandler(SimpleHTTPRequestHandler):
         sys.stdout.write(f"[para] {self.address_string()} {format_string % args}\n")
 
     def end_headers(self) -> None:
+        if not self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")

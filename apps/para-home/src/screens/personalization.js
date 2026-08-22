@@ -30,7 +30,7 @@ function backgroundName(selection) {
 
 function backgroundChoice(id, option, selected, autofocus) {
   const visual = `style="--choice-image:url('${option.image}');--choice-color:${option.color}"`;
-  return `<button type="button" class="background-choice ${selected ? "is-selected" : ""}" data-background-id="${id}" aria-label="Preview ${escapeHtml(option.name)}" ${visual} ${autofocus ? "data-autofocus='true'" : ""}><span class="background-choice__visual" aria-hidden="true"></span><strong>${escapeHtml(option.name)}</strong><small>${selected ? "Current" : "Preview"}</small></button>`;
+  return `<button type="button" class="background-choice ${selected ? "is-selected" : ""}" data-action="preview-background" data-background-id="${id}" aria-label="Preview ${escapeHtml(option.name)}" aria-pressed="${selected}" ${visual} ${autofocus ? "data-autofocus='true'" : ""}><span class="background-choice__visual" aria-hidden="true"></span><strong>${escapeHtml(option.name)}</strong><small>${selected ? "Current" : "Preview"}</small></button>`;
 }
 
 export function backgroundScreen() {
@@ -42,7 +42,7 @@ export function backgroundScreen() {
     description: "Personal to this profile.",
     eyebrow: "Personalization",
     className: "background-page",
-    body: `<div class="background-live-wallpaper profile-wallpaper" aria-hidden="true"><span></span></div><section class="background-preview-status" aria-live="polite"><span>Preview</span><strong data-background-preview-name>${escapeHtml(backgroundName(selected))}</strong></section><section class="background-section"><div class="section-heading"><h2>PARA backgrounds</h2></div><div class="background-grid">${included}</div><div class="background-apply-bar"><button class="action-button action-button--ghost" data-action="cancel-background-selection">Cancel</button><button class="action-button" data-action="apply-background">Apply</button></div></section><section class="custom-background-section"><button class="add-custom-background" data-action="open-background-picker" data-custom-background hidden><span aria-hidden="true">＋</span><strong>Add Custom Background</strong><small>PNG, JPEG, or WebP</small></button><input type="file" accept="image/png,image/jpeg,image/webp" data-background-input hidden /></section><section class="background-controls panel"><div class="background-control"><div><strong>Fitting</strong><small>Choose how the image fills the screen</small></div><div class="segmented">${["fill", "fit", "center", "stretch"].map((fit) => `<button data-action="set-background-fit" data-background-fit="${fit}" class="${preferences.background.fit === fit ? "is-selected" : ""}">${fit[0].toUpperCase()}${fit.slice(1)}</button>`).join("")}</div></div><label class="background-control"><div><strong>Background dimming</strong><small><output data-dim-value>${preferences.background.dim}%</output></small></div><input type="range" min="0" max="80" step="2" value="${preferences.background.dim}" data-background-dim /></label><button class="list-row reset-background" data-action="restore-background-default"><span class="list-row__icon">↺</span><span class="list-row__body"><span class="list-row__title">Restore PARA Default</span><span class="list-row__meta">Use Aurora Current with the standard fitting and dimming</span></span></button></section><div class="background-confirm" data-background-confirm hidden><div class="background-confirm__card" role="dialog" aria-modal="true" aria-label="Preview custom background"><img data-background-preview alt="Custom background preview" /><h2>Use this background?</h2><div><button class="action-button action-button--ghost" data-action="cancel-background-preview">Cancel</button><button class="action-button" data-action="apply-custom-background">Apply</button></div></div></div>`,
+    body: `<div class="background-live-wallpaper profile-wallpaper" aria-hidden="true"><span></span></div><section class="background-preview-status" aria-live="polite"><span>Preview</span><strong data-background-preview-name>${escapeHtml(backgroundName(selected))}</strong></section><section class="background-section"><div class="section-heading"><h2>PARA backgrounds</h2><div class="background-apply-bar"><button class="action-button action-button--ghost" data-action="cancel-background-selection">Cancel</button><button class="action-button" data-action="apply-background">Apply</button></div></div><div class="background-grid">${included}</div></section><section class="custom-background-section"><button class="add-custom-background" data-action="open-background-picker" data-custom-background hidden><span aria-hidden="true">＋</span><strong>Add Custom Background</strong><small>PNG, JPEG, or WebP</small></button><input type="file" accept="image/png,image/jpeg,image/webp" data-background-input hidden /></section><section class="background-controls panel"><div class="background-control"><div><strong>Fitting</strong><small>Choose how the image fills the screen</small></div><div class="segmented">${["fill", "fit", "center", "stretch"].map((fit) => `<button data-action="set-background-fit" data-background-fit="${fit}" class="${preferences.background.fit === fit ? "is-selected" : ""}">${fit[0].toUpperCase()}${fit.slice(1)}</button>`).join("")}</div></div><label class="background-control"><div><strong>Background dimming</strong><small><output data-dim-value>${preferences.background.dim}%</output></small></div><input type="range" min="0" max="80" step="2" value="${preferences.background.dim}" data-background-dim /></label><button class="list-row reset-background" data-action="restore-background-default"><span class="list-row__icon">↺</span><span class="list-row__body"><span class="list-row__title">Restore PARA Default</span><span class="list-row__meta">Use Aurora Current with the standard fitting and dimming</span></span></button></section><div class="background-confirm" data-background-confirm hidden><div class="background-confirm__card" role="dialog" aria-modal="true" aria-label="Preview custom background"><img data-background-preview alt="Custom background preview" /><h2>Use this background?</h2><div><button class="action-button action-button--ghost" data-action="cancel-background-preview">Cancel</button><button class="action-button" data-action="apply-custom-background">Apply</button></div></div></div>`,
   });
 }
 
@@ -51,6 +51,7 @@ function updateBackgroundChoiceState(session) {
     const id = choice.dataset.backgroundId;
     choice.classList.toggle("is-selected", id === normalizedSelection(session.committed));
     choice.classList.toggle("is-previewing", id === normalizedSelection(session.staged));
+    choice.setAttribute("aria-pressed", String(id === normalizedSelection(session.staged)));
     const note = choice.querySelector("small");
     if (note) note.textContent = id === normalizedSelection(session.committed) ? "Current" : id === normalizedSelection(session.staged) ? "Previewing" : "Preview";
   });
@@ -70,6 +71,14 @@ function stageBuiltInBackground(id) {
   if (!activeBackgroundSession || !BUILT_IN_BACKGROUND_IDS.includes(id)) return;
   activeBackgroundSession.staged = id;
   showSessionPreview(activeBackgroundSession);
+}
+
+export function selectBackgroundPreview(id, focus) {
+  if (!BUILT_IN_BACKGROUND_IDS.includes(id)) return false;
+  stageBuiltInBackground(id);
+  const apply = document.querySelector("[data-action='apply-background']");
+  if (apply) requestAnimationFrame(() => focus.setCurrent(apply, true));
+  return true;
 }
 
 function closeCustomConfirmation({ restore = true } = {}) {

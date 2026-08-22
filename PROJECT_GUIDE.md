@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.4.3 is the first working skeleton of a Linux-powered home console/PC
+PARA 0.4.4 is the first working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -196,7 +196,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.3`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.4`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -224,7 +224,7 @@ PARA/
 | `src/screens/auth.js` | “Who’s playing?”, Player One, Guest, selected-profile Continue, and Switch Profile. | JavaScript | Working as a local session flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
 | `src/screens/home.js` | Wallpaper-first PARA Home with exactly Continue, Explore, Create, Community, and System as a single horizontal tab row. Focus replaces one contextual strip; Explore and Create consume discovered applications, while System exposes only capability-backed actions. | JavaScript + inline SVG | Working. No Home dashboard cards, permanent widgets, fictional activity, or invented statistics are rendered. | Add resumable-activity and community providers; their existing quiet states will then be replaced with real content. Communicates with `para-api.js`, `state.js`, controller state, and the shared focus manager. |
 | `src/screens/libraries.js` | Installed Apps from the gateway, launch routing, clean Bear Home art, capability-gated spatial hotspots, and read-only file lists. | JavaScript | Working. Bear Home is one app; room controls exist only for readable folders or mounted media. | Add file opening via portals, indexed media, thumbnails, and mounted-volume navigation after permission design. |
-| `src/screens/personalization.js` | Renders the four supplied built-ins first, live focus preview, staged Apply/Cancel, fitting, dimming, default restoration, then the separate custom-background chooser. It also owns Control Center arrangement. | JavaScript DOM events + platform file input | Working. Built-ins work everywhere; the PNG/JPEG/WebP system chooser and upload appear only in a writable local Linux session. | Add approved-background policy once the account permission service exists. Communicates with `state.js`, `para-api.js`, and the shared focus manager. |
+| `src/screens/personalization.js` | Renders the four supplied built-ins first, live focus preview, click/confirm selection, staged Apply/Cancel, fitting, dimming, default restoration, then the separate custom-background chooser. It also owns Control Center arrangement. | JavaScript DOM events + platform file input | Working. A card press moves focus to the always-visible Apply action; built-ins work everywhere. The PNG/JPEG/WebP system chooser and upload appear only in a writable local Linux session. | Add approved-background policy once the account permission service exists. Communicates with `state.js`, `para-api.js`, and the shared focus manager. |
 | `src/screens/system.js` | Controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. | JavaScript | Working with live information and safe local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
 | `src/ui/control-center.js` | Builds the overlay without leaving the active route and filters controls against actual gateway/controller capability. | JavaScript templates + Fetch | Working. Notifications and app switching are absent because no provider exists. | Add providers for running apps and notifications, then expose them automatically. |
 
@@ -466,7 +466,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.4.3.zip`.
+The archive is written to `dist/PARA-0.4.4.zip`.
 
 ## Render deployment
 
