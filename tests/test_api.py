@@ -58,8 +58,8 @@ class ApiContractTests(unittest.TestCase):
     def test_capabilities_do_not_invent_switcher_or_notifications(self):
         status, payload = resolve("/api/v1/capabilities")
         self.assertEqual(status, 200)
-        self.assertFalse(payload["switcher"])
-        self.assertFalse(payload["notifications"])
+        for capability in ["switcher", "notifications", "friends", "downloads", "music"]:
+            self.assertFalse(payload[capability])
 
     def test_power_actions_are_off_until_explicitly_enabled(self):
         status, payload = resolve("/api/v1/capabilities")

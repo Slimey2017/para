@@ -226,11 +226,12 @@ export function restoreDefaultBackground() {
 
 function arrangementRows(ids, labels, preferences, namespace) {
   const hidden = new Set(preferences.hidden);
-  return ids.map((id, index) => `<div class="arrangement-row" data-arrangement-id="${id}"><div><strong>${escapeHtml(labels[id])}</strong><small>${hidden.has(id) ? "Hidden" : "Shown"}</small></div><div><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="-1" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} earlier">↑</button><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="1" ${index === ids.length - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} later">↓</button><button data-action="toggle-${namespace}-item" data-item-id="${id}">${hidden.has(id) ? "Show" : "Hide"}</button></div></div>`).join("");
+  const core = new Set(["home", "power"]);
+  return ids.map((id, index) => `<div class="arrangement-row" data-arrangement-id="${id}"><div><strong>${escapeHtml(labels[id])}</strong><small>${core.has(id) ? "Always shown" : hidden.has(id) ? "Hidden" : "Shown"}</small></div><div><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="-1" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} earlier">↑</button><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="1" ${index === ids.length - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} later">↓</button>${core.has(id) ? "" : `<button data-action="toggle-${namespace}-item" data-item-id="${id}">${hidden.has(id) ? "Show" : "Hide"}</button>`}</div></div>`).join("");
 }
 
 export function controlCenterSettingsScreen() {
-  return page({ title: "Control Center", description: "Arrange the controls available on this PARA system.", eyebrow: "Personalization", body: `<div class="arrangement-list" data-control-center-arrangement><div class="library-loading library-empty--small"><span></span><strong>Reading controls…</strong></div></div>` });
+  return page({ title: "Control Center", description: "Arrange the controls available on this PARA system.", eyebrow: "Personalization", body: `<div class="arrangement-list" data-control-center-arrangement><div class="library-loading library-empty--small"><span></span><strong>Reading controls…</strong></div></div><button class="list-row reset-control-center" data-action="restore-control-center-order"><span class="list-row__icon">↺</span><span class="list-row__body"><span class="list-row__title">Restore default order</span><span class="list-row__meta">Show available controls in PARA’s standard order</span></span></button>` });
 }
 
 export async function activateControlCenterSettings({ focus, controller }) {
@@ -239,11 +240,16 @@ export async function activateControlCenterSettings({ focus, controller }) {
   let capabilities = {};
   try { capabilities = await paraApi.capabilities(); } catch { capabilities = {}; }
   const allowed = ["home"];
+  if (capabilities.switcher) allowed.push("switcher");
+  if (capabilities.notifications) allowed.push("notifications");
+  if (capabilities.friends) allowed.push("friends");
+  if (capabilities.downloads) allowed.push("downloads");
+  if (capabilities.music) allowed.push("music");
   if (capabilities.network) allowed.push("network");
   if (capabilities.audio) allowed.push("audio");
   if (capabilities.microphone) allowed.push("microphone");
   if (controller.connected) allowed.push("controllers");
-  allowed.push("profile", "settings", "power");
+  allowed.push("profile", "power");
   const preferences = getProfilePreferences().controlCenter;
   const ids = [...preferences.order.filter((id) => allowed.includes(id)), ...allowed.filter((id) => !preferences.order.includes(id))];
   const labels = Object.fromEntries(Object.entries(controlCenterDefinitions).map(([id, item]) => [id, item.title]));

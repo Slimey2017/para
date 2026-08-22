@@ -98,8 +98,21 @@ export function beginPowerSequence(action, { returnFocus = null } = {}) {
   });
 }
 
+function powerConfirmationNode() {
+  const existing = document.querySelector("[data-power-confirm]");
+  if (existing) return existing;
+  const modal = document.createElement("div");
+  modal.className = "power-confirm";
+  modal.dataset.powerConfirm = "";
+  modal.dataset.transientPowerConfirm = "";
+  modal.hidden = true;
+  modal.innerHTML = `<section class="power-confirm__card" role="alertdialog" aria-modal="true" aria-labelledby="power-confirm-title" aria-describedby="power-confirm-copy"><span class="power-confirm__symbol" aria-hidden="true">○</span><h2 id="power-confirm-title">Turn off PARA?</h2><p id="power-confirm-copy">Any unsaved work may be lost.</p><div class="power-confirm__actions"><button type="button" class="action-button" data-action="cancel-turn-off" data-autofocus="true">Cancel</button><button type="button" class="action-button action-button--purple" data-action="turn-off-para">Turn Off</button></div></section>`;
+  document.body.append(modal);
+  return modal;
+}
+
 export function openTurnOffConfirmation(focus, returnFocus) {
-  const modal = document.querySelector("[data-power-confirm]");
+  const modal = powerConfirmationNode();
   if (!modal || activeSequence) return;
   confirmationReturnFocus = returnFocus || focus.current;
   modal.hidden = false;
@@ -112,12 +125,14 @@ export function cancelTurnOffConfirmation(focus) {
   modal.hidden = true;
   if (confirmationReturnFocus?.isConnected) focus.setCurrent(confirmationReturnFocus, true);
   confirmationReturnFocus = null;
+  if (modal.hasAttribute("data-transient-power-confirm")) modal.remove();
   return true;
 }
 
 export function confirmTurnOff() {
   const modal = document.querySelector("[data-power-confirm]:not([hidden])");
-  if (modal) modal.hidden = true;
+  if (modal?.hasAttribute("data-transient-power-confirm")) modal.remove();
+  else if (modal) modal.hidden = true;
   confirmationReturnFocus = null;
 }
 

@@ -26,7 +26,7 @@ _file_operations_enabled = False
 BACKGROUND_SELECTIONS = {"para-default", "para-aurora", "para-horizon", "para-midnight", "solid-black", "custom"}
 BACKGROUND_FITS = {"fill", "fit", "center", "stretch"}
 HOME_WIDGETS = {"network", "storage", "system"}
-CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"}
+CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "friends", "downloads", "music", "network", "audio", "microphone", "controllers", "profile", "settings", "power"}
 
 
 def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False, file_operations_enabled: bool = False) -> None:
@@ -90,6 +90,9 @@ def capabilities() -> dict[str, Any]:
         "controllers": "browser-gamepad",
         "notifications": False,
         "switcher": False,
+        "friends": False,
+        "downloads": False,
+        "music": False,
         "power": "system" if power_available else "session",
         "power_actions": ["suspend", "reboot", "poweroff"] if power_available else [],
         "files": _controls_enabled,
@@ -174,7 +177,7 @@ def _validated_preferences(value: Any) -> dict[str, Any] | None:
             "hidden": _string_list(home.get("hidden"), HOME_WIDGETS, []),
         },
         "controlCenter": {
-            "order": _string_list(control_center.get("order"), CONTROL_CENTER_ITEMS, ["home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"]),
+            "order": _string_list(control_center.get("order"), CONTROL_CENTER_ITEMS, ["home", "switcher", "notifications", "friends", "downloads", "music", "network", "audio", "microphone", "controllers", "profile", "power"]),
             "hidden": _string_list(control_center.get("hidden"), CONTROL_CENTER_ITEMS, []),
         },
     }

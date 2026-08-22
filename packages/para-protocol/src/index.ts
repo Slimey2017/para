@@ -51,6 +51,9 @@ export interface ParaCapabilities {
   controllers: "browser-gamepad";
   notifications: false;
   switcher: false;
+  friends: false;
+  downloads: false;
+  music: false;
   power: "session" | "system";
   power_actions: Array<"suspend" | "reboot" | "poweroff">;
   files: boolean;
@@ -58,6 +61,17 @@ export interface ParaCapabilities {
   file_operations: boolean;
   trash: boolean;
   volume_actions: boolean;
+}
+
+export interface ParaStartupLightCue {
+  color: "violet";
+  intensity: number;
+  pulse?: "soft";
+}
+
+export interface ParaStartupSoundCue {
+  cue: "low-frequency-bed" | "formation-hit" | "all";
+  active: boolean;
 }
 
 export interface ParaFileEntry {

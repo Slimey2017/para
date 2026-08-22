@@ -1,5 +1,5 @@
-const STORAGE_KEY = "para.home.state.v3";
-const LEGACY_STORAGE_KEY = "para.home.state.v2";
+const STORAGE_KEY = "para.home.state.v4";
+const LEGACY_STORAGE_KEYS = ["para.home.state.v3", "para.home.state.v2"];
 
 export const DEFAULT_BACKGROUND_ID = "para-aurora";
 export const BUILT_IN_BACKGROUND_IDS = Object.freeze(["para-aurora", "para-horizon", "para-midnight", "solid-black"]);
@@ -13,8 +13,29 @@ export const BACKGROUND_OPTIONS = Object.freeze({
   "solid-black": { kind: "image", name: "Matte Black", image: "./assets/background-matte-black.png", color: "#020203" },
 });
 
-const DEFAULT_CONTROL_CENTER_ORDER = ["home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"];
+export const DEFAULT_CONTROL_CENTER_ORDER = Object.freeze(["home", "switcher", "notifications", "friends", "downloads", "music", "network", "audio", "microphone", "controllers", "profile", "power"]);
 const DEFAULT_HOME_WIDGET_ORDER = ["network", "storage", "system"];
+
+function detectedSetupChoices() {
+  const locale = typeof navigator !== "undefined" ? navigator.language || "en-US" : "en-US";
+  const [language = "en", region = "US"] = locale.split("-");
+  let timeZone = "UTC";
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* UTC remains active */ }
+  return {
+    inputMode: "keyboard",
+    language,
+    region,
+    timeZone,
+    keyboardLayout: "system",
+    safeArea: 0,
+    networkChoice: "current",
+    accountMode: "offline",
+    profileName: "Player One",
+    gamingAccounts: {},
+    otherAccounts: {},
+    sleepMinutes: 30,
+  };
+}
 
 const defaults = {
   firstBootComplete: false,
@@ -25,6 +46,7 @@ const defaults = {
   highContrast: false,
   largeText: false,
   displayMode: "Living room",
+  setupChoices: detectedSetupChoices(),
   profilePreferences: {},
 };
 
@@ -52,11 +74,16 @@ function mergeProfilePreferences(value = {}) {
 
 function load() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || "{}";
+    const stored = localStorage.getItem(STORAGE_KEY) || LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) || "{}";
     const parsed = JSON.parse(stored);
-    return { ...defaults, ...parsed, profilePreferences: { ...(parsed.profilePreferences || {}) } };
+    return {
+      ...defaults,
+      ...parsed,
+      setupChoices: { ...detectedSetupChoices(), ...(parsed.setupChoices || {}) },
+      profilePreferences: { ...(parsed.profilePreferences || {}) },
+    };
   } catch {
-    return { ...defaults, profilePreferences: {} };
+    return { ...defaults, setupChoices: detectedSetupChoices(), profilePreferences: {} };
   }
 }
 
@@ -71,10 +98,19 @@ export function getProfilePreferences(profile = state.activeProfile || "Player O
 }
 
 export function setState(patch) {
-  state = { ...state, ...patch };
+  state = { ...state, ...patch, ...(patch.setupChoices ? { setupChoices: { ...state.setupChoices, ...patch.setupChoices } } : {}) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   applyPreferences();
   return getState();
+}
+
+export function setSetupChoice(key, value) {
+  return setState({ setupChoices: { [key]: value } });
+}
+
+export function setSetupAccountChoice(group, provider, value) {
+  const choices = state.setupChoices[group] || {};
+  return setState({ setupChoices: { [group]: { ...choices, [provider]: value } } });
 }
 
 export function setProfilePreferences(patch, profile = state.activeProfile || "Player One") {
@@ -101,14 +137,18 @@ export function replaceProfilePreferences(preferences, profile = state.activePro
 }
 
 export function resetState() {
-  state = { ...defaults, profilePreferences: {} };
+  state = { ...defaults, setupChoices: detectedSetupChoices(), profilePreferences: {} };
   localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(LEGACY_STORAGE_KEY);
+  LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   applyPreferences();
 }
 
 export function startupDestination() {
-  if (!state.firstBootComplete) return "intro";
+  return "intro";
+}
+
+export function postStartupDestination() {
+  if (!state.firstBootComplete) return "setup";
   if (!state.loggedIn) return "profiles";
   return "home";
 }
@@ -149,6 +189,9 @@ export function applyPreferences() {
   root.dataset.largeText = String(state.largeText);
   root.dataset.displayMode = state.displayMode;
   root.dataset.backgroundFit = preferences.background.fit;
+  root.dataset.setupLanguage = state.setupChoices.language;
+  root.style.setProperty("--para-safe-area", `${Math.max(0, Math.min(8, Number(state.setupChoices.safeArea) || 0))}vmin`);
+  root.lang = state.setupChoices.language || "en";
   applyWallpaper(wallpaper);
   root.style.setProperty("--profile-wallpaper-dim", String(Math.max(0, Math.min(80, Number(preferences.background.dim) || 0)) / 100));
   root.style.setProperty("--surface-blur", `${Math.max(0, Math.min(24, Number(preferences.background.blur) || 0))}px`);

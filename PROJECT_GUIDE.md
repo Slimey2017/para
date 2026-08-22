@@ -2,18 +2,18 @@
 
 ## Purpose
 
-PARA 0.5.0 is the working skeleton of a Linux-powered home console/PC
+PARA 0.6.0 is the working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
 Linux capabilities.
 
-The current repository boots through the reserved PARA startup sequence,
-completes a seven-step first-time setup, supports local profile selection, opens
+The current repository boots through an exact eight-second PARA ignition,
+completes a 14-chapter first-time setup, supports local profile selection, opens
 PARA Home, lists only applications the current runtime can actually open, and
 provides a classic PARA Files interface over real Linux directories and mounted
 media. PARA Home keeps the selected per-profile background visible,
-the PARA action opens a persistent Control Center overlay, and local PipeWire
+the PARA action opens a compact contextual Control Center overlay, and local PipeWire
 controls appear only when the host exposes them. No fictional catalog,
 application, notification, network, storage, or success data is used.
 
@@ -120,7 +120,8 @@ PARA/
 │           │   └── bear-home-game.js
 │           ├── services/
 │           │   ├── para-api.js
-│           │   └── power-adapter.js
+│           │   ├── power-adapter.js
+│           │   └── startup-adapter.js
 │           ├── state.js
 │           ├── screens/
 │           │   ├── auth.js
@@ -211,7 +212,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.5.0`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.6.0`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -231,12 +232,13 @@ PARA/
 | `src/router.js` | Restricts navigation to the screen manifest and keeps an in-shell back stack. | JavaScript + hash routing | Working. | Add route guards and activity suspension when real games/apps exist. |
 | `src/focus-manager.js` | Geometry-based directional focus, pointer focus, range adjustment, Tab compatibility, Enter, Escape, PARA tap/hold, and shoulder navigation. | JavaScript DOM APIs | Working. | Add wrap policies, virtual lists, RTL, focus groups, and announcements. |
 | `src/gamepad.js` | Normalizes Browser Gamepad input, detects controller families, and maps a dedicated or fallback button to PARA tap/hold. | JavaScript Gamepad API | Working when the browser exposes a controller. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
-| `src/state.js` | Stores first boot, local session, accessibility, and separate background/Control Center preferences for every profile. It maps the four built-in wallpaper ids to supplied image files. | JavaScript `localStorage` plus gateway synchronization | Working; selected wallpaper, fitting, and dimming survive navigation and restart. It is not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
+| `src/state.js` | Stores first boot, the current setup chapter and choices, local session, accessibility, safe area, inactivity sleep, and separate background/Control Center preferences for every profile. It maps the four built-in wallpaper ids to supplied image files. | JavaScript `localStorage` plus gateway synchronization | Working; setup progress and selected wallpaper survive navigation and restart. It is not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
 | `src/screen-manifest.js` | Authoritative set of 22 reachable screens. Bear Home is not a route; the Control Center remains an overlay. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
 | `src/services/para-api.js` | Client boundary for capabilities, applications, Linux state, personalization, PARA Files browse/search/actions, volume actions, custom images, and fixed power requests. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
 | `src/services/power-adapter.js` | Separates session visuals from optional Linux suspend/reboot/poweroff requests. It also performs the browser restart handoff and graceful close attempt. | JavaScript Fetch, session storage, window lifecycle APIs | Working. Hosted poweroff ends permanently black if the window cannot close; local host actions require the gateway capability. | Replace browser lifecycle fallbacks with a dedicated installed shell bridge. Communicates with `para-api.js` and `power-experience.js`. |
+| `src/services/startup-adapter.js` | Defines the exact 8000 ms startup timeline and emits normalized startup sound/button-light cues for a future installed host bridge. | JavaScript Custom Events | Working as the timing and cue contract; it does not claim hardware control. | Connect cues to the PulseWave/console-light service and an approved startup sound asset. Communicates with `boot.js`. |
 | `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
-| `src/screens/boot.js` | Startup, five reserved intro stages, and Welcome → Display → Network → Accessibility → Privacy → Account/Profile → Ready setup. | JavaScript + CSS animation | Working. Display/network values are live; final rendered startup assets do not exist yet. | Replace each animation stage without changing routing; add real calibration providers. |
+| `src/screens/boot.js` | Renders black → violet point → circular ignition → official P formation → PARA wordmark, then Controller → Language & Region → Display Area → Internet → PARA Account → Gaming Accounts → Other Accounts → Privacy → Accessibility → Audio → Power & Sleep → Background → Updates & Storage → Ready. | JavaScript, `requestAnimationFrame`, CSS transitions, Web Audio test tone | Working. The visual startup is exactly 8000 ms; display, network, audio, storage, controller, and background chapters consume actual available data. Unsupported account connections remain disabled and every chapter is skippable where appropriate. | Add signed account providers, full localization, HDR calibration, update status, and the native light/audio bridge. |
 | `src/screens/auth.js` | “Who’s playing?”, Player One, Guest, selected-profile Continue, and Switch Profile. | JavaScript | Working as a local session flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
 | `src/screens/home.js` | Wallpaper-first PARA Home with exactly Continue, Explore, Create, Community, and System as a single horizontal tab row. Focus replaces one contextual strip; Explore and Create consume discovered applications, while System exposes only capability-backed actions. | JavaScript + inline SVG | Working. No Home dashboard cards, permanent widgets, fictional activity, or invented statistics are rendered. | Add resumable-activity and community providers; their existing quiet states will then be replaced with real content. Communicates with `para-api.js`, `state.js`, controller state, and the shared focus manager. |
 | `src/screens/libraries.js` | Installed Apps from the gateway and exact route/Linux application launching. Files appears as one normal built-in app only on a local session. | JavaScript | Working. It contains no Bear Home routing, hotspots, or fake apps. | Add lifecycle and sandbox metadata when the Linux application service exposes it. |
@@ -244,7 +246,7 @@ PARA/
 | `src/future/bear-home-game.js` | Keeps the future Bear Home identity, supplied artwork path, direct-character input model, and room-object vocabulary separate from normal Files. | JavaScript descriptor | Reserved architecture only; it is not routed or rendered. | Build a real explorable 2D game with a separately animated bear and PARA Files service access. |
 | `src/screens/personalization.js` | Renders the four supplied built-ins first, live focus preview, click/confirm selection, staged Apply/Cancel, fitting, dimming, default restoration, then the separate custom-background chooser. It also owns Control Center arrangement. | JavaScript DOM events + platform file input | Working. A card press moves focus to the always-visible Apply action; built-ins work everywhere. The PNG/JPEG/WebP system chooser and upload appear only in a writable local Linux session. | Add approved-background policy once the account permission service exists. Communicates with `state.js`, `para-api.js`, and the shared focus manager. |
 | `src/screens/system.js` | Controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. Its Power screen exposes Return Home, Sleep, Restart PARA, Turn Off PARA, Sign Out, and Recovery, with a focused shutdown confirmation. | JavaScript | Working with live information and safe local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
-| `src/ui/control-center.js` | Builds the overlay without leaving the active route and filters controls against actual gateway/controller capability. | JavaScript templates + Fetch | Working. Notifications and app switching are absent because no provider exists. | Add providers for running apps and notifications, then expose them automatically. |
+| `src/ui/control-center.js` | Builds the compact bottom control strip without leaving the active route, remembers its last focus, filters controls against actual gateway/controller capability, and renders a single contextual card for Network, Sound, Microphone, Controller, Profile, or Power. | JavaScript templates + Fetch + inline SVG | Working. The current experience remains visible, unavailable services stay out, and Power reuses the real sleep/restart/shutdown flows. | Add lifecycle, notification, download, friends, and media providers; their controls are already ordered but stay hidden until real data exists. |
 | `src/ui/power-experience.js` | Owns the Sleep state, controller/input lock, shutdown confirmation support, and the exact 8000 ms restart/shutdown timeline using the official logo. | JavaScript timers + DOM/CSS state | Working. Sleep restores the current session surface; shutdown remains black if closing is unavailable; restart re-enters the startup sequence. | Synchronize against native session lifecycle events once PARA runs as an installed shell. Communicates with `power-adapter.js`, `app.js`, and `styles.css`. |
 
 ## Frontend navigation
@@ -252,14 +254,23 @@ PARA/
 ```text
 Startup
    ↓
+8-second PARA ignition
+   ↓
 First boot complete?
-   ├─ No → Intro animation → Setup Wizard → PARA Home
+   ├─ No → 14-chapter Setup → PARA Home
    └─ Yes
         ↓
 Logged in?
    ├─ No → Profile Selection → Login
    └─ Yes → PARA Home
 ```
+
+First-time setup uses one focused question per chapter and a single thin
+progress line labelled `SETUP · NN / 14`. Its chapter order is Controller,
+Language & Region, Display Area, Internet, PARA Account, Gaming Accounts,
+Other Accounts, Privacy, Accessibility, Audio, Power & Sleep, Background,
+Updates & Storage, and Ready. Account connections are optional; unavailable
+providers are disabled instead of producing a false connection result.
 
 PARA Home retains the required five primary items in one horizontal row. They
 behave as contextual tabs, not giant cards or website links:
@@ -315,12 +326,20 @@ window-close leaves shutdown black without an error surface.
 
 ## Control Center and personalization
 
-A short PARA action opens `#para-overlay` above the current route; closing it
-returns focus to the exact previous control. The gateway capability response is
-the filter for Network, Audio, and Microphone. Browser Gamepad connection state
-is the filter for Controllers. Home, Profile, Quick Settings, and session Power
-are always valid shell actions. Running-app switching and notifications do not
-render because their providers do not exist.
+A short PARA action opens `#para-overlay` above the current route; the current
+game, app, or Home remains visible beneath a light dim and blur. A compact
+icon-first strip rises from the bottom and restores the last selected control.
+Left/right moves across that strip. A useful contextual card appears above the
+focused Network, Sound, Microphone, Controller, Profile, or Power control; up
+moves into it and down returns to the strip. Back returns from a contextual
+control before closing the overlay, and the PARA action closes it immediately.
+
+The gateway capability response filters Network, Sound, and Microphone;
+controller connection state filters Controller; Profile appears only for the
+active profile. Home and Power remain present. Switcher, Notifications,
+Friends, Downloads, and Music keep their preferred ordering but do not render
+until a real provider reports them. Customization stays in Settings →
+Personalization → Control Center rather than occupying the overlay.
 
 Settings → Personalization → Background presents Aurora Current, Violet
 Horizon, Midnight Flow, and Matte Black as large thumbnails backed by the four
@@ -476,12 +495,17 @@ Replay first boot:
 http://127.0.0.1:4173/?reset=1
 ```
 
-The reserved startup sequence is:
+The startup sequence is exactly eight seconds:
 
 ```text
-fade-in → purple and white liquid mixing → water splash revealing the PARA logo
-→ logo melting into a circle → 3D circle reacting to a beat → setup screen
+pure black → violet point → console-button ring → white orbit → official P forms
+→ PARA + Play. Create. Connect. → Setup or the configured session
 ```
+
+The animation runs from a monotonic `requestAnimationFrame` clock. Its adapter
+emits separate sound and physical-button-light cues so installed PARA hardware
+can synchronize without coupling the visual layer to a driver. Until that host
+bridge exists, the cues remain inert and no hardware state is claimed.
 
 ### Show and launch installed Linux desktop apps
 
@@ -535,7 +559,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.5.0.zip`.
+The archive is written to `dist/PARA-0.6.0.zip`.
 
 ## Render deployment
 
@@ -554,8 +578,9 @@ omitted there; those capabilities require the local gateway on that machine.
 ## Current limitations
 
 - PARA Home currently runs in a browser, not a dedicated Wayland session.
-- The intro reserves the required stages with CSS; final rendered audio/video or
-  WebGL assets do not exist.
+- Startup timing, official-logo formation, transition, and hardware cue events
+  work. A production startup sound and physical P-button light bridge still
+  require target hardware integration.
 - Local profiles are session preferences, not authenticated identities.
 - PARA Files reads actual paths in a local session. File changes require the
   explicit file-operation flag and currently use simple conflict refusal rather
@@ -577,9 +602,10 @@ omitted there; those capabilities require the local gateway on that machine.
 - ParaStore, remote accounts, purchases, downloads/installation, updates,
   VR-US, social communication, native PulseWave operations, optical controls,
   and privileged recovery are not exposed.
-- Screen reader, captions, controller assistance, HDR calibration, safe-area
-  calibration, and native controller remapping need real system providers before
-  they can be offered.
+- Safe-area calibration and PARA interface size work now. Full screen-reader
+  control, captions, controller assistance, HDR calibration, update reporting,
+  and native controller remapping still need real system providers before they
+  can be offered.
 
 ## Next milestones
 
@@ -591,8 +617,8 @@ omitted there; those capabilities require the local gateway on that machine.
    sandbox permissions, and capability reporting.
 4. Add indexed content search, thumbnails, transfer progress/cancel, undo,
    portal-scoped file opening, and hotplug events to PARA Files.
-5. Implement a native controller service using existing Linux input stacks and a
-   shared mapping database.
+5. Implement a native controller and console-light service using existing Linux
+   input stacks, a shared mapping database, and the startup cue contract.
 6. Design signed package, update, entitlement, security, and recovery systems
    before exposing ParaStore or privileged controls.
 7. Add a real account/permission provider for parental background approvals and

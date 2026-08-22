@@ -1,8 +1,15 @@
 import { Router } from "./router.js";
 import { FocusManager } from "./focus-manager.js";
 import { GamepadNavigation, keyboardController } from "./gamepad.js";
-import { applyPreferences, getProfilePreferences, getState, replaceProfilePreferences, resetState, setProfilePreferences, setState, startupDestination } from "./state.js";
-import { startupScreen, introScreen, setupScreen, activateIntro, activateSetupNetwork } from "./screens/boot.js";
+import {
+  applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getState, postStartupDestination,
+  replaceProfilePreferences, resetState, setProfilePreferences, setSetupAccountChoice,
+  setSetupChoice, setState, startupDestination,
+} from "./state.js";
+import {
+  SETUP_CHAPTERS, startupScreen, introScreen, setupScreen, activateIntro,
+  activateSetupChapter, playSetupAudioTest, updateSetupControllerStatus,
+} from "./screens/boot.js";
 import { profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
@@ -20,7 +27,10 @@ import {
   cancelBackgroundSelection, selectBackgroundPreview, setBackgroundFit, restoreDefaultBackground,
   controlCenterSettingsScreen, activateControlCenterSettings,
 } from "./screens/personalization.js";
-import { controlCenterShell, populateControlCenter } from "./ui/control-center.js";
+import {
+  collapseControlCenterContext, controlCenterShell, populateControlCenter,
+  resetControlCenterData, showControlCenterContext,
+} from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
 import { takeRestartSequence } from "./services/power-adapter.js";
 import {
@@ -62,6 +72,8 @@ let navigating = false;
 let controllerStatus = keyboardController();
 let overlayReturnFocus = null;
 let preferenceTimer = null;
+let idleSleepTimer = null;
+let overlayCloseTimer = null;
 
 function toast(title, message = "") {
   const node = document.createElement("div");
@@ -80,7 +92,13 @@ function toast(title, message = "") {
 
 function updateClock() {
   const now = new Date();
-  const value = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(now);
+  const setup = getState().setupChoices;
+  let value;
+  try {
+    value = new Intl.DateTimeFormat(`${setup.language || "en"}-${setup.region || "US"}`, { hour: "numeric", minute: "2-digit", timeZone: setup.timeZone || undefined }).format(now);
+  } catch {
+    value = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(now);
+  }
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   document.querySelectorAll("[data-clock]").forEach((clock) => { clock.textContent = value; });
   document.querySelectorAll("[data-greeting]").forEach((node) => { node.textContent = greeting; });
@@ -135,11 +153,11 @@ function render(route) {
   focus.focusFirst();
 
   if (route === "startup") {
-    const timer = setTimeout(() => router.go(startupDestination(), { replace: true }), 850);
-    cleanupScreen = () => clearTimeout(timer);
+    const frame = requestAnimationFrame(() => router.go(startupDestination(), { replace: true }));
+    cleanupScreen = () => cancelAnimationFrame(frame);
   } else if (route === "intro") {
-    const restarting = takeRestartSequence();
-    cleanupScreen = activateIntro(() => router.go(restarting ? startupDestination() : "setup", { replace: true }));
+    takeRestartSequence();
+    cleanupScreen = activateIntro(() => router.go(postStartupDestination(), { replace: true }));
   } else if (route === "home") {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
@@ -158,8 +176,8 @@ function render(route) {
     cleanupScreen = activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
   } else if (route === "control-center-settings") {
     activateControlCenterSettings({ focus, controller: controllerStatus });
-  } else if (route === "setup" && getState().setupStep === 2) {
-    activateSetupNetwork();
+  } else if (route === "setup") {
+    cleanupScreen = activateSetupChapter({ controller: controllerStatus, focus, changed: () => { schedulePreferenceSave(getState().activeProfile || getState().setupChoices.profileName || "Player One"); rerender(); } });
   }
 }
 
@@ -185,6 +203,7 @@ function back() {
   if (cancelTurnOffConfirmation(focus)) return;
   if (filesBack()) return;
   if (!overlay.hidden) {
+    if (collapseControlCenterContext(focus)) return;
     closeControlCenter();
     return;
   }
@@ -196,24 +215,37 @@ function back() {
 async function openControlCenter() {
   if (consumePowerInput()) return;
   if (!overlay.hidden) return;
+  clearTimeout(overlayCloseTimer);
+  overlay.classList.remove("is-closing");
   overlayReturnFocus = focus.current;
   overlay.innerHTML = controlCenterShell();
   overlay.hidden = false;
   updateControllerPrompts();
-  focus.setCurrent(overlay.querySelector(".control-center-close"), true);
   await populateControlCenter({ overlay, controller: controllerStatus, focus });
 }
 
 function closeControlCenter(restore = true) {
   if (overlay.hidden) return;
-  overlay.hidden = true;
-  overlay.innerHTML = "";
-  if (restore && overlayReturnFocus?.isConnected) focus.setCurrent(overlayReturnFocus, true);
-  overlayReturnFocus = null;
+  overlay.classList.add("is-closing");
+  const returnTarget = restore ? overlayReturnFocus : null;
+  clearTimeout(overlayCloseTimer);
+  overlayCloseTimer = setTimeout(() => {
+    overlay.hidden = true;
+    overlay.classList.remove("is-closing");
+    overlay.innerHTML = "";
+    resetControlCenterData();
+    if (returnTarget?.isConnected) focus.setCurrent(returnTarget, true);
+    overlayReturnFocus = null;
+  }, getState().reducedMotion ? 1 : 210);
 }
 
 function paraTap() {
   if (consumePowerInput()) return;
+  if (router.current() === "setup" && getState().setupStep === 0 && controllerStatus.connected) {
+    setSetupChoice("inputMode", "controller");
+    rerender();
+    return;
+  }
   if (overlay.hidden) openControlCenter();
   else closeControlCenter();
 }
@@ -244,7 +276,7 @@ function options() {
 
 const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder, secondary, options });
 const gamepad = new GamepadNavigation({
-  move: (direction) => { if (!consumePowerInput()) focus.move(direction); },
+  move: (direction) => { if (!consumePowerInput()) { resetIdleSleep(); focus.move(direction); } },
   confirm: () => confirm(),
   back,
   paraTap,
@@ -256,6 +288,7 @@ const gamepad = new GamepadNavigation({
     const hadController = controllerStatus.connected;
     controllerStatus = controller;
     updateControllerPrompts();
+    updateSetupControllerStatus(controller);
     document.dispatchEvent(new CustomEvent("para-controllerchange", { detail: controller }));
     if (controller.connected && !hadController) toast("Controller connected", `${controller.typeLabel} controls active`);
   },
@@ -274,10 +307,10 @@ async function hydrateProfile(profile) {
   }
 }
 
-function schedulePreferenceSave() {
+function schedulePreferenceSave(profileOverride = "") {
   clearTimeout(preferenceTimer);
   preferenceTimer = setTimeout(async () => {
-    const profile = getState().activeProfile || "Player One";
+    const profile = profileOverride || getState().activeProfile || "Player One";
     try { await paraApi.savePersonalization(profile, getProfilePreferences(profile)); } catch { /* local state remains active */ }
   }, 240);
 }
@@ -285,6 +318,7 @@ function schedulePreferenceSave() {
 async function loginToHome(profile, target) {
   setState({ loggedIn: true, activeProfile: profile });
   await hydrateProfile(profile);
+  resetIdleSleep();
   navigate("home", { replace: true }, target);
 }
 
@@ -309,11 +343,8 @@ async function openLinuxApplication(target) {
 async function handleAction(action, target) {
   const state = getState();
   switch (action) {
-    case "skip-intro":
-      navigate("setup", { replace: true }, target);
-      break;
     case "setup-next":
-      setState({ setupStep: Math.min(6, state.setupStep + 1) });
+      setState({ setupStep: Math.min(SETUP_CHAPTERS.length - 1, state.setupStep + 1) });
       rerender();
       break;
     case "setup-back":
@@ -321,16 +352,48 @@ async function handleAction(action, target) {
       rerender();
       break;
     case "finish-setup":
-      setState({ firstBootComplete: true, activeProfile: state.activeProfile || "Player One", setupStep: 6 });
-      loginToHome(state.activeProfile || "Player One", target);
+      setState({ firstBootComplete: true, setupStep: SETUP_CHAPTERS.length - 1 });
+      loginToHome(state.activeProfile || state.setupChoices.profileName || "Player One", target);
       break;
-    case "setup-profile":
-      setState({ activeProfile: target.dataset.profile || "Player One" });
+    case "setup-use-controller":
+      if (controllerStatus.connected) setSetupChoice("inputMode", "controller");
       rerender();
       break;
-    case "setup-guest":
-      setState({ activeProfile: "Guest" });
+    case "setup-use-keyboard":
+      setSetupChoice("inputMode", "keyboard");
       rerender();
+      break;
+    case "setup-network-later":
+      setSetupChoice("networkChoice", "later");
+      toast("Network", "Set up later");
+      break;
+    case "setup-account-offline": {
+      const profile = state.setupChoices.profileName?.trim() || "Player One";
+      setState({ activeProfile: profile, setupChoices: { accountMode: "offline", profileName: profile } });
+      toast("Offline profile ready", profile);
+      break;
+    }
+    case "setup-skip-provider":
+      setSetupAccountChoice(target.dataset.providerGroup, target.dataset.provider, "skipped");
+      rerender();
+      break;
+    case "setup-sleep-timer":
+      setSetupChoice("sleepMinutes", Number(target.dataset.value));
+      resetIdleSleep();
+      rerender();
+      break;
+    case "setup-background": {
+      const profile = state.activeProfile || state.setupChoices.profileName || "Player One";
+      setProfilePreferences({ background: { selection: target.dataset.backgroundId } }, profile);
+      schedulePreferenceSave(profile);
+      rerender();
+      break;
+    }
+    case "setup-open-background-picker":
+      document.querySelector("[data-setup-background-input]")?.click();
+      break;
+    case "setup-audio-test":
+      if (!(await playSetupAudioTest())) toast("Sound couldn’t play");
       break;
     case "select-profile":
       setState({ activeProfile: target.dataset.profile || "Player One" });
@@ -406,6 +469,9 @@ async function handleAction(action, target) {
     case "close-control-center":
       closeControlCenter();
       break;
+    case "control-center-open-context":
+      showControlCenterContext(target.dataset.controlCenterId, true, focus);
+      break;
     case "toggle-microphone": {
       try {
         await paraApi.setAudio("microphone", { muted: target.dataset.microphoneMuted !== "true" });
@@ -452,6 +518,12 @@ async function handleAction(action, target) {
     case "toggle-control-center-item":
       togglePreferenceItem("controlCenter", target.dataset.itemId);
       break;
+    case "restore-control-center-order":
+      setProfilePreferences({ controlCenter: { order: [...DEFAULT_CONTROL_CENTER_ORDER], hidden: [] } });
+      schedulePreferenceSave();
+      toast("Control Center restored");
+      rerender();
+      break;
     case "refresh-network":
       activateNetwork();
       break;
@@ -494,19 +566,55 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
-  if (!event.target.matches("[data-audio-volume]")) return;
-  try {
-    const audio = await paraApi.setAudio("output", { volume: Number(event.target.value) });
-    const output = overlay.querySelector("[data-audio-output]");
-    if (output && audio.output) output.textContent = `${audio.output.volume}%`;
-  } catch { /* the control will be refreshed on the next open */ }
+  if (event.target.matches("[data-setup-setting]")) {
+    setSetupChoice(event.target.dataset.setupSetting, event.target.value);
+    updateClock();
+    return;
+  }
+  if (event.target.matches("[data-setup-safe-area]")) {
+    setSetupChoice("safeArea", Number(event.target.value));
+    return;
+  }
+  if (event.target.matches("[data-audio-volume]")) {
+    try {
+      const audio = await paraApi.setAudio("output", { volume: Number(event.target.value) });
+      const output = overlay.querySelector("[data-audio-output]");
+      if (output && audio.output) output.textContent = `${audio.output.volume}%`;
+    } catch { /* the current level remains visible */ }
+  }
 });
 
 document.addEventListener("input", (event) => {
-  if (!event.target.matches("[data-audio-volume]")) return;
-  const output = overlay.querySelector("[data-audio-output]");
-  if (output) output.textContent = `${event.target.value}%`;
+  if (event.target.matches("[data-setup-setting='profileName']")) {
+    setSetupChoice("profileName", event.target.value);
+    return;
+  }
+  if (event.target.matches("[data-setup-safe-area]")) {
+    const value = Number(event.target.value);
+    setSetupChoice("safeArea", value);
+    const output = document.querySelector("[data-safe-area-value]");
+    const frame = document.querySelector(".setup-display-frame");
+    if (output) output.textContent = `${value}%`;
+    if (frame) frame.style.setProperty("--setup-inset", `${value}%`);
+    return;
+  }
+  if (event.target.matches("[data-audio-volume]")) {
+    const output = overlay.querySelector("[data-audio-output]");
+    if (output) output.textContent = `${event.target.value}%`;
+  }
 });
+
+function resetIdleSleep() {
+  clearTimeout(idleSleepTimer);
+  idleSleepTimer = null;
+  const state = getState();
+  const minutes = Number(state.setupChoices.sleepMinutes) || 0;
+  if (!state.firstBootComplete || !state.loggedIn || minutes <= 0) return;
+  idleSleepTimer = setTimeout(() => beginSleep({ returnFocus: focus.current }), minutes * 60_000);
+}
+
+document.addEventListener("pointerdown", resetIdleSleep, { passive: true });
+document.addEventListener("keydown", resetIdleSleep, { passive: true });
 
 if (new URLSearchParams(location.search).get("reset") === "1") {
   resetState();
@@ -519,6 +627,7 @@ async function start() {
   if (state.loggedIn && state.activeProfile) await hydrateProfile(state.activeProfile);
   gamepad.start();
   setInterval(updateClock, 30_000);
+  resetIdleSleep();
   router.resolve();
 }
 

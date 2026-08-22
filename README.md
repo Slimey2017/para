@@ -5,6 +5,12 @@ contains a safe boot-to-PARA-Home experience, live Linux information, an
 overlay Control Center, per-profile backgrounds, an installed-application
 launcher boundary, and PARA Files.
 
+Startup now uses PARA's eight-second ignition signature: pure black, a violet
+point, the console-button ring, the official P forming inside it, then the PARA
+wordmark and “Play. Create. Connect.” First-time setup continues through all 14
+chapters from Controller to Ready; configured profiles transition from the same
+startup directly into their session.
+
 PARA Home is wallpaper-first. Its only permanent navigation is Continue,
 Explore, Create, Community, and System in one horizontal row. Moving focus
 replaces the single contextual strip beneath that row; Home does not invent
@@ -57,6 +63,11 @@ These flags are never enabled by the Render launcher.
 PARA Files also supports Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Delete, F2, Enter,
 Backspace, and address-bar input. Prompts adapt to the identified controller;
 generic PARA controls remain Blue, Red, Green, and Yellow.
+
+The Control Center is a compact bottom strip over the current experience. Its
+available controls come from current Linux/session capabilities; focusing a
+control reveals only the useful live context above it. Home and Power remain
+available, and unavailable services do not fill the strip.
 
 Backgrounds are configured under Settings → Personalization → Background and
 saved separately for each local PARA profile. The included choices are Aurora

@@ -54,7 +54,7 @@ function audit(name, html) {
 }
 
 for (const [name, render] of Object.entries(renderers)) audit(name, render());
-for (let setupStep = 0; setupStep < 7; setupStep += 1) {
+for (let setupStep = 0; setupStep < boot.SETUP_CHAPTERS.length; setupStep += 1) {
   state.setState({ setupStep });
   audit(`setup:${setupStep + 1}`, boot.setupScreen());
 }
@@ -68,4 +68,4 @@ if (failures.length) {
   console.error(`Consumer UI audit failed:\n${failures.join("\n")}`);
   process.exit(1);
 }
-console.log(`Consumer UI audit passed: ${Object.keys(renderers).length + 7} rendered states`);
+console.log(`Consumer UI audit passed: ${Object.keys(renderers).length + boot.SETUP_CHAPTERS.length} rendered states`);

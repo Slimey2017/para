@@ -126,6 +126,51 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("paraHold", focus)
         self.assertIn("controlCenterShell", app)
 
+    def test_startup_is_the_eight_second_para_ignition(self):
+        boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
+        adapter = (ROOT / "apps/para-home/src/services/startup-adapter.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        self.assertIn("STARTUP_DURATION_MS = 8000", adapter)
+        for marker in ["BLACK_END: 1000", "POINT_END: 1250", "RING_END: 1850", "MARK_END: 5000", "BRAND_END: 7000"]:
+            self.assertIn(marker, adapter)
+        self.assertIn('paraLogo("para-ignition__mark")', boot)
+        self.assertIn("requestAnimationFrame(run)", boot)
+        self.assertIn("para-startup-light", adapter)
+        for legacy in ["liquid__blob", "beat-orb", "boot-stage", "melt-logo"]:
+            self.assertNotIn(legacy, boot)
+            self.assertNotIn(legacy, css)
+
+    def test_first_time_setup_has_all_fourteen_chapters(self):
+        boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        chapters = [
+            "Controller", "Language & Region", "Display Area", "Internet", "PARA Account",
+            "Gaming Accounts", "Other Accounts", "Privacy", "Accessibility", "Audio",
+            "Power & Sleep", "Background", "Updates & Storage", "Ready",
+        ]
+        chapter_block = boot.split("export const SETUP_CHAPTERS", 1)[1].split("]);", 1)[0]
+        for chapter in chapters:
+            self.assertEqual(chapter_block.count(f'"{chapter}"'), 1)
+        self.assertIn("SETUP_CHAPTERS.length - 1", app)
+        self.assertIn("setup-journey__line", boot)
+        self.assertNotIn("setup-progress span", (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8"))
+
+    def test_control_center_is_a_compact_contextual_strip(self):
+        control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        for title in ["Home", "Switcher", "Notifications", "Friends", "Downloads", "Music", "Network", "Sound", "Microphone", "Controller", "Profile", "Power"]:
+            self.assertIn(f'title: "{title}"', control)
+        self.assertIn("control-center-strip", control)
+        self.assertIn("control-center-context", control)
+        self.assertIn("lastSelectedId", control)
+        self.assertIn('data-action="enter-sleep"', control)
+        self.assertIn('data-action="restart-shell"', control)
+        self.assertIn('data-action="confirm-turn-off"', control)
+        self.assertNotIn("<h2>Control Center</h2>", control)
+        self.assertNotIn(">Customize<", control)
+        self.assertNotIn("control-center-close", control)
+        self.assertNotIn("control-center-item", css)
+
     def test_power_screen_has_real_routes_and_exact_shutdown_timeline(self):
         system_screen = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
         screen = system_screen.split("export function powerScreen()", 1)[1].split("export function healthScreen()", 1)[0]
