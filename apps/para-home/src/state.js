@@ -1,12 +1,16 @@
 const STORAGE_KEY = "para.home.state.v3";
 const LEGACY_STORAGE_KEY = "para.home.state.v2";
 
+export const DEFAULT_BACKGROUND_ID = "para-aurora";
+export const BUILT_IN_BACKGROUND_IDS = Object.freeze(["para-aurora", "para-horizon", "para-midnight", "solid-black"]);
+
 export const BACKGROUND_OPTIONS = Object.freeze({
-  "para-default": { kind: "image", name: "PARA Default", image: "./assets/para-home-background.png", color: "#030208" },
-  "para-aurora": { kind: "gradient", name: "Aurora Current", color: "radial-gradient(circle at 72% 20%, #5d20b2 0, transparent 32%), linear-gradient(145deg, #020107, #160925 58%, #05020b)" },
-  "para-horizon": { kind: "gradient", name: "Violet Horizon", color: "radial-gradient(ellipse at 50% 78%, #6f28cf 0, #24094a 26%, transparent 58%), linear-gradient(#030208, #090414 62%, #160827)" },
-  "para-midnight": { kind: "gradient", name: "Midnight Flow", color: "radial-gradient(circle at 18% 35%, #251041 0, transparent 42%), radial-gradient(circle at 82% 70%, #42117d 0, transparent 38%), #020105" },
-  "solid-black": { kind: "solid", name: "Matte Black", color: "#030207" },
+  // Keep the former id as a migration alias so saved profiles load the official default artwork.
+  "para-default": { kind: "image", name: "Aurora Current", image: "./assets/background-aurora-current.png", color: "#030208" },
+  "para-aurora": { kind: "image", name: "Aurora Current", image: "./assets/background-aurora-current.png", color: "#030208" },
+  "para-horizon": { kind: "image", name: "Violet Horizon", image: "./assets/background-violet-horizon.png", color: "#05020c" },
+  "para-midnight": { kind: "image", name: "Midnight Flow", image: "./assets/background-midnight-flow.png", color: "#020105" },
+  "solid-black": { kind: "image", name: "Matte Black", image: "./assets/background-matte-black.png", color: "#020203" },
 });
 
 const DEFAULT_CONTROL_CENTER_ORDER = ["home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"];
@@ -27,7 +31,7 @@ const defaults = {
 
 export function defaultProfilePreferences() {
   return {
-    background: { selection: "para-default", fit: "fill", dim: 42, blur: 18, revision: 0 },
+    background: { selection: DEFAULT_BACKGROUND_ID, fit: "fill", dim: 42, blur: 18, revision: 0 },
     home: { order: [...DEFAULT_HOME_WIDGET_ORDER], hidden: [] },
     controlCenter: { order: [...DEFAULT_CONTROL_CENTER_ORDER], hidden: [] },
   };
@@ -117,8 +121,23 @@ function wallpaperValues(profile, preferences) {
     return { image: `url("${url}")`, color: "#030208" };
   }
   const option = BACKGROUND_OPTIONS[background.selection] || BACKGROUND_OPTIONS["para-default"];
-  if (option.kind === "gradient") return { image: option.color, color: "#030208" };
   return { image: option.image ? `url("${option.image}")` : "none", color: option.color };
+}
+
+function applyWallpaper(wallpaper) {
+  const root = document.documentElement;
+  root.style.setProperty("--profile-wallpaper-image", wallpaper.image);
+  root.style.setProperty("--profile-wallpaper-color", wallpaper.color);
+}
+
+export function previewBackground(selection, customUrl = "") {
+  const profile = state.activeProfile || "Player One";
+  const preferences = getProfilePreferences(profile);
+  if (customUrl) {
+    applyWallpaper({ image: `url("${customUrl}")`, color: "#030208" });
+    return;
+  }
+  applyWallpaper(wallpaperValues(profile, { ...preferences, background: { ...preferences.background, selection } }));
 }
 
 export function applyPreferences() {
@@ -131,8 +150,7 @@ export function applyPreferences() {
   root.dataset.largeText = String(state.largeText);
   root.dataset.displayMode = state.displayMode;
   root.dataset.backgroundFit = preferences.background.fit;
-  root.style.setProperty("--profile-wallpaper-image", wallpaper.image);
-  root.style.setProperty("--profile-wallpaper-color", wallpaper.color);
+  applyWallpaper(wallpaper);
   root.style.setProperty("--profile-wallpaper-dim", String(Math.max(0, Math.min(80, Number(preferences.background.dim) || 0)) / 100));
   root.style.setProperty("--surface-blur", `${Math.max(0, Math.min(24, Number(preferences.background.blur) || 0))}px`);
 }

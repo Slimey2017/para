@@ -41,7 +41,7 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
 
 
 class ParaHandler(SimpleHTTPRequestHandler):
-    server_version = "PARA/0.4.2"
+    server_version = "PARA/0.4.3"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(HOME_ROOT), **kwargs)

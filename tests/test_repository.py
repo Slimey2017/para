@@ -72,6 +72,27 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("home-wordmark__mark", css)
         self.assertNotIn("conic-gradient(from 205deg", css)
 
+    def test_built_in_wallpapers_use_supplied_images(self):
+        expected = {
+            "background-aurora-current.png": "6fae718d7f8e33d6e274bf4e8876640aef1103e5df393096f4ff9e5953e51f12",
+            "background-violet-horizon.png": "82f5eef9ad30289e9dd38ebf8e56b9bb2cd80bbd6625cb6aba371039b354135e",
+            "background-midnight-flow.png": "f779bb08742cbcd50cc3ef9add755f0b2658824f761d76eb441e9f03f36accd5",
+            "background-matte-black.png": "e8976d7b7c5a7c4ba76b77b1133fbb46d601bd7868eda064b0bd89875fdc84fc",
+        }
+        for filename, digest in expected.items():
+            artwork = ROOT / "apps/para-home/assets" / filename
+            self.assertTrue(artwork.exists())
+            self.assertEqual(hashlib.sha256(artwork.read_bytes()).hexdigest(), digest)
+        state = (ROOT / "apps/para-home/src/state.js").read_text(encoding="utf-8")
+        screen = (ROOT / "apps/para-home/src/screens/personalization.js").read_text(encoding="utf-8")
+        self.assertNotIn('kind: "gradient"', state)
+        self.assertNotIn('kind: "solid"', state)
+        for name in ["Aurora Current", "Violet Horizon", "Midnight Flow", "Matte Black"]:
+            self.assertIn(f'name: "{name}"', state)
+        for action in ["apply-background", "cancel-background-selection", "restore-background-default", "open-background-picker"]:
+            self.assertIn(f'data-action="{action}"', screen)
+        self.assertIn("Add Custom Background", screen)
+
     def test_para_button_supports_tap_and_hold(self):
         gamepad = (ROOT / "apps/para-home/src/gamepad.js").read_text(encoding="utf-8")
         focus = (ROOT / "apps/para-home/src/focus-manager.js").read_text(encoding="utf-8")

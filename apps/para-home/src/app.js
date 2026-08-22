@@ -16,7 +16,8 @@ import {
 } from "./screens/system.js";
 import {
   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
-  cancelBackgroundPreview, applyCustomBackground,
+  cancelBackgroundPreview, applyCustomBackground, applyBackgroundSelection,
+  cancelBackgroundSelection, setBackgroundFit, restoreDefaultBackground,
   controlCenterSettingsScreen, activateControlCenterSettings,
 } from "./screens/personalization.js";
 import { controlCenterShell, populateControlCenter } from "./ui/control-center.js";
@@ -151,7 +152,7 @@ function render(route) {
   } else if (route === "controller") {
     updateControllerScreen(controllerStatus);
   } else if (route === "background") {
-    activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
+    cleanupScreen = activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
   } else if (route === "control-center-settings") {
     activateControlCenterSettings({ focus, controller: controllerStatus });
   } else if (route === "setup" && getState().setupStep === 2) {
@@ -405,20 +406,23 @@ async function handleAction(action, target) {
         rerender();
       } else toast("That image couldn’t be applied");
       break;
-    case "select-background":
-      setProfilePreferences({ background: { selection: target.dataset.backgroundId } });
-      schedulePreferenceSave();
-      rerender();
+    case "apply-background":
+      if (applyBackgroundSelection()) {
+        schedulePreferenceSave();
+        toast("Background applied");
+      }
+      break;
+    case "cancel-background-selection":
+      cancelBackgroundSelection(focus);
       break;
     case "set-background-fit":
-      setProfilePreferences({ background: { fit: target.dataset.backgroundFit } });
-      schedulePreferenceSave();
-      rerender();
+      if (setBackgroundFit(target.dataset.backgroundFit)) schedulePreferenceSave();
       break;
-    case "reset-background":
-      setProfilePreferences({ background: { selection: "para-default", fit: "fill", dim: 42, blur: 18, revision: 0 } });
-      schedulePreferenceSave();
-      rerender();
+    case "restore-background-default":
+      if (restoreDefaultBackground()) {
+        schedulePreferenceSave();
+        toast("PARA Default restored");
+      }
       break;
     case "move-control-center-item":
       movePreferenceItem("controlCenter", target.dataset.itemId, Number(target.dataset.direction));

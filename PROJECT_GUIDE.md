@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.4.2 is the first working skeleton of a Linux-powered home console/PC
+PARA 0.4.3 is the first working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -94,6 +94,10 @@ PARA/
 ├── apps/
 │   └── para-home/
 │       ├── assets/
+│       │   ├── background-aurora-current.png
+│       │   ├── background-matte-black.png
+│       │   ├── background-midnight-flow.png
+│       │   ├── background-violet-horizon.png
 │       │   ├── bear-home-room.png
 │       │   ├── para-home-background.png
 │       │   └── para-logo.png
@@ -192,7 +196,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.2`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.3`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -200,7 +204,11 @@ PARA/
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
 | `apps/para-home/index.html` | Minimal full-screen launch document and accessibility live regions. | HTML5 + ES modules | Working. | Add production preload/local font policy. Loads `styles.css` and `src/app.js`. |
-| `assets/para-home-background.png` | Independent purple planet artwork behind real Home controls. | PNG | Working. | Add optimized WebP/AVIF/HDR variants and licensed source records. Used only by `home.js`. |
+| `assets/background-aurora-current.png` | Supplied Aurora Current artwork and the official restored/default profile wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add optimized source-controlled derivatives without replacing the original. Read by `state.js` and `personalization.js`. |
+| `assets/background-violet-horizon.png` | Supplied Violet Horizon built-in wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add licensed source records and optimized display variants. Read by `state.js` and `personalization.js`. |
+| `assets/background-midnight-flow.png` | Supplied Midnight Flow built-in wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add licensed source records and optimized display variants. Read by `state.js` and `personalization.js`. |
+| `assets/background-matte-black.png` | Supplied Matte Black built-in wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add licensed source records and optimized display variants. Read by `state.js` and `personalization.js`. |
+| `assets/para-home-background.png` | Earlier independent purple planet source artwork retained for project history; it is not a selectable wallpaper. | PNG | Asset only. | Remove in a later asset cleanup after release migration review. No runtime file communicates with it. |
 | `assets/para-logo.png` | Official PARA logo supplied by the project owner and used byte-for-byte for system branding. | PNG with alpha | Working; proportions and colors are unchanged. | Add vector/export variants only from the official source artwork. Used by `components.js`, `home.js`, and the startup sequence in `boot.js`. |
 | `assets/bear-home-room.png` | Clean 1672×941 room + furniture + PARA bear with zero baked interface. | PNG | Working and preserved byte-for-byte from the supplied art. | Add separate animation layers when proper assets exist. Used only by `libraries.js`. |
 | `styles.css` | Complete consumer design system: black/purple atmosphere, translucent panels, console spacing, 180–250 ms focus motion, disabled states, setup, apps, Bear Home, and system pages. | Modern responsive CSS | Working. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
@@ -208,7 +216,7 @@ PARA/
 | `src/router.js` | Restricts navigation to the screen manifest and keeps an in-shell back stack. | JavaScript + hash routing | Working. | Add route guards and activity suspension when real games/apps exist. |
 | `src/focus-manager.js` | Geometry-based directional focus, pointer focus, range adjustment, Tab compatibility, Enter, Escape, PARA tap/hold, and shoulder navigation. | JavaScript DOM APIs | Working. | Add wrap policies, virtual lists, RTL, focus groups, and announcements. |
 | `src/gamepad.js` | Normalizes Browser Gamepad input, detects controller families, and maps a dedicated or fallback button to PARA tap/hold. | JavaScript Gamepad API | Working when the browser exposes a controller. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
-| `src/state.js` | Stores first boot, local session, accessibility, selected Bear collection, and separate background/Control Center preferences for every profile. It still accepts the retired Home-widget preference keys when reading older 0.3.x profiles. | JavaScript `localStorage` plus gateway synchronization | Working; not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
+| `src/state.js` | Stores first boot, local session, accessibility, selected Bear collection, and separate background/Control Center preferences for every profile. It maps the four built-in wallpaper ids to the supplied image files and still reads older profile ids safely. | JavaScript `localStorage` plus gateway synchronization | Working; selected wallpaper, fitting, and dimming survive navigation and restart. It is not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
 | `src/screen-manifest.js` | Authoritative set of 23 reachable screens. The Control Center is an overlay, not a route. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
 | `src/services/para-api.js` | One client boundary for capabilities, applications, host state, PipeWire controls, profile personalization, files, and custom-image upload. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
 | `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
@@ -216,7 +224,7 @@ PARA/
 | `src/screens/auth.js` | “Who’s playing?”, Player One, Guest, selected-profile Continue, and Switch Profile. | JavaScript | Working as a local session flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
 | `src/screens/home.js` | Wallpaper-first PARA Home with exactly Continue, Explore, Create, Community, and System as a single horizontal tab row. Focus replaces one contextual strip; Explore and Create consume discovered applications, while System exposes only capability-backed actions. | JavaScript + inline SVG | Working. No Home dashboard cards, permanent widgets, fictional activity, or invented statistics are rendered. | Add resumable-activity and community providers; their existing quiet states will then be replaced with real content. Communicates with `para-api.js`, `state.js`, controller state, and the shared focus manager. |
 | `src/screens/libraries.js` | Installed Apps from the gateway, launch routing, clean Bear Home art, capability-gated spatial hotspots, and read-only file lists. | JavaScript | Working. Bear Home is one app; room controls exist only for readable folders or mounted media. | Add file opening via portals, indexed media, thumbnails, and mounted-volume navigation after permission design. |
-| `src/screens/personalization.js` | Settings for included/custom backgrounds, preview, fit, dimming, surface blur, and Control Center arrangement. | JavaScript + Linux file-picker input | Working in a local session; custom upload is hidden on hosted deployments. | Add approved-background policy once the account permission service exists. |
+| `src/screens/personalization.js` | Renders the four supplied built-ins first, live focus preview, staged Apply/Cancel, fitting, dimming, default restoration, then the separate custom-background chooser. It also owns Control Center arrangement. | JavaScript DOM events + platform file input | Working. Built-ins work everywhere; the PNG/JPEG/WebP system chooser and upload appear only in a writable local Linux session. | Add approved-background policy once the account permission service exists. Communicates with `state.js`, `para-api.js`, and the shared focus manager. |
 | `src/screens/system.js` | Controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. | JavaScript | Working with live information and safe local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
 | `src/ui/control-center.js` | Builds the overlay without leaving the active route and filters controls against actual gateway/controller capability. | JavaScript templates + Fetch | Working. Notifications and app switching are absent because no provider exists. | Add providers for running apps and notifications, then expose them automatically. |
 
@@ -282,14 +290,22 @@ is the filter for Controllers. Home, Profile, Quick Settings, and session Power
 are always valid shell actions. Running-app switching and notifications do not
 render because their providers do not exist.
 
-Settings → Personalization → Background offers the official image, included
-PARA gradients, Matte Black, and—on a local writable session—a real PNG, JPEG,
-or WebP picker with preview. Fit, Fill, Center, Stretch, dimming, and surface
-blur apply immediately. Each profile has an independent preference document
-and custom-image filename derived from a one-way profile key. Login and profile
-selection use the neutral PARA background and never load the selected user's
-wallpaper before login. Reset restores the official background for only the
-active profile.
+Settings → Personalization → Background presents Aurora Current, Violet
+Horizon, Midnight Flow, and Matte Black as large thumbnails backed by the four
+supplied PNG files. Controller, keyboard, or pointer focus previews one image
+live behind the settings interface. Apply commits the staged image; Cancel
+restores the profile's saved choice. Fill, Fit, Center, Stretch, and dimming
+apply through the same profile preference. Restore PARA Default selects Aurora
+Current with PARA's standard fit and dimming.
+
+Only after those four built-ins, a writable local Linux session reveals **Add
+Custom Background**. Its platform file input opens the system chooser and
+accepts verified PNG, JPEG, or WebP bytes. The gateway stores the image under
+`$XDG_DATA_HOME/para/backgrounds` and atomically stores the profile preference
+under `$XDG_CONFIG_HOME/para/profiles`; both survive shell and Linux restarts.
+Each profile has an independent preference document and custom-image filename
+derived from a one-way profile key. Login and profile selection use the neutral
+PARA background and never load the selected user's wallpaper before login.
 
 Control Center order/visibility is also per profile. The code reserves
 the settings boundary for a future `Allow Custom Backgrounds` account policy,
@@ -450,7 +466,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.4.2.zip`.
+The archive is written to `dist/PARA-0.4.3.zip`.
 
 ## Render deployment
 
@@ -482,7 +498,7 @@ those capabilities require the local gateway on that machine.
   creator applications when local application discovery is explicitly enabled.
 - Running-application switching and notifications are omitted from Control
   Center until real lifecycle and notification providers exist.
-- Static backgrounds, fit, dimming, and blur work; animated backgrounds are
+- Static backgrounds, fit, and dimming work; animated backgrounds are
   intentionally deferred until native shell lifecycle and resource limits exist.
 - ParaStore, remote accounts, purchases, downloads/installation, updates,
   VR-US, social communication, native PulseWave operations, optical controls,

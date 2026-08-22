@@ -116,7 +116,7 @@ def _validated_preferences(value: Any) -> dict[str, Any] | None:
     control_center = value.get("controlCenter", {})
     if not all(isinstance(section, dict) for section in [background, home, control_center]):
         return None
-    selection = background.get("selection", "para-default")
+    selection = background.get("selection", "para-aurora")
     fit = background.get("fit", "fill")
     if selection not in BACKGROUND_SELECTIONS or fit not in BACKGROUND_FITS:
         return None

@@ -1,75 +1,149 @@
-import { BACKGROUND_OPTIONS, getProfilePreferences, getState, setProfilePreferences } from "../state.js";
+import {
+  applyPreferences, BACKGROUND_OPTIONS, BUILT_IN_BACKGROUND_IDS, DEFAULT_BACKGROUND_ID,
+  getProfilePreferences, getState, previewBackground, setProfilePreferences,
+} from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { page, tile } from "../ui/components.js";
 import { controlCenterDefinitions } from "../ui/control-center.js";
 
 let pendingBackground = null;
 let pendingPreviewUrl = null;
+let activeBackgroundSession = null;
 
 export function personalizationScreen() {
   return page({
     title: "Personalization",
     description: "Make PARA feel like yours.",
     eyebrow: "Settings",
-    body: `<div class="settings-grid personalization-grid">${tile({ title: "Background", meta: "Wallpaper, fit, dimming, and surface blur", route: "background", icon: "◩", autofocus: true })}${tile({ title: "Control Center", meta: "Arrange quick system controls", route: "control-center-settings", icon: "◎" })}</div>`,
+    body: `<div class="settings-grid personalization-grid">${tile({ title: "Background", meta: "Wallpaper, preview, fitting, and dimming", route: "background", icon: "◩", autofocus: true })}${tile({ title: "Control Center", meta: "Arrange quick system controls", route: "control-center-settings", icon: "◎" })}</div>`,
   });
 }
 
+function normalizedSelection(selection) {
+  return selection === "para-default" ? DEFAULT_BACKGROUND_ID : selection;
+}
+
+function backgroundName(selection) {
+  if (selection === "custom") return "Custom Background";
+  return BACKGROUND_OPTIONS[normalizedSelection(selection)]?.name || BACKGROUND_OPTIONS[DEFAULT_BACKGROUND_ID].name;
+}
+
 function backgroundChoice(id, option, selected, autofocus) {
-  const visual = option.image ? `style="--choice-image:url('${option.image}');--choice-color:${option.color}"` : `style="--choice-image:none;--choice-color:${option.color}"`;
-  return `<button class="background-choice ${selected ? "is-selected" : ""}" data-action="select-background" data-background-id="${id}" ${visual} ${autofocus ? "data-autofocus='true'" : ""}><span class="background-choice__visual"></span><strong>${escapeHtml(option.name)}</strong>${selected ? "<small>Selected</small>" : ""}</button>`;
+  const visual = `style="--choice-image:url('${option.image}');--choice-color:${option.color}"`;
+  return `<button type="button" class="background-choice ${selected ? "is-selected" : ""}" data-background-id="${id}" aria-label="Preview ${escapeHtml(option.name)}" ${visual} ${autofocus ? "data-autofocus='true'" : ""}><span class="background-choice__visual" aria-hidden="true"></span><strong>${escapeHtml(option.name)}</strong><small>${selected ? "Current" : "Preview"}</small></button>`;
 }
 
 export function backgroundScreen() {
   const preferences = getProfilePreferences();
-  const selected = preferences.background.selection;
-  const included = Object.entries(BACKGROUND_OPTIONS).map(([id, option], index) => backgroundChoice(id, option, id === selected, index === 0)).join("");
-  const custom = selected === "custom"
-    ? backgroundChoice("custom", { name: "Custom Image", image: `/api/v1/backgrounds/custom?profile=${encodeURIComponent(getState().activeProfile || "Player One")}&v=${preferences.background.revision}`, color: "#030208" }, true, false)
-    : "";
-  const choices = `${included}${custom}`;
+  const selected = normalizedSelection(preferences.background.selection);
+  const included = BUILT_IN_BACKGROUND_IDS.map((id, index) => backgroundChoice(id, BACKGROUND_OPTIONS[id], id === selected, index === 0)).join("");
   return page({
     title: "Background",
     description: "Personal to this profile.",
     eyebrow: "Personalization",
     className: "background-page",
-    body: `<section class="background-preview profile-wallpaper"><span>PARA</span><i></i></section><section class="background-section"><div class="section-heading"><h2>Choose a background</h2><button class="action-button action-button--ghost" data-action="open-background-picker" data-custom-background hidden>Custom Image</button></div><div class="background-grid">${choices}</div><input type="file" accept="image/png,image/jpeg,image/webp" data-background-input hidden /></section><section class="background-controls panel"><div class="background-control"><div><strong>Fitting</strong><small>Choose how the image fills the screen</small></div><div class="segmented">${["fill", "fit", "center", "stretch"].map((fit) => `<button data-action="set-background-fit" data-background-fit="${fit}" class="${preferences.background.fit === fit ? "is-selected" : ""}">${fit[0].toUpperCase()}${fit.slice(1)}</button>`).join("")}</div></div><label class="background-control"><div><strong>Background dimming</strong><small><output data-dim-value>${preferences.background.dim}%</output></small></div><input type="range" min="0" max="80" step="2" value="${preferences.background.dim}" data-background-dim /></label><label class="background-control"><div><strong>Surface blur</strong><small><output data-blur-value>${preferences.background.blur}px</output></small></div><input type="range" min="0" max="24" step="1" value="${preferences.background.blur}" data-background-blur /></label><button class="list-row reset-background" data-action="reset-background"><span class="list-row__icon">↺</span><span class="list-row__body"><span class="list-row__title">Reset to PARA Default</span><span class="list-row__meta">Restore the official PARA background for this profile</span></span></button></section><div class="background-confirm" data-background-confirm hidden><div class="background-confirm__card" role="dialog" aria-modal="true" aria-label="Preview custom background"><img data-background-preview alt="Custom background preview" /><h2>Use this background?</h2><div><button class="action-button action-button--ghost" data-action="cancel-background-preview">Cancel</button><button class="action-button" data-action="apply-custom-background">Apply</button></div></div></div>`,
+    body: `<div class="background-live-wallpaper profile-wallpaper" aria-hidden="true"><span></span></div><section class="background-preview-status" aria-live="polite"><span>Preview</span><strong data-background-preview-name>${escapeHtml(backgroundName(selected))}</strong></section><section class="background-section"><div class="section-heading"><h2>PARA backgrounds</h2></div><div class="background-grid">${included}</div><div class="background-apply-bar"><button class="action-button action-button--ghost" data-action="cancel-background-selection">Cancel</button><button class="action-button" data-action="apply-background">Apply</button></div></section><section class="custom-background-section"><button class="add-custom-background" data-action="open-background-picker" data-custom-background hidden><span aria-hidden="true">＋</span><strong>Add Custom Background</strong><small>PNG, JPEG, or WebP</small></button><input type="file" accept="image/png,image/jpeg,image/webp" data-background-input hidden /></section><section class="background-controls panel"><div class="background-control"><div><strong>Fitting</strong><small>Choose how the image fills the screen</small></div><div class="segmented">${["fill", "fit", "center", "stretch"].map((fit) => `<button data-action="set-background-fit" data-background-fit="${fit}" class="${preferences.background.fit === fit ? "is-selected" : ""}">${fit[0].toUpperCase()}${fit.slice(1)}</button>`).join("")}</div></div><label class="background-control"><div><strong>Background dimming</strong><small><output data-dim-value>${preferences.background.dim}%</output></small></div><input type="range" min="0" max="80" step="2" value="${preferences.background.dim}" data-background-dim /></label><button class="list-row reset-background" data-action="restore-background-default"><span class="list-row__icon">↺</span><span class="list-row__body"><span class="list-row__title">Restore PARA Default</span><span class="list-row__meta">Use Aurora Current with the standard fitting and dimming</span></span></button></section><div class="background-confirm" data-background-confirm hidden><div class="background-confirm__card" role="dialog" aria-modal="true" aria-label="Preview custom background"><img data-background-preview alt="Custom background preview" /><h2>Use this background?</h2><div><button class="action-button action-button--ghost" data-action="cancel-background-preview">Cancel</button><button class="action-button" data-action="apply-custom-background">Apply</button></div></div></div>`,
   });
 }
 
-export async function activateBackgroundScreen({ focus, changed }) {
+function updateBackgroundChoiceState(session) {
+  document.querySelectorAll("[data-background-id]").forEach((choice) => {
+    const id = choice.dataset.backgroundId;
+    choice.classList.toggle("is-selected", id === normalizedSelection(session.committed));
+    choice.classList.toggle("is-previewing", id === normalizedSelection(session.staged));
+    const note = choice.querySelector("small");
+    if (note) note.textContent = id === normalizedSelection(session.committed) ? "Current" : id === normalizedSelection(session.staged) ? "Previewing" : "Preview";
+  });
+  const name = document.querySelector("[data-background-preview-name]");
+  if (name) name.textContent = backgroundName(session.staged);
+  const apply = document.querySelector("[data-action='apply-background']");
+  if (apply) apply.disabled = session.staged === "custom";
+}
+
+function showSessionPreview(session) {
+  if (session.staged === "custom" && pendingPreviewUrl) previewBackground("custom", pendingPreviewUrl);
+  else previewBackground(session.staged);
+  updateBackgroundChoiceState(session);
+}
+
+function stageBuiltInBackground(id) {
+  if (!activeBackgroundSession || !BUILT_IN_BACKGROUND_IDS.includes(id)) return;
+  activeBackgroundSession.staged = id;
+  showSessionPreview(activeBackgroundSession);
+}
+
+function closeCustomConfirmation({ restore = true } = {}) {
+  document.querySelector("[data-background-confirm]")?.setAttribute("hidden", "");
+  if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+  pendingPreviewUrl = null;
+  pendingBackground = null;
+  if (activeBackgroundSession && restore) {
+    activeBackgroundSession.staged = activeBackgroundSession.customReturn || activeBackgroundSession.committed;
+    activeBackgroundSession.customReturn = null;
+    showSessionPreview(activeBackgroundSession);
+  }
+}
+
+export function activateBackgroundScreen({ focus, changed }) {
+  const pageElement = document.querySelector(".background-page");
   const custom = document.querySelector("[data-custom-background]");
   const input = document.querySelector("[data-background-input]");
-  try {
-    const capabilities = await paraApi.capabilities();
-    if (custom) custom.hidden = !capabilities.custom_backgrounds;
-  } catch {
-    if (custom) custom.hidden = true;
-  }
-  input?.addEventListener("change", () => {
+  const savedSelection = normalizedSelection(getProfilePreferences().background.selection);
+  const session = { committed: savedSelection, staged: savedSelection, customReturn: null, changed };
+  activeBackgroundSession = session;
+
+  const onChoiceFocus = (event) => {
+    const choice = event.target.closest?.("[data-background-id]");
+    if (choice) stageBuiltInBackground(choice.dataset.backgroundId);
+  };
+  const onChoicePointer = (event) => {
+    const choice = event.target.closest?.("[data-background-id]");
+    if (choice) stageBuiltInBackground(choice.dataset.backgroundId);
+  };
+  const onFileChange = () => {
     const file = input.files?.[0];
     if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) return;
     pendingBackground = file;
     if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
     pendingPreviewUrl = URL.createObjectURL(file);
+    session.customReturn = session.staged;
+    session.staged = "custom";
+    showSessionPreview(session);
     const confirmation = document.querySelector("[data-background-confirm]");
     const preview = document.querySelector("[data-background-preview]");
     if (preview) preview.src = pendingPreviewUrl;
     if (confirmation) confirmation.hidden = false;
     requestAnimationFrame(() => focus.setCurrent(confirmation?.querySelector("[data-action='apply-custom-background']"), true));
-  });
-  document.querySelector("[data-background-dim]")?.addEventListener("input", (event) => {
+  };
+  const onDimming = (event) => {
     setProfilePreferences({ background: { dim: Number(event.target.value) } });
     const output = document.querySelector("[data-dim-value]");
     if (output) output.textContent = `${event.target.value}%`;
+    showSessionPreview(session);
     changed();
+  };
+
+  pageElement?.addEventListener("focusin", onChoiceFocus);
+  pageElement?.addEventListener("pointerover", onChoicePointer);
+  input?.addEventListener("change", onFileChange);
+  document.querySelector("[data-background-dim]")?.addEventListener("input", onDimming);
+  updateBackgroundChoiceState(session);
+
+  paraApi.capabilities().then((capabilities) => {
+    if (activeBackgroundSession === session && custom) custom.hidden = !capabilities.custom_backgrounds;
+  }).catch(() => {
+    if (activeBackgroundSession === session && custom) custom.hidden = true;
   });
-  document.querySelector("[data-background-blur]")?.addEventListener("input", (event) => {
-    setProfilePreferences({ background: { blur: Number(event.target.value) } });
-    const output = document.querySelector("[data-blur-value]");
-    if (output) output.textContent = `${event.target.value}px`;
-    changed();
-  });
+
+  return () => {
+    pageElement?.removeEventListener("focusin", onChoiceFocus);
+    pageElement?.removeEventListener("pointerover", onChoicePointer);
+    input?.removeEventListener("change", onFileChange);
+    document.querySelector("[data-background-dim]")?.removeEventListener("input", onDimming);
+    closeCustomConfirmation({ restore: false });
+    if (activeBackgroundSession === session) activeBackgroundSession = null;
+    applyPreferences();
+  };
 }
 
 export function openBackgroundPicker() {
@@ -77,10 +151,7 @@ export function openBackgroundPicker() {
 }
 
 export function cancelBackgroundPreview(focus) {
-  document.querySelector("[data-background-confirm]")?.setAttribute("hidden", "");
-  if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
-  pendingPreviewUrl = null;
-  pendingBackground = null;
+  closeCustomConfirmation();
   focus.setCurrent(document.querySelector("[data-custom-background]"), true);
 }
 
@@ -90,11 +161,58 @@ export async function applyCustomBackground(focus) {
   try {
     const result = await paraApi.uploadBackground(profile, pendingBackground);
     setProfilePreferences({ background: { selection: "custom", revision: result.revision } }, profile);
-    cancelBackgroundPreview(focus);
+    if (activeBackgroundSession) {
+      activeBackgroundSession.committed = "custom";
+      activeBackgroundSession.staged = "custom";
+      activeBackgroundSession.customReturn = null;
+    }
+    closeCustomConfirmation({ restore: false });
     return true;
   } catch {
     return false;
   }
+}
+
+export function applyBackgroundSelection() {
+  if (!activeBackgroundSession || !BUILT_IN_BACKGROUND_IDS.includes(activeBackgroundSession.staged)) return false;
+  const selection = activeBackgroundSession.staged;
+  setProfilePreferences({ background: { selection } });
+  activeBackgroundSession.committed = selection;
+  showSessionPreview(activeBackgroundSession);
+  return true;
+}
+
+export function cancelBackgroundSelection(focus) {
+  if (!activeBackgroundSession) return;
+  activeBackgroundSession.staged = activeBackgroundSession.committed;
+  applyPreferences();
+  updateBackgroundChoiceState(activeBackgroundSession);
+  const custom = document.querySelector("[data-custom-background]");
+  const target = document.querySelector(`[data-background-id='${normalizedSelection(activeBackgroundSession.committed)}']`) || (!custom?.hidden ? custom : document.querySelector("[data-action='cancel-background-selection']"));
+  focus.setCurrent(target, true);
+}
+
+export function setBackgroundFit(fit) {
+  if (!activeBackgroundSession || !["fill", "fit", "center", "stretch"].includes(fit)) return false;
+  setProfilePreferences({ background: { fit } });
+  document.querySelectorAll("[data-background-fit]").forEach((button) => button.classList.toggle("is-selected", button.dataset.backgroundFit === fit));
+  showSessionPreview(activeBackgroundSession);
+  return true;
+}
+
+export function restoreDefaultBackground() {
+  if (!activeBackgroundSession) return false;
+  setProfilePreferences({ background: { selection: DEFAULT_BACKGROUND_ID, fit: "fill", dim: 42, blur: 18, revision: 0 } });
+  activeBackgroundSession.committed = DEFAULT_BACKGROUND_ID;
+  activeBackgroundSession.staged = DEFAULT_BACKGROUND_ID;
+  document.documentElement.dataset.backgroundFit = "fill";
+  document.querySelectorAll("[data-background-fit]").forEach((button) => button.classList.toggle("is-selected", button.dataset.backgroundFit === "fill"));
+  const dimming = document.querySelector("[data-background-dim]");
+  const output = document.querySelector("[data-dim-value]");
+  if (dimming) dimming.value = "42";
+  if (output) output.textContent = "42%";
+  showSessionPreview(activeBackgroundSession);
+  return true;
 }
 
 function arrangementRows(ids, labels, preferences, namespace) {

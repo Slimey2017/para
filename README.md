@@ -43,7 +43,11 @@ Application launch is off by default and always off on Render.
 
 Prompts change for Xbox, PlayStation Mode, Nintendo, or PARA/generic controls.
 Backgrounds are configured under Settings → Personalization → Background and
-are saved separately for each local PARA profile.
+are saved separately for each local PARA profile. The built-in choices are
+Aurora Current, Violet Horizon, Midnight Flow, and Matte Black. Focusing a
+choice previews its supplied artwork live; Apply commits it, while Cancel
+returns to the profile's saved choice. A writable local Linux session also
+offers the system file chooser for a PNG, JPEG, or WebP custom background.
 
 ## Check and package
 
