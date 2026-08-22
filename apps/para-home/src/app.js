@@ -138,6 +138,8 @@ function render(route) {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
     activateApps({ focus });
+  } else if (route === "bear-home") {
+    activateBearHome({ focus });
   } else if (route === "files" || route === "downloads") {
     activateFiles();
   } else if (route === "storage") {
@@ -495,5 +497,3 @@ async function start() {
 }
 
 start();
-  } else if (route === "bear-home") {
-    activateBearHome({ focus });
