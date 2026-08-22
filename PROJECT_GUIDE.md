@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.4.0 is the first working skeleton of a Linux-powered home console/PC
+PARA 0.4.2 is the first working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -95,7 +95,8 @@ PARA/
 │   └── para-home/
 │       ├── assets/
 │       │   ├── bear-home-room.png
-│       │   └── para-home-background.png
+│       │   ├── para-home-background.png
+│       │   └── para-logo.png
 │       ├── index.html
 │       ├── styles.css
 │       └── src/
@@ -191,7 +192,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.0`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.2`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -200,6 +201,7 @@ PARA/
 |---|---|---|---|---|
 | `apps/para-home/index.html` | Minimal full-screen launch document and accessibility live regions. | HTML5 + ES modules | Working. | Add production preload/local font policy. Loads `styles.css` and `src/app.js`. |
 | `assets/para-home-background.png` | Independent purple planet artwork behind real Home controls. | PNG | Working. | Add optimized WebP/AVIF/HDR variants and licensed source records. Used only by `home.js`. |
+| `assets/para-logo.png` | Official PARA logo supplied by the project owner and used byte-for-byte for system branding. | PNG with alpha | Working; proportions and colors are unchanged. | Add vector/export variants only from the official source artwork. Used by `components.js`, `home.js`, and the startup sequence in `boot.js`. |
 | `assets/bear-home-room.png` | Clean 1672×941 room + furniture + PARA bear with zero baked interface. | PNG | Working and preserved byte-for-byte from the supplied art. | Add separate animation layers when proper assets exist. Used only by `libraries.js`. |
 | `styles.css` | Complete consumer design system: black/purple atmosphere, translucent panels, console spacing, 180–250 ms focus motion, disabled states, setup, apps, Bear Home, and system pages. | Modern responsive CSS | Working. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
 | `src/app.js` | Runtime composition, route transitions, Control Center lifecycle, profile hydration, actions, controller prompts, and service activation. | JavaScript | Working. | Split domain controllers and add typed error boundaries. Talks to every screen, router, input, state, overlay, and API adapter. |
@@ -376,7 +378,7 @@ UI:
 |---|---|---|---|---|
 | `scripts/dev.sh` | Starts the loopback gateway; optional app launch requires an environment flag. | Bash | Working. | Live reload and structured logging. |
 | `scripts/render-start.sh` | Binds to Render's `PORT` with explicit nonlocal permission and no app launching. | Bash | Working. | Replace transport only if traffic requires it. |
-| `scripts/check.sh` | Runs structural validation, consumer-copy audit, unit tests, shell syntax, and Python compilation. | Bash | Working. | Add CSS/JS lint, browser accessibility, and contract diffs. |
+| `scripts/check.sh` | Runs structural validation, consumer-copy audit, browser entry-module parsing, unit tests, shell syntax, and Python compilation. | Bash | Working. | Add CSS lint, browser accessibility, and contract diffs. |
 | `scripts/smoke.sh` | Starts a temporary local gateway and checks health. | Bash + Python | Working. | Add endpoint and concurrency checks. |
 | `scripts/render-smoke.sh` | Tests the hosted start path and security headers on loopback. | Bash + Python | Working. | Add static cache and graceful-shutdown checks. |
 | `scripts/native-check.sh` | Compiles native boundaries when compilers are installed. | Bash | Working; skips absent optional compilers. | Add CMake presets, clippy, sanitizers, and cross-builds. |
@@ -448,14 +450,14 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.4.0.zip`.
+The archive is written to `dist/PARA-0.4.2.zip`.
 
 ## Render deployment
 
 Push the repository to GitHub, create a Render Blueprint, and select this repo.
 The included settings are:
 
-- Build command: `python3 tools/validate_project.py`
+- Build command: `./scripts/check.sh`
 - Start command: `./scripts/render-start.sh`
 - Health check: `/api/v1/health`
 

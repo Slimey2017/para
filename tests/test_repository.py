@@ -28,6 +28,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_render_blueprint_uses_gateway(self):
         blueprint = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        self.assertIn("buildCommand: ./scripts/check.sh", blueprint)
         self.assertIn("startCommand: ./scripts/render-start.sh", blueprint)
         self.assertIn("healthCheckPath: /api/v1/health", blueprint)
         launcher = (ROOT / "scripts/render-start.sh").read_text(encoding="utf-8")
@@ -57,6 +58,19 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("contextMarkup", screen)
         self.assertNotIn("home-launcher", screen)
         self.assertNotIn("home-widget", screen)
+
+    def test_official_logo_is_used_without_generated_ring(self):
+        logo = ROOT / "apps/para-home/assets/para-logo.png"
+        self.assertTrue(logo.exists())
+        self.assertEqual(hashlib.sha256(logo.read_bytes()).hexdigest(), "32b657bf30d6091e8441268049b7ffdbefa150e4ca2259ebe1755bf1e9dc54b0")
+        home = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
+        components = (ROOT / "apps/para-home/src/ui/components.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        self.assertIn('paraLogo("home-wordmark__logo")', home)
+        self.assertIn("./assets/para-logo.png", components)
+        self.assertNotIn("brand__mark", css)
+        self.assertNotIn("home-wordmark__mark", css)
+        self.assertNotIn("conic-gradient(from 205deg", css)
 
     def test_para_button_supports_tap_and_hold(self):
         gamepad = (ROOT / "apps/para-home/src/gamepad.js").read_text(encoding="utf-8")

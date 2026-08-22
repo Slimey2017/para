@@ -1,5 +1,6 @@
 import { getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
+import { paraLogo } from "../ui/components.js";
 
 const paths = {
   apps: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/>',
@@ -85,7 +86,7 @@ function contextMarkup(section, model) {
 
 export function homeScreen() {
   const profile = getState().activeProfile || "Player One";
-  return `<section class="home-ui" data-home-section="continue" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header"><button class="home-wordmark" type="button" data-action="open-control-center" aria-label="Open PARA Control Center"><span class="home-wordmark__mark"><i></i></span><strong>PARA</strong></button><div class="home-status"><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><div class="home-canvas" aria-hidden="true"></div><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home">${mainNavigation()}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-continue" aria-live="polite">${quietState("Continue", "Nothing to continue")}</section></main></section>`;
+  return `<section class="home-ui" data-home-section="continue" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header"><button class="home-wordmark" type="button" data-action="open-control-center" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-status"><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><div class="home-canvas" aria-hidden="true"></div><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home">${mainNavigation()}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-continue" aria-live="polite">${quietState("Continue", "Nothing to continue")}</section></main></section>`;
 }
 
 export function activateHome({ focus, controller }) {

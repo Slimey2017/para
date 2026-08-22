@@ -1,5 +1,9 @@
+export function paraLogo(className = "brand__logo") {
+  return `<img class="${className}" src="./assets/para-logo.png" alt="" aria-hidden="true" />`;
+}
+
 export function brand() {
-  return `<div class="brand" aria-label="PARA"><span class="brand__mark" aria-hidden="true"><i></i></span><span>PARA</span></div>`;
+  return `<div class="brand" aria-label="PARA">${paraLogo()}<span>PARA</span></div>`;
 }
 
 export function livingBackground() {

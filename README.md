@@ -59,7 +59,7 @@ make package
 
 The repository includes `render.yaml`.
 
-- Build command: `python3 tools/validate_project.py`
+- Build command: `./scripts/check.sh`
 - Start command: `./scripts/render-start.sh`
 - Health path: `/api/v1/health`
 

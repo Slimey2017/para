@@ -1,4 +1,4 @@
-import { brand, hints, listRow, livingBackground, toggleRow } from "../ui/components.js";
+import { brand, hints, listRow, livingBackground, paraLogo, toggleRow } from "../ui/components.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { getState } from "../state.js";
 
@@ -10,10 +10,10 @@ export function startupScreen() {
 
 export function introScreen() {
   return `<section class="boot-screen" aria-label="PARA welcome animation">
-    <div class="boot-stage" data-boot-stage="fade"><div class="para-logo">PARA</div></div>
+    <div class="boot-stage" data-boot-stage="fade"><div class="para-logo">${paraLogo("para-logo__image")}<strong>PARA</strong></div></div>
     <div class="boot-stage" data-boot-stage="liquid"><div class="liquid"><span class="liquid__blob liquid__blob--purple"></span><span class="liquid__blob liquid__blob--white"></span></div><p class="boot-caption">A new current</p></div>
-    <div class="boot-stage" data-boot-stage="splash"><div class="splash"></div><div class="para-logo boot-reveal-logo">PARA</div></div>
-    <div class="boot-stage" data-boot-stage="melt"><div class="para-logo melt-logo">PARA</div></div>
+    <div class="boot-stage" data-boot-stage="splash"><div class="splash"></div><div class="para-logo boot-reveal-logo">${paraLogo("para-logo__image")}<strong>PARA</strong></div></div>
+    <div class="boot-stage" data-boot-stage="melt"><div class="para-logo melt-logo">${paraLogo("para-logo__image")}<strong>PARA</strong></div></div>
     <div class="boot-stage" data-boot-stage="beat"><div class="beat-orb"></div><p class="boot-caption">Feel the pulse</p></div>
     <button class="action-button action-button--ghost boot-screen__skip" data-action="skip-intro">Skip</button>
   </section>`;
