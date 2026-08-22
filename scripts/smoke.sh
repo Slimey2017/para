@@ -30,6 +30,8 @@ for attempt in range(30):
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/capabilities", timeout=1) as response:
             capabilities = json.load(response)
         assert capabilities["personalization"] is True
+        assert capabilities["files"] is True
+        assert capabilities["file_operations"] is False
         assert capabilities["notifications"] is False
         print("PARA smoke check passed")
         raise SystemExit(0)

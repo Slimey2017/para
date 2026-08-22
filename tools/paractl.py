@@ -18,8 +18,9 @@ def request(base: str, path: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="paractl", description="Inspect a running PARA session")
     parser.add_argument("--base", default="http://127.0.0.1:4173")
-    parser.add_argument("command", choices=["health", "capabilities", "system", "storage", "network", "audio", "apps", "directories", "personalization", "replay-first-boot"])
+    parser.add_argument("command", choices=["health", "capabilities", "system", "storage", "network", "audio", "apps", "directories", "files", "personalization", "replay-first-boot"])
     parser.add_argument("--profile", default="Player One")
+    parser.add_argument("--path", default="home", help="Location for the files command")
     args = parser.parse_args()
 
     if args.command == "replay-first-boot":
@@ -29,6 +30,8 @@ def main() -> int:
         path = f"/api/v1/{args.command}"
         if args.command == "personalization":
             path += f"?profile={urllib.parse.quote(args.profile)}"
+        elif args.command == "files":
+            path = f"/api/v1/files/browse?path={urllib.parse.quote(args.path)}"
         print(json.dumps(request(args.base, path), indent=2))
     except (urllib.error.URLError, TimeoutError) as error:
         print(f"PARA gateway is unavailable: {error}")

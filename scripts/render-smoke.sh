@@ -35,6 +35,8 @@ for attempt in range(30):
             capabilities = json.load(response)
         assert capabilities["personalization"] is False
         assert capabilities["custom_backgrounds"] is False
+        assert capabilities["files"] is False
+        assert capabilities["file_operations"] is False
         print("PARA Render-mode smoke check passed")
         raise SystemExit(0)
     except Exception:

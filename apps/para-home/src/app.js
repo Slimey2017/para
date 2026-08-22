@@ -6,9 +6,9 @@ import { startupScreen, introScreen, setupScreen, activateIntro, activateSetupNe
 import { profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
-  appsScreen, activateApps, filterApps, bearHomeScreen, activateBearHome, filesScreen,
-  downloadsScreen, activateFiles, launchLinuxApplication,
+  appsScreen, activateApps, filterApps, launchLinuxApplication,
 } from "./screens/libraries.js";
+import { filesScreen, downloadsScreen, activateFiles, filesBack } from "./screens/files.js";
 import {
   controllerScreen, updateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
@@ -39,7 +39,6 @@ const renderers = {
   profiles: profilesScreen,
   home: homeScreen,
   apps: appsScreen,
-  "bear-home": bearHomeScreen,
   files: filesScreen,
   downloads: downloadsScreen,
   controller: controllerScreen,
@@ -145,10 +144,8 @@ function render(route) {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
     activateApps({ focus });
-  } else if (route === "bear-home") {
-    activateBearHome({ focus });
   } else if (route === "files" || route === "downloads") {
-    activateFiles();
+    cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
   } else if (route === "storage") {
     activateStorage();
   } else if (route === "network") {
@@ -186,14 +183,9 @@ function confirm(target = focus.current) {
 function back() {
   if (consumePowerInput()) return;
   if (cancelTurnOffConfirmation(focus)) return;
+  if (filesBack()) return;
   if (!overlay.hidden) {
     closeControlCenter();
-    return;
-  }
-  const bearMenu = document.querySelector("[data-bear-menu]");
-  if (bearMenu && !bearMenu.hidden) {
-    bearMenu.hidden = true;
-    focus.setCurrent(document.querySelector("[data-action='bear-menu']"), true);
     return;
   }
   if (["startup", "intro", "setup", "profiles"].includes(router.current())) return;
@@ -240,7 +232,17 @@ function shoulder(direction) {
   navigate(majorSections[(currentIndex + direction + majorSections.length) % majorSections.length]);
 }
 
-const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder });
+function secondary() {
+  if (consumePowerInput()) return;
+  document.dispatchEvent(new CustomEvent("para-secondary", { detail: { target: focus.current, controller: controllerStatus } }));
+}
+
+function options() {
+  if (consumePowerInput()) return;
+  document.dispatchEvent(new CustomEvent("para-options", { detail: { target: focus.current, controller: controllerStatus } }));
+}
+
+const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder, secondary, options });
 const gamepad = new GamepadNavigation({
   move: (direction) => { if (!consumePowerInput()) focus.move(direction); },
   confirm: () => confirm(),
@@ -248,6 +250,8 @@ const gamepad = new GamepadNavigation({
   paraTap,
   paraHold,
   shoulder,
+  secondary,
+  options,
   connected: (controller) => {
     const hadController = controllerStatus.connected;
     controllerStatus = controller;
@@ -395,21 +399,6 @@ async function handleAction(action, target) {
       break;
     case "launch-linux-app":
       openLinuxApplication(target);
-      break;
-    case "open-collection":
-      setState({ fileCollection: target.dataset.collection || "downloads" });
-      navigate("files", {}, target);
-      break;
-    case "bear-menu": {
-      const menu = document.querySelector("[data-bear-menu]");
-      if (menu) {
-        menu.hidden = false;
-        requestAnimationFrame(() => focus.setCurrent(menu.querySelector("[data-autofocus='true']"), true));
-      }
-      break;
-    }
-    case "bear-menu-close":
-      back();
       break;
     case "open-control-center":
       openControlCenter();

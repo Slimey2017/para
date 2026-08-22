@@ -34,9 +34,16 @@ class ApiContractTests(unittest.TestCase):
     def test_application_launch_is_hidden_by_default(self):
         status, payload = resolve("/api/v1/apps")
         self.assertEqual(status, 200)
-        self.assertEqual([item["id"] for item in payload["applications"]], ["para:bear-home"])
+        self.assertEqual(payload["applications"], [])
         launch_status, _ = system_layer.launch_application("linux:any.desktop")
         self.assertEqual(launch_status, 404)
+
+    def test_files_is_the_local_builtin_application(self):
+        system_layer.configure(launch_enabled=False, controls_enabled=True)
+        status, payload = resolve("/api/v1/apps")
+        self.assertEqual(status, 200)
+        self.assertEqual([item["id"] for item in payload["applications"]], ["para:files"])
+        self.assertEqual(payload["applications"][0]["launch"], {"kind": "route", "route": "files"})
 
     def test_application_roles_come_from_desktop_metadata(self):
         self.assertEqual(system_layer._application_roles("Development;IDE;", "Code Studio"), ["creator"])
@@ -113,6 +120,75 @@ class ApiContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_bind("0.0.0.0")
         self.assertEqual(str(validate_bind("0.0.0.0", allow_nonlocal=True)), "0.0.0.0")
+
+    def test_files_browse_and_search_actual_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Documents").mkdir()
+            (root / "Documents" / "notes.txt").write_text("PARA", encoding="utf-8")
+            (root / "picture.png").write_bytes(b"image")
+            system_layer.configure(launch_enabled=False, controls_enabled=True)
+            with patch("system_layer._block_volumes", return_value=[]):
+                status, payload = system_layer.browse_files(str(root))
+                search_status, search = system_layer.search_files(str(root), "notes")
+            self.assertEqual(status, 200)
+            self.assertEqual({item["name"] for item in payload["items"]}, {"Documents", "picture.png"})
+            self.assertFalse(payload["capabilities"]["write"])
+            self.assertEqual(search_status, 200)
+            self.assertEqual([item["name"] for item in search["items"]], ["notes.txt"])
+
+    def test_file_changes_require_explicit_local_opt_in(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.txt"
+            source.write_text("source", encoding="utf-8")
+            destination = root / "destination"
+            destination.mkdir()
+            denied, _ = system_layer.file_action("rename", {"paths": [str(source)], "name": "renamed.txt"})
+            self.assertEqual(denied, 403)
+
+            system_layer.configure(launch_enabled=False, controls_enabled=True, file_operations_enabled=True)
+            created, result = system_layer.file_action("create-folder", {"destination": str(root), "name": "New Folder"})
+            renamed, rename_result = system_layer.file_action("rename", {"paths": [str(source)], "name": "renamed.txt"})
+            copied, _ = system_layer.file_action("copy", {"paths": [rename_result["renamed"]], "destination": str(destination)})
+            moved, _ = system_layer.file_action("move", {"paths": [rename_result["renamed"]], "destination": str(root / "New Folder")})
+            self.assertEqual(created, 201)
+            self.assertTrue(Path(result["created"]).is_dir())
+            self.assertEqual(renamed, 200)
+            self.assertEqual(copied, 200)
+            self.assertTrue((destination / "renamed.txt").is_file())
+            self.assertEqual(moved, 200)
+            self.assertTrue((root / "New Folder" / "renamed.txt").is_file())
+
+    def test_file_routes_replace_collection_route(self):
+        system_layer.configure(launch_enabled=False, controls_enabled=True)
+        with patch("system_layer._block_volumes", return_value=[]):
+            status, payload = resolve("/api/v1/files/browse", {"path": ["home"]})
+        old_status, _ = resolve("/api/v1/files", {"collection": ["documents"]})
+        self.assertEqual(status, 200)
+        self.assertIn("items", payload)
+        self.assertEqual(old_status, 404)
+
+    def test_permanent_delete_is_limited_to_trash(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trash_root = root / "Trash"
+            (trash_root / "files").mkdir(parents=True)
+            (trash_root / "info").mkdir()
+            trashed = trash_root / "files" / "discard.txt"
+            trashed.write_text("discard", encoding="utf-8")
+            (trash_root / "info" / "discard.txt.trashinfo").write_text("[Trash Info]", encoding="utf-8")
+            outside = root / "keep.txt"
+            outside.write_text("keep", encoding="utf-8")
+            system_layer.configure(launch_enabled=False, controls_enabled=True, file_operations_enabled=True)
+            with patch("system_layer._trash_root", return_value=trash_root):
+                denied, _ = system_layer.file_action("delete", {"paths": [str(outside)]})
+                deleted, _ = system_layer.file_action("delete", {"paths": [str(trashed)]})
+            self.assertEqual(denied, 400)
+            self.assertTrue(outside.exists())
+            self.assertEqual(deleted, 200)
+            self.assertFalse(trashed.exists())
+            self.assertFalse((trash_root / "info" / "discard.txt.trashinfo").exists())
 
 
 if __name__ == "__main__":

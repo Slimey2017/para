@@ -38,7 +38,7 @@ export function settingsScreen() {
     ["Network", "Connections available to PARA", "network", "⌁"],
     ["Controllers", "Gamepads available to PARA", "controller", "◇"],
     ["Storage", "Disk usage and mounted drives", "storage", "▯"],
-    ["Downloads", "Open your Downloads folder", "downloads", "↓"],
+    ["Files", "Browse files and connected storage", "files", "▱"],
     ["Account", "Local PARA profile", "account", "●"],
     ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
     ["Power", "Session controls", "power", "○"],

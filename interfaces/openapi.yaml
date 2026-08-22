@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: PARA Linux Gateway API
-  version: 0.4.5
-  description: Linux system information, local profile personalization, safe session controls, and explicitly enabled local application and power actions.
+  version: 0.5.0
+  description: Linux system information, local profile personalization, PARA Files, safe session controls, and explicitly enabled local application, file, volume, and power actions.
 servers:
   - url: http://127.0.0.1:4173/api/v1
 paths:
@@ -125,19 +125,71 @@ paths:
       summary: Read XDG user-directory availability
       responses:
         '200': { description: User directory availability }
-  /files:
+  /files/browse:
     get:
-      summary: List a supported user directory or mounted-media collection
+      summary: Browse an actual local directory, Recent, or Trash on a local PARA session
       parameters:
         - in: query
-          name: collection
-          required: true
-          schema:
-            type: string
-            enum: [videos, music, documents, downloads, discs, external]
+          name: path
+          schema: { type: string, default: home }
       responses:
-        '200': { description: Readable entries or connected media }
-        '404': { description: Unknown collection }
+        '200': { description: Current location, real entries, real places, and action capabilities }
+        '403': { description: Files are unavailable outside a local session }
+        '404': { description: The requested location does not exist }
+  /files/search:
+    get:
+      summary: Search names below one actual readable local directory
+      parameters:
+        - in: query
+          name: path
+          required: true
+          schema: { type: string }
+        - in: query
+          name: q
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200': { description: Up to 200 actual matching files and directories }
+        '400': { description: Search input or location is invalid }
+  /files/action:
+    post:
+      summary: Perform an explicitly enabled local file action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [open, create-folder, create-file, rename, copy, move, trash, restore, delete] }
+                paths: { type: array, maxItems: 100, items: { type: string } }
+                destination: { type: string }
+                name: { type: string }
+                trash_uri: { type: string }
+      responses:
+        '200': { description: Action completed }
+        '201': { description: File or folder created }
+        '202': { description: Open request accepted }
+        '403': { description: File actions were not explicitly enabled }
+        '409': { description: Destination name already exists }
+  /volumes/action:
+    post:
+      summary: Mount, unmount, or eject an actual removable block device through udisks2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, device]
+              properties:
+                action: { type: string, enum: [mount, unmount, eject] }
+                device: { type: string }
+      responses:
+        '200': { description: Device action completed }
+        '400': { description: Device or action is invalid }
+        '403': { description: Volume actions were not explicitly enabled }
   /apps:
     get:
       summary: List routable PARA apps and launchable Linux desktop entries

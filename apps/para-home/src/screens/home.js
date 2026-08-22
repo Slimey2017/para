@@ -7,6 +7,7 @@ const paths = {
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
   controller: '<path d="M7 8h10a5 5 0 0 1 4.8 6.4l-1 3.3a2.2 2.2 0 0 1-3.7.9L14.8 16H9.2l-2.3 2.6a2.2 2.2 0 0 1-3.7-.9l-1-3.3A5 5 0 0 1 7 8Z"/><path d="M7 11v4M5 13h4"/><circle cx="17" cy="12" r=".8" class="icon-fill"/><circle cx="19" cy="14" r=".8" class="icon-fill"/>',
   storage: '<path d="M4 6h16l2 12H2L4 6Z"/><path d="M3 15h18"/><circle cx="18" cy="17" r=".7" class="icon-fill"/>',
+  files: '<path d="M3 7h7l2 2h9v10H3V7Z"/><path d="M3 10h18"/>',
   network: '<path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16a5.5 5.5 0 0 1 7 0"/><circle cx="12" cy="20" r="1" class="icon-fill"/>',
   power: '<path d="M12 2v10"/><path d="M6.3 5.8a8 8 0 1 0 11.4 0"/>',
 };
@@ -33,7 +34,7 @@ function mainNavigation() {
 
 function applicationArtwork(application) {
   if (application.icon) return `<img src="${escapeHtml(application.icon)}" alt="" />`;
-  if (application.id === "para:bear-home") return '<span class="home-app__house" aria-hidden="true">⌂</span>';
+  if (application.id === "para:files") return '<span class="home-app__files" aria-hidden="true"><i></i></span>';
   return `<span class="home-app__letter" aria-hidden="true">${escapeHtml(application.name.slice(0, 1).toUpperCase())}</span>`;
 }
 
@@ -77,6 +78,7 @@ function contextMarkup(section, model) {
     return applicationStrip("Create", creatorApps, "No creation apps found");
   }
   const actions = [systemAction("Settings", "settings", "settings")];
+  if (model.capabilities.files) actions.push(systemAction("Files", "files", "files"));
   if (model.controller?.connected) actions.push(systemAction("Controllers", "controller", "controller"));
   if (model.capabilities.storage) actions.push(systemAction("Storage", "storage", "storage"));
   if (model.capabilities.network) actions.push(systemAction("Network", "network", "network"));

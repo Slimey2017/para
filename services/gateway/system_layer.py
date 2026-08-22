@@ -5,6 +5,7 @@ import configparser
 from datetime import datetime, timezone
 import hashlib
 import json
+import mimetypes
 import os
 from pathlib import Path
 import platform
@@ -13,11 +14,14 @@ import subprocess
 import tempfile
 import time
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
+import xml.etree.ElementTree as ElementTree
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _launch_enabled = False
 _controls_enabled = False
 _power_enabled = False
+_file_operations_enabled = False
 
 BACKGROUND_SELECTIONS = {"para-default", "para-aurora", "para-horizon", "para-midnight", "solid-black", "custom"}
 BACKGROUND_FITS = {"fill", "fit", "center", "stretch"}
@@ -25,11 +29,12 @@ HOME_WIDGETS = {"network", "storage", "system"}
 CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "network", "audio", "microphone", "controllers", "profile", "settings", "power"}
 
 
-def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False) -> None:
-    global _launch_enabled, _controls_enabled, _power_enabled
+def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False, file_operations_enabled: bool = False) -> None:
+    global _launch_enabled, _controls_enabled, _power_enabled, _file_operations_enabled
     _launch_enabled = launch_enabled
     _controls_enabled = controls_enabled
     _power_enabled = power_enabled
+    _file_operations_enabled = file_operations_enabled
 
 
 def health() -> dict[str, Any]:
@@ -74,6 +79,7 @@ def _safe_profile(profile: str) -> bool:
 def capabilities() -> dict[str, Any]:
     audio_state = audio()
     power_available = _power_enabled and shutil.which("systemctl") is not None
+    gio_available = shutil.which("gio") is not None
     return {
         "personalization": _controls_enabled,
         "custom_backgrounds": _controls_enabled,
@@ -86,6 +92,11 @@ def capabilities() -> dict[str, Any]:
         "switcher": False,
         "power": "system" if power_available else "session",
         "power_actions": ["suspend", "reboot", "poweroff"] if power_available else [],
+        "files": _controls_enabled,
+        "file_open": _file_operations_enabled and gio_available,
+        "file_operations": _file_operations_enabled,
+        "trash": _file_operations_enabled and gio_available,
+        "volume_actions": _file_operations_enabled and shutil.which("udisksctl") is not None,
     }
 
 
@@ -367,14 +378,23 @@ def network() -> dict[str, Any]:
 def _xdg_directories() -> dict[str, Path]:
     home = Path.home()
     result = {
-        "videos": home / "Videos",
-        "music": home / "Music",
+        "desktop": home / "Desktop",
         "documents": home / "Documents",
         "downloads": home / "Downloads",
+        "pictures": home / "Pictures",
+        "videos": home / "Videos",
+        "music": home / "Music",
     }
     config = home / ".config" / "user-dirs.dirs"
     if config.exists():
-        mapping = {"XDG_VIDEOS_DIR": "videos", "XDG_MUSIC_DIR": "music", "XDG_DOCUMENTS_DIR": "documents", "XDG_DOWNLOAD_DIR": "downloads"}
+        mapping = {
+            "XDG_DESKTOP_DIR": "desktop",
+            "XDG_VIDEOS_DIR": "videos",
+            "XDG_MUSIC_DIR": "music",
+            "XDG_DOCUMENTS_DIR": "documents",
+            "XDG_DOWNLOAD_DIR": "downloads",
+            "XDG_PICTURES_DIR": "pictures",
+        }
         for line in config.read_text(encoding="utf-8", errors="replace").splitlines():
             if "=" not in line:
                 continue
@@ -396,42 +416,426 @@ def directories() -> dict[str, Any]:
     return {"directories": rows}
 
 
-def _directory_items(path: Path) -> list[dict[str, Any]]:
-    if not path.is_dir() or not os.access(path, os.R_OK):
-        return []
-    rows = []
+def _display_path(path: Path) -> str:
+    home = Path.home()
     try:
-        entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold()))[:200]
+        relative = path.relative_to(home)
+    except ValueError:
+        return str(path)
+    return "Home" if str(relative) == "." else f"Home/{relative}"
+
+
+def _resolve_file_location(location: str) -> Path | str | None:
+    value = unquote(str(location or "home")).strip()
+    if not value or value == "home":
+        return Path.home()
+    if value in {"recent:", "trash:"}:
+        return value
+    if value == "internal":
+        return Path("/")
+    xdg = _xdg_directories()
+    if value in xdg:
+        return xdg[value]
+    if value.startswith("~"):
+        return Path(value).expanduser()
+    candidate = Path(value)
+    return candidate if candidate.is_absolute() else None
+
+
+def _file_type(path: Path, is_directory: bool) -> str:
+    if is_directory:
+        return "Folder"
+    mime = mimetypes.guess_type(path.name)[0]
+    if mime:
+        major, _, minor = mime.partition("/")
+        labels = {"image": "Image", "video": "Video", "audio": "Audio", "text": "Text document", "application": minor.replace("-", " ").title()}
+        return labels.get(major, mime)
+    return "File"
+
+
+def _file_row(path: Path, *, location: str | None = None, trash_uri: str | None = None) -> dict[str, Any] | None:
+    try:
+        stat = path.stat()
+        is_directory = path.is_dir()
     except (OSError, PermissionError):
+        return None
+    return {
+        "name": path.name or str(path),
+        "path": str(path),
+        "kind": "folder" if is_directory else "file",
+        "type": _file_type(path, is_directory),
+        "size": None if is_directory else stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "location": location or _display_path(path.parent),
+        "hidden": path.name.startswith("."),
+        "readable": os.access(path, os.R_OK),
+        "writable": os.access(path, os.W_OK),
+        "parent_writable": os.access(path.parent, os.W_OK),
+        "trash_uri": trash_uri,
+    }
+
+
+def _browse_directory(path: Path) -> tuple[int, dict[str, Any]]:
+    if not path.exists():
+        return 404, {"error": "location_not_found"}
+    if not path.is_dir() or not os.access(path, os.R_OK):
+        return 403, {"error": "location_unavailable"}
+    try:
+        entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold()))[:1000]
+    except (OSError, PermissionError):
+        return 403, {"error": "location_unavailable"}
+    items = [row for row in (_file_row(entry) for entry in entries) if row is not None]
+    parent = str(path.parent) if path != path.parent else None
+    return 200, {
+        "location": {"id": str(path), "path": str(path), "display_path": _display_path(path), "name": path.name or "Internal Storage", "parent": parent, "kind": "folder", "writable": os.access(path, os.W_OK)},
+        "items": items,
+    }
+
+
+def _recent_items() -> list[dict[str, Any]]:
+    source = Path.home() / ".local" / "share" / "recently-used.xbel"
+    if not source.is_file():
         return []
-    for entry in entries:
-        try:
-            stat = entry.stat()
-        except (OSError, PermissionError):
+    try:
+        root = ElementTree.parse(source).getroot()
+    except (OSError, ElementTree.ParseError):
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bookmark in root.iter():
+        if not bookmark.tag.endswith("bookmark"):
             continue
-        rows.append({
-            "name": entry.name,
-            "kind": "folder" if entry.is_dir() else "file",
-            "size": None if entry.is_dir() else stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-        })
+        href = bookmark.attrib.get("href", "")
+        parsed = urlparse(href)
+        if parsed.scheme != "file":
+            continue
+        path = Path(unquote(parsed.path))
+        if str(path) in seen or not path.exists():
+            continue
+        row = _file_row(path)
+        if row:
+            rows.append(row)
+            seen.add(str(path))
+        if len(rows) >= 200:
+            break
+    rows.sort(key=lambda item: item.get("modified") or "", reverse=True)
     return rows
 
 
-def collection(identifier: str) -> tuple[int, dict[str, Any]]:
-    normalized = identifier.casefold()
-    xdg = _xdg_directories()
-    if normalized in xdg:
-        path = xdg[normalized]
-        return 200, {"id": normalized, "name": normalized.title(), "available": path.is_dir(), "items": _directory_items(path)}
-    if normalized in {"external", "discs"}:
-        want_optical = normalized == "discs"
-        if want_optical:
-            mounts = [item for item in _mounts() if item["optical"]]
+def _trash_root() -> Path:
+    return Path.home() / ".local" / "share" / "Trash"
+
+
+def _trash_items() -> list[dict[str, Any]]:
+    root = _trash_root()
+    files = root / "files"
+    info = root / "info"
+    if not files.is_dir():
+        return []
+    rows = []
+    try:
+        entries = sorted(files.iterdir(), key=lambda item: item.name.casefold())[:1000]
+    except (OSError, PermissionError):
+        return []
+    for path in entries:
+        original = ""
+        details = info / f"{path.name}.trashinfo"
+        if details.is_file():
+            parser = configparser.ConfigParser(interpolation=None)
+            try:
+                parser.read(details, encoding="utf-8")
+                original = unquote(parser.get("Trash Info", "Path", fallback=""))
+            except (OSError, configparser.Error):
+                original = ""
+        row = _file_row(path, location=original or "Trash", trash_uri=f"trash:///{quote(path.name)}")
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _block_volumes() -> list[dict[str, Any]]:
+    executable = shutil.which("lsblk")
+    if not executable:
+        return []
+    try:
+        result = subprocess.run(
+            [executable, "-J", "-b", "-o", "NAME,PATH,LABEL,FSTYPE,SIZE,MOUNTPOINTS,RM,RO,TYPE,TRAN,MODEL"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=True,
+        )
+        document = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+    rows: list[dict[str, Any]] = []
+
+    def visit(node: dict[str, Any]) -> None:
+        device_type = str(node.get("type") or "")
+        removable = bool(node.get("rm")) or str(node.get("tran") or "").casefold() in {"usb", "mmc"}
+        optical = device_type == "rom" or str(node.get("fstype") or "").casefold() in {"iso9660", "udf"}
+        mountpoints = [value for value in (node.get("mountpoints") or []) if value]
+        if device_type in {"part", "rom"} and (removable or optical):
+            device = str(node.get("path") or "")
+            label = str(node.get("label") or node.get("model") or Path(device).name or "Drive").strip()
+            rows.append({
+                "id": f"volume:{device}",
+                "name": label,
+                "device": device,
+                "path": mountpoints[0] if mountpoints else None,
+                "mounted": bool(mountpoints),
+                "optical": optical,
+                "removable": removable,
+                "read_only": bool(node.get("ro")),
+                "filesystem": str(node.get("fstype") or ""),
+                "size": int(node.get("size") or 0),
+            })
+        for child in node.get("children") or []:
+            if isinstance(child, dict):
+                visit(child)
+
+    for device in document.get("blockdevices") or []:
+        if isinstance(device, dict):
+            visit(device)
+    return rows
+
+
+def file_places() -> list[dict[str, Any]]:
+    home = Path.home()
+    rows = [{"id": "home", "name": "Home", "path": str(home), "kind": "home", "available": True}]
+    labels = {"desktop": "Desktop", "documents": "Documents", "downloads": "Downloads", "pictures": "Pictures", "videos": "Videos", "music": "Music"}
+    for identifier, path in _xdg_directories().items():
+        if path.is_dir():
+            rows.append({"id": identifier, "name": labels[identifier], "path": str(path), "kind": "folder", "available": True})
+    recent_source = home / ".local" / "share" / "recently-used.xbel"
+    if recent_source.is_file():
+        rows.append({"id": "recent", "name": "Recent", "path": "recent:", "kind": "recent", "available": True})
+    rows.append({"id": "trash", "name": "Trash", "path": "trash:", "kind": "trash", "available": True})
+    rows.append({"id": "internal", "name": "Internal Storage", "path": "/", "kind": "storage", "available": True})
+    volumes = _block_volumes()
+    mounted_paths = {volume["path"] for volume in volumes if volume.get("path")}
+    devices = {volume["device"] for volume in volumes}
+    for volume in volumes:
+        rows.append({**volume, "kind": "disc" if volume["optical"] else "drive", "available": volume["mounted"]})
+    network_filesystems = {"nfs", "nfs4", "cifs", "smb3", "sshfs", "fuse.sshfs", "davfs", "davfs2", "fuse.rclone", "fuse.google-drive-ocamlfuse"}
+    cloud_filesystems = {"davfs", "davfs2", "fuse.rclone", "fuse.google-drive-ocamlfuse"}
+    for mount in _mounts():
+        if mount["mount"] in mounted_paths or mount["device"] in devices:
+            continue
+        filesystem = mount["filesystem"].casefold()
+        if filesystem in network_filesystems:
+            rows.append({
+                "id": f"network:{mount['mount']}",
+                "name": mount["name"],
+                "path": mount["mount"],
+                "kind": "cloud" if filesystem in cloud_filesystems else "network",
+                "available": True,
+                "mounted": True,
+                "device": None,
+            })
+        elif mount["external"]:
+            rows.append({
+                "id": f"mount:{mount['mount']}",
+                "name": mount["name"],
+                "path": mount["mount"],
+                "kind": "disc" if mount["optical"] else "drive",
+                "available": True,
+                "mounted": True,
+                "device": None,
+            })
+    return rows
+
+
+def browse_files(location: str) -> tuple[int, dict[str, Any]]:
+    if not _controls_enabled:
+        return 403, {"error": "files_unavailable"}
+    resolved = _resolve_file_location(location)
+    if resolved is None:
+        return 400, {"error": "invalid_location"}
+    if resolved == "recent:":
+        status, payload = 200, {"location": {"id": "recent:", "path": "recent:", "display_path": "Recent", "name": "Recent", "parent": None, "kind": "recent", "writable": False}, "items": _recent_items()}
+    elif resolved == "trash:":
+        status, payload = 200, {"location": {"id": "trash:", "path": "trash:", "display_path": "Trash", "name": "Trash", "parent": None, "kind": "trash", "writable": False}, "items": _trash_items()}
+    else:
+        status, payload = _browse_directory(resolved)
+    if status == 200:
+        payload["places"] = file_places()
+        payload["capabilities"] = {
+            "open": _file_operations_enabled and shutil.which("gio") is not None,
+            "write": _file_operations_enabled,
+            "trash": _file_operations_enabled and shutil.which("gio") is not None,
+            "volumes": _file_operations_enabled and shutil.which("udisksctl") is not None,
+        }
+    return status, payload
+
+
+def search_files(location: str, query: str) -> tuple[int, dict[str, Any]]:
+    if not _controls_enabled:
+        return 403, {"error": "files_unavailable"}
+    term = str(query or "").strip().casefold()
+    resolved = _resolve_file_location(location)
+    if not term or not isinstance(resolved, Path) or not resolved.is_dir() or not os.access(resolved, os.R_OK):
+        return 400, {"error": "invalid_search"}
+    rows: list[dict[str, Any]] = []
+    scanned = 0
+    for root, directories, files in os.walk(resolved, followlinks=False):
+        directories[:] = [name for name in directories if not name.startswith(".")]
+        for name in [*directories, *files]:
+            scanned += 1
+            if term in name.casefold():
+                row = _file_row(Path(root) / name)
+                if row:
+                    rows.append(row)
+            if len(rows) >= 200 or scanned >= 20_000:
+                break
+        if len(rows) >= 200 or scanned >= 20_000:
+            break
+    return 200, {"query": query, "items": rows, "limited": len(rows) >= 200 or scanned >= 20_000}
+
+
+def _requested_paths(value: Any) -> list[Path] | None:
+    if not isinstance(value, list) or not 1 <= len(value) <= 100:
+        return None
+    paths = []
+    for raw in value:
+        if not isinstance(raw, str) or not raw or "\x00" in raw:
+            return None
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            return None
+        paths.append(path)
+    return paths
+
+
+def _safe_new_name(value: Any) -> str | None:
+    name = str(value or "").strip()
+    if not name or name in {".", ".."} or Path(name).name != name or "\x00" in name:
+        return None
+    return name
+
+
+def file_action(action: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    if not _file_operations_enabled:
+        return 403, {"error": "file_actions_unavailable"}
+    gio = shutil.which("gio")
+    if action == "open":
+        paths = _requested_paths(payload.get("paths"))
+        if not gio or not paths or len(paths) != 1 or not paths[0].exists():
+            return 400, {"error": "invalid_open_request"}
+        try:
+            subprocess.Popen([gio, "open", str(paths[0])], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            return 503, {"error": "open_failed"}
+        return 202, {"accepted": True}
+    if action in {"create-folder", "create-file"}:
+        destination = Path(str(payload.get("destination") or "")).expanduser()
+        name = _safe_new_name(payload.get("name"))
+        if not destination.is_absolute() or not destination.is_dir() or not name:
+            return 400, {"error": "invalid_create_request"}
+        target = destination / name
+        if target.exists():
+            return 409, {"error": "name_exists"}
+        try:
+            target.mkdir() if action == "create-folder" else target.open("x", encoding="utf-8").close()
+        except (OSError, PermissionError):
+            return 403, {"error": "create_failed"}
+        return 201, {"created": str(target)}
+    if action == "rename":
+        paths = _requested_paths(payload.get("paths"))
+        name = _safe_new_name(payload.get("name"))
+        if not paths or len(paths) != 1 or not paths[0].exists() or not name:
+            return 400, {"error": "invalid_rename_request"}
+        destination = paths[0].with_name(name)
+        if destination.exists():
+            return 409, {"error": "name_exists"}
+        try:
+            paths[0].rename(destination)
+        except (OSError, PermissionError):
+            return 403, {"error": "rename_failed"}
+        return 200, {"renamed": str(destination)}
+    if action in {"copy", "move"}:
+        paths = _requested_paths(payload.get("paths"))
+        destination = Path(str(payload.get("destination") or "")).expanduser()
+        if not paths or not destination.is_absolute() or not destination.is_dir():
+            return 400, {"error": "invalid_transfer_request"}
+        targets = [destination / source.name for source in paths]
+        if any(not source.exists() for source in paths) or any(target.exists() for target in targets):
+            return 409, {"error": "transfer_conflict"}
+        try:
+            for source, target in zip(paths, targets):
+                if action == "move":
+                    shutil.move(str(source), str(target))
+                elif source.is_dir():
+                    shutil.copytree(source, target, symlinks=True)
+                else:
+                    shutil.copy2(source, target, follow_symlinks=False)
+        except (OSError, PermissionError, shutil.Error):
+            return 403, {"error": "transfer_failed"}
+        return 200, {"completed": len(paths), "action": action}
+    if action == "trash":
+        paths = _requested_paths(payload.get("paths"))
+        if not gio or not paths or any(not path.exists() for path in paths):
+            return 400, {"error": "invalid_trash_request"}
+        try:
+            for path in paths:
+                subprocess.run([gio, "trash", str(path)], capture_output=True, timeout=15, check=True)
+        except (OSError, subprocess.SubprocessError):
+            return 503, {"error": "trash_failed"}
+        return 200, {"trashed": len(paths)}
+    if action == "delete":
+        paths = _requested_paths(payload.get("paths"))
+        trash_root = _trash_root()
+        trash_files = trash_root / "files"
+        try:
+            trash_parent = trash_files.resolve(strict=True)
+        except OSError:
+            return 400, {"error": "invalid_delete_request"}
+        if not paths or any(not path.exists() or path.parent.resolve() != trash_parent for path in paths):
+            return 400, {"error": "invalid_delete_request"}
+        try:
+            for path in paths:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                (trash_root / "info" / f"{path.name}.trashinfo").unlink(missing_ok=True)
+        except (OSError, PermissionError, shutil.Error):
+            return 403, {"error": "delete_failed"}
+        return 200, {"deleted": len(paths)}
+    if action == "restore":
+        uri = str(payload.get("trash_uri") or "")
+        if not gio or not uri.startswith("trash:///"):
+            return 400, {"error": "invalid_restore_request"}
+        try:
+            subprocess.run([gio, "trash", "--restore", uri], capture_output=True, timeout=15, check=True)
+        except (OSError, subprocess.SubprocessError):
+            return 503, {"error": "restore_failed"}
+        return 200, {"restored": True}
+    return 400, {"error": "unknown_file_action"}
+
+
+def volume_action(action: str, device: str) -> tuple[int, dict[str, Any]]:
+    if not _file_operations_enabled:
+        return 403, {"error": "volume_actions_unavailable"}
+    volume = next((item for item in _block_volumes() if item["device"] == device), None)
+    udisksctl = shutil.which("udisksctl")
+    if not volume or not udisksctl or action not in {"mount", "unmount", "eject"}:
+        return 400, {"error": "invalid_volume_action"}
+    try:
+        if action == "mount":
+            subprocess.run([udisksctl, "mount", "-b", device], capture_output=True, timeout=20, check=True)
+        elif action == "unmount":
+            subprocess.run([udisksctl, "unmount", "-b", device], capture_output=True, timeout=20, check=True)
         else:
-            mounts = [item for item in _mounts() if item["external"] and not item["optical"]]
-        return 200, {"id": normalized, "name": "Discs" if want_optical else "External Drives", "available": bool(mounts), "items": [{"name": item["name"], "kind": "drive", "size": None, "modified": None, "free_gb": item["free_gb"]} for item in mounts]}
-    return 404, {"error": "collection_not_found"}
+            if volume["mounted"]:
+                subprocess.run([udisksctl, "unmount", "-b", device], capture_output=True, timeout=20, check=True)
+            if volume["optical"] and shutil.which("eject"):
+                subprocess.run([shutil.which("eject"), device], capture_output=True, timeout=20, check=True)
+            else:
+                subprocess.run([udisksctl, "power-off", "-b", device], capture_output=True, timeout=20, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return 503, {"error": "volume_action_failed"}
+    return 200, {"completed": True, "action": action, "device": device}
 
 
 def _application_dirs() -> list[Path]:
@@ -547,9 +951,9 @@ def _desktop_entries() -> dict[str, dict[str, Any]]:
 
 
 def applications() -> dict[str, Any]:
-    built_in = {"id": "para:bear-home", "name": "Bear Home", "category": "Tools", "roles": [], "icon": None, "launch": {"kind": "route", "route": "bear-home"}}
+    built_in = {"id": "para:files", "name": "Files", "category": "Tools", "roles": [], "icon": None, "launch": {"kind": "route", "route": "files"}}
     linux = [{key: value for key, value in item.items() if not key.startswith("_")} for item in _desktop_entries().values()]
-    apps = [built_in, *linux]
+    apps = ([built_in] if _controls_enabled else []) + linux
     categories = [name for name in ["All Apps", "Entertainment", "Tools"] if name == "All Apps" or any(item["category"] == name for item in apps)]
     return {"applications": apps, "categories": categories}
 

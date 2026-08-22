@@ -1,6 +1,7 @@
 id = "bear-home"
-status = "read-only"
-frontend_routes = ["bear-home", "files", "downloads"]
-current_provider = "services/gateway/system_layer.py"
-future_runtime = "Indexed metadata service over Tracker/SPARQL or a PARA-owned SQLite index"
-linux_apis = ["xdg-user-dirs", "udisks2", "inotify"]
+status = "future-game"
+frontend_routes = []
+current_provider = "none"
+preserved_artwork = "apps/para-home/assets/bear-home-room.png"
+future_runtime = "Direct-character 2D exploration game consuming the PARA Files service"
+linux_apis = ["PARA Files API", "SDL GameController", "xdg-desktop-portal"]

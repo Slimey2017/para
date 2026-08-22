@@ -2,5 +2,5 @@ id = "vrus"
 status = "contract-only"
 frontend_routes = []
 current_provider = "none"
-future_runtime = "OpenXR compositor bridge and capability-scoped Bear Home data adapter"
+future_runtime = "OpenXR session bridge and capability-scoped PARA Files data adapter for the future Bear Home world"
 linux_apis = ["OpenXR", "PipeWire", "Wayland", "udev"]

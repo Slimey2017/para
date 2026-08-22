@@ -15,8 +15,14 @@ if [[ "${PARA_ENABLE_POWER_ACTIONS:-0}" == "1" ]]; then
   PARA_POWER_ARGS+=(--enable-power-actions)
 fi
 
+PARA_FILE_ARGS=()
+if [[ "${PARA_ENABLE_FILE_OPERATIONS:-0}" == "1" ]]; then
+  PARA_FILE_ARGS+=(--enable-file-operations)
+fi
+
 exec python3 "$PARA_REPO_ROOT/services/gateway/server.py" \
   --host "$PARA_DEV_HOST" \
   --port "$PARA_DEV_PORT" \
   "${PARA_LAUNCH_ARGS[@]}" \
-  "${PARA_POWER_ARGS[@]}"
+  "${PARA_POWER_ARGS[@]}" \
+  "${PARA_FILE_ARGS[@]}"

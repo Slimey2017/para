@@ -9,12 +9,12 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_SCREENS = {
-    "startup", "intro", "setup", "login", "profiles", "home", "apps", "bear-home", "files",
+    "startup", "intro", "setup", "login", "profiles", "home", "apps", "files",
     "downloads", "controller", "storage", "settings", "display", "accessibility",
     "network", "account", "power", "health", "recovery", "personalization", "background",
     "control-center-settings",
 }
-REQUIRED_SERVICES = {"accounts", "bear-home", "hardware", "network", "optical", "parastore", "power", "pulsewave", "recovery", "security", "updates", "vrus"}
+REQUIRED_SERVICES = {"accounts", "bear-home", "files", "hardware", "network", "optical", "parastore", "power", "pulsewave", "recovery", "security", "updates", "vrus"}
 
 
 def fail(message: str) -> None:
@@ -58,6 +58,8 @@ def main() -> int:
         ROOT / "apps/para-home/assets/background-violet-horizon.png",
         ROOT / "apps/para-home/assets/background-midnight-flow.png",
         ROOT / "apps/para-home/assets/background-matte-black.png",
+        ROOT / "apps/para-home/src/screens/files.js",
+        ROOT / "apps/para-home/src/future/bear-home-game.js",
         ROOT / "apps/para-home/src/services/power-adapter.js",
         ROOT / "apps/para-home/src/ui/power-experience.js",
         ROOT / "services/gateway/server.py",

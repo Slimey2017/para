@@ -1,8 +1,8 @@
 const FOCUSABLE = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
 export class FocusManager {
-  constructor({ confirm, back, paraTap, paraHold, shoulder }) {
-    this.handlers = { confirm, back, paraTap, paraHold, shoulder };
+  constructor({ confirm, back, paraTap, paraHold, shoulder, secondary, options }) {
+    this.handlers = { confirm, back, paraTap, paraHold, shoulder, secondary, options };
     this.current = null;
     this.paraKeyDown = false;
     this.paraHoldTimer = null;
@@ -17,7 +17,7 @@ export class FocusManager {
   }
 
   candidates() {
-    const scope = document.querySelector(".power-confirm:not([hidden])") || document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
+    const scope = document.querySelector(".files-dialog:not([hidden])") || document.querySelector(".files-context:not([hidden])") || document.querySelector(".power-confirm:not([hidden])") || document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
     return [...scope.querySelectorAll(FOCUSABLE)].filter((node) => {
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && node.getAttribute("aria-disabled") !== "true";
@@ -25,7 +25,7 @@ export class FocusManager {
   }
 
   focusFirst() {
-    const scope = document.querySelector(".power-confirm:not([hidden])") || document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
+    const scope = document.querySelector(".files-dialog:not([hidden])") || document.querySelector(".files-context:not([hidden])") || document.querySelector(".power-confirm:not([hidden])") || document.querySelector(".background-confirm:not([hidden])") || document.querySelector("#para-overlay:not([hidden])") || document;
     const preferred = scope.querySelector("[data-autofocus='true']");
     const target = preferred || this.candidates()[0];
     if (target) requestAnimationFrame(() => this.setCurrent(target, true));
@@ -74,6 +74,8 @@ export class FocusManager {
 
   onKeyDown(event) {
     const directions = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+    const textEditing = event.target.matches?.("input:not([type='range']),textarea,select");
+    if (textEditing && (directions[event.key] || event.key === "Enter" || (!event.ctrlKey && !event.metaKey && event.key.length === 1))) return;
     if (directions[event.key]) {
       event.preventDefault();
       this.move(directions[event.key]);
@@ -94,6 +96,12 @@ export class FocusManager {
       this.handlers.shoulder(-1);
     } else if (event.key === "PageDown") {
       this.handlers.shoulder(1);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      this.handlers.secondary();
+    } else if (event.key.toLowerCase() === "y" && !event.target.matches("input,textarea")) {
+      event.preventDefault();
+      this.handlers.options();
     }
   }
 

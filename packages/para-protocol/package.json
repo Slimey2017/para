@@ -1,6 +1,6 @@
 {
   "name": "@para/protocol",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Shared TypeScript contracts for PARA Home and system services"

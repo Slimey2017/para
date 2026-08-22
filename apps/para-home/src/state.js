@@ -25,7 +25,6 @@ const defaults = {
   highContrast: false,
   largeText: false,
   displayMode: "Living room",
-  fileCollection: "downloads",
   profilePreferences: {},
 };
 

@@ -3,7 +3,7 @@ const KEYBOARD_CONTROLLER = Object.freeze({
   name: "Keyboard and mouse",
   type: "keyboard",
   typeLabel: "Keyboard",
-  prompts: { confirm: "Enter", back: "Esc", secondary: "C", options: "Y", para: "PARA" },
+  prompts: { confirm: "Enter", back: "Esc", secondary: "⇧F10", options: "Y", para: "PARA" },
 });
 
 function identifyController(name = "Controller") {
@@ -27,8 +27,8 @@ export function keyboardController() {
 // The browser Gamepad API is the shared input adapter. Linux-native controller
 // services can provide the same normalized shape without changing the UI.
 export class GamepadNavigation {
-  constructor({ move, confirm, back, paraTap, paraHold, shoulder, connected }) {
-    this.handlers = { move, confirm, back, paraTap, paraHold, shoulder, connected };
+  constructor({ move, confirm, back, paraTap, paraHold, shoulder, secondary, options, connected }) {
+    this.handlers = { move, confirm, back, paraTap, paraHold, shoulder, secondary, options, connected };
     this.previous = [];
     this.lastAxisMove = 0;
     this.activeIndex = null;
@@ -71,6 +71,8 @@ export class GamepadNavigation {
     const edge = (index) => pressed[index] && !this.previous[index];
     if (edge(0)) this.handlers.confirm();
     if (edge(1)) this.handlers.back();
+    if (edge(2)) this.handlers.secondary();
+    if (edge(3)) this.handlers.options();
     const paraIndex = gamepad.buttons.length > 16 ? 16 : 9;
     const now = performance.now();
     if (pressed[paraIndex] && !this.previous[paraIndex]) {

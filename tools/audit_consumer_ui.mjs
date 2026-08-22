@@ -8,6 +8,7 @@ const boot = await import("../apps/para-home/src/screens/boot.js");
 const auth = await import("../apps/para-home/src/screens/auth.js");
 const home = await import("../apps/para-home/src/screens/home.js");
 const libraries = await import("../apps/para-home/src/screens/libraries.js");
+const files = await import("../apps/para-home/src/screens/files.js");
 const system = await import("../apps/para-home/src/screens/system.js");
 const personalization = await import("../apps/para-home/src/screens/personalization.js");
 
@@ -18,9 +19,8 @@ const renderers = {
   login: auth.loginScreen,
   home: home.homeScreen,
   apps: libraries.appsScreen,
-  "bear-home": libraries.bearHomeScreen,
-  files: libraries.filesScreen,
-  downloads: libraries.downloadsScreen,
+  files: files.filesScreen,
+  downloads: files.downloadsScreen,
   controller: system.controllerScreen,
   storage: system.storageScreen,
   settings: system.settingsScreen,

@@ -29,9 +29,13 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
         "/api/v1/directories": system_layer.directories,
         "/api/v1/apps": system_layer.applications,
     }
-    if path == "/api/v1/files":
-        identifier = (query or {}).get("collection", [""])[0]
-        return system_layer.collection(identifier)
+    if path == "/api/v1/files/browse":
+        location = (query or {}).get("path", ["home"])[0]
+        return system_layer.browse_files(location)
+    if path == "/api/v1/files/search":
+        location = (query or {}).get("path", ["home"])[0]
+        term = (query or {}).get("q", [""])[0]
+        return system_layer.search_files(location, term)
     if path == "/api/v1/personalization":
         profile = (query or {}).get("profile", [""])[0]
         return system_layer.personalization(profile)
@@ -41,7 +45,7 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
 
 
 class ParaHandler(SimpleHTTPRequestHandler):
-    server_version = "PARA/0.4.5"
+    server_version = "PARA/0.5.0"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(HOME_ROOT), **kwargs)
@@ -143,6 +147,10 @@ class ParaHandler(SimpleHTTPRequestHandler):
             status, result = system_layer.save_personalization(str(payload.get("profile", "")), payload.get("preferences"))
         elif request.path == "/api/v1/power":
             status, result = system_layer.request_power_action(str(payload.get("action", "")))
+        elif request.path == "/api/v1/files/action":
+            status, result = system_layer.file_action(str(payload.get("action", "")), payload)
+        elif request.path == "/api/v1/volumes/action":
+            status, result = system_layer.volume_action(str(payload.get("action", "")), str(payload.get("device", "")))
         else:
             self._send_json(404, {"error": "not_found"})
             return
@@ -156,6 +164,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-nonlocal", action="store_true", help="Permit a hosted public bind")
     parser.add_argument("--enable-app-launch", action="store_true", help="Expose and launch discovered Linux desktop applications")
     parser.add_argument("--enable-power-actions", action="store_true", help="Permit fixed suspend, reboot, and poweroff requests on a local bind")
+    parser.add_argument("--enable-file-operations", action="store_true", help="Permit file opening, file changes, Trash, and volume actions on a local bind")
     return parser.parse_args()
 
 
@@ -174,12 +183,19 @@ def main() -> int:
     validate_bind(args.host, args.allow_nonlocal)
     launch_enabled = args.enable_app_launch and not args.allow_nonlocal
     power_enabled = args.enable_power_actions and not args.allow_nonlocal
+    file_operations_enabled = args.enable_file_operations and not args.allow_nonlocal
     controls_enabled = not args.allow_nonlocal
-    system_layer.configure(launch_enabled=launch_enabled, controls_enabled=controls_enabled, power_enabled=power_enabled)
+    system_layer.configure(
+        launch_enabled=launch_enabled,
+        controls_enabled=controls_enabled,
+        power_enabled=power_enabled,
+        file_operations_enabled=file_operations_enabled,
+    )
     server = ThreadingHTTPServer((args.host, args.port), ParaHandler)
     print(f"PARA Home: http://{args.host}:{args.port}")
     print("Linux application launch is enabled." if launch_enabled else "Linux application launch is off.")
     print("Linux power actions are enabled." if power_enabled else "Linux power actions are off.")
+    print("Linux file operations are enabled." if file_operations_enabled else "Linux file operations are read-only.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -36,17 +36,38 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("--allow-nonlocal", launcher)
         self.assertIn('${PORT:-10000}', launcher)
 
-    def test_bear_home_uses_clean_room_and_spatial_hotspots(self):
+    def test_bear_home_art_is_preserved_for_a_future_direct_control_game(self):
         art = ROOT / "apps/para-home/assets/bear-home-room.png"
         self.assertTrue(art.exists())
         self.assertGreater(art.stat().st_size, 3_000_000)
         self.assertEqual(hashlib.sha256(art.read_bytes()).hexdigest(), "25e5575eb43e90356a4b937a66be55ddec3494abb5c45d7f222afe6493a0b3bd")
-        screen = (ROOT / "apps/para-home/src/screens/libraries.js").read_text(encoding="utf-8")
+        future = (ROOT / "apps/para-home/src/future/bear-home-game.js").read_text(encoding="utf-8")
+        manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
+        library = (ROOT / "apps/para-home/src/screens/libraries.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
-        for label in ["Videos", "Discs", "Music", "Documents", "External Drives", "Downloads", "Bear Home menu"]:
-            self.assertIn(f'label: "{label}"', screen)
-        self.assertIn("data-focus-label", screen)
-        self.assertIn("object-fit: contain", css)
+        self.assertIn('inputModel: "direct-character-control"', future)
+        self.assertIn('description: "Explore your files as a cozy interactive world."', future)
+        self.assertNotRegex(manifest, r'id:\s*"bear-home"')
+        self.assertNotIn("Bear Home", library)
+        self.assertNotIn("bear-hotspot", css)
+
+    def test_para_files_replaces_bear_home_as_the_file_manager(self):
+        files = (ROOT / "apps/para-home/src/screens/files.js").read_text(encoding="utf-8")
+        gateway = (ROOT / "services/gateway/system_layer.py").read_text(encoding="utf-8")
+        launcher = (ROOT / "scripts/dev.sh").read_text(encoding="utf-8")
+        hosted = (ROOT / "scripts/render-start.sh").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        for command in ["back", "forward", "up", "refresh", "new-folder", "view", "sort", "options"]:
+            self.assertIn(f'data-files-command="{command}"', files)
+        for shortcut in ['event.key.toLowerCase() === "c"', 'event.key.toLowerCase() === "x"', 'event.key.toLowerCase() === "v"', 'event.key === "Delete"', 'event.key === "F2"', 'event.key === "Backspace"']:
+            self.assertIn(shortcut, files)
+        for action in ['"create-folder"', '"create-file"', '"rename"', '"copy"', '"move"', '"trash"', '"restore"', '"delete"']:
+            self.assertIn(action, gateway)
+        self.assertIn("PARA_ENABLE_FILE_OPERATIONS", launcher)
+        self.assertIn("--enable-file-operations", launcher)
+        self.assertNotIn("--enable-file-operations", hosted)
+        self.assertIn('files: filesScreen', app)
+        self.assertNotIn('"bear-home"', app)
 
     def test_home_keeps_five_primary_buttons(self):
         screen = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")

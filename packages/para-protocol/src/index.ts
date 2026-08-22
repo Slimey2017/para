@@ -2,6 +2,7 @@ export type ServiceStatus =
   | "available"
   | "local-opt-in"
   | "local-session"
+  | "future-game"
   | "read-only"
   | "mounted-media-read-only"
   | "browser-gamepad"
@@ -52,6 +53,26 @@ export interface ParaCapabilities {
   switcher: false;
   power: "session" | "system";
   power_actions: Array<"suspend" | "reboot" | "poweroff">;
+  files: boolean;
+  file_open: boolean;
+  file_operations: boolean;
+  trash: boolean;
+  volume_actions: boolean;
+}
+
+export interface ParaFileEntry {
+  name: string;
+  path: string;
+  kind: "folder" | "file";
+  type: string;
+  size: number | null;
+  modified: string;
+  location: string;
+  hidden: boolean;
+  readable: boolean;
+  writable: boolean;
+  parent_writable: boolean;
+  trash_uri: string | null;
 }
 
 export interface ParaProfilePreferences {
@@ -77,7 +98,10 @@ export const apiPaths = {
   personalization: "/api/v1/personalization",
   customBackground: "/api/v1/backgrounds/custom",
   directories: "/api/v1/directories",
-  files: "/api/v1/files",
+  browseFiles: "/api/v1/files/browse",
+  searchFiles: "/api/v1/files/search",
+  fileAction: "/api/v1/files/action",
+  volumeAction: "/api/v1/volumes/action",
   applications: "/api/v1/apps",
   launchApplication: "/api/v1/apps/launch",
 } as const;

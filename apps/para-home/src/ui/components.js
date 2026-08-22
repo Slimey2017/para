@@ -45,7 +45,7 @@ export function toggleRow({ title, meta, action, value, icon = "◉", autofocus 
 }
 
 export function hints({ back = true, context = false, options = false } = {}) {
-  return `<footer class="bottom-nav control-legend"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span>${back ? `<span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span>` : ""}${context ? `<span><b class="prompt-key prompt-key--green" data-prompt="secondary">C</b>Context</span>` : ""}${options ? `<span><b class="prompt-key prompt-key--yellow" data-prompt="options">M</b>Options</span>` : ""}</footer>`;
+  return `<footer class="bottom-nav control-legend"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span>${back ? `<span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span>` : ""}${context ? `<span><b class="prompt-key prompt-key--green" data-prompt="secondary">⇧F10</b>Context</span>` : ""}${options ? `<span><b class="prompt-key prompt-key--yellow" data-prompt="options">Y</b>Options</span>` : ""}</footer>`;
 }
 
 export function page({ title, description = "", eyebrow = "", body, className = "", back = true, section = "" }) {

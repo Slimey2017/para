@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.4.5 is the first working skeleton of a Linux-powered home console/PC
+PARA 0.5.0 is the working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -11,8 +11,8 @@ Linux capabilities.
 The current repository boots through the reserved PARA startup sequence,
 completes a seven-step first-time setup, supports local profile selection, opens
 PARA Home, lists only applications the current runtime can actually open, and
-provides a spatial Bear Home file explorer over real user directories and
-mounted media. PARA Home now keeps the selected per-profile background visible,
+provides a classic PARA Files interface over real Linux directories and mounted
+media. PARA Home keeps the selected per-profile background visible,
 the PARA action opens a persistent Control Center overlay, and local PipeWire
 controls appear only when the host exposes them. No fictional catalog,
 application, notification, network, storage, or success data is used.
@@ -28,9 +28,12 @@ The normal launcher is safe to run on a development PC:
 - It does not edit a bootloader, `/boot`, partitions, filesystems, firmware,
   BIOS/UEFI, kernel modules, graphics drivers, or the existing desktop.
 - It does not install or enable systemd units.
-- It does not format, erase, mount, eject, copy, move, rename, or delete user
-  documents. It can atomically replace PARA-owned profile preferences and a
-  selected wallpaper in XDG config/data directories.
+- It never formats or erases storage. File opening, creation, rename, copy,
+  move, Trash, restore, mount, unmount, and eject controls are absent in the
+  default run. Those actions exist only on a loopback session deliberately
+  started with `PARA_ENABLE_FILE_OPERATIONS=1`.
+- It can atomically replace PARA-owned profile preferences and a selected
+  wallpaper in XDG config/data directories.
 - The gateway uses unprivileged Linux information and local session controls.
   Linux app launch is off
   unless the developer explicitly sets `PARA_ENABLE_APP_LAUNCH=1`.
@@ -75,7 +78,8 @@ flowchart TD
     Linux["Linux and drivers"] --> Gateway["PARA Linux gateway"]
     Gateway --> API["PARA APIs"]
     API --> Home["PARA Home"]
-    Home --> Apps["Apps and Bear Home"]
+    Home --> Apps["Games and applications"]
+    API --> Files["PARA Files"]
 ```
 
 Linux is the source of truth. PARA does not maintain a second fictional view of
@@ -112,6 +116,8 @@ PARA/
 │           ├── gamepad.js
 │           ├── router.js
 │           ├── screen-manifest.js
+│           ├── future/
+│           │   └── bear-home-game.js
 │           ├── services/
 │           │   ├── para-api.js
 │           │   └── power-adapter.js
@@ -121,6 +127,7 @@ PARA/
 │           │   ├── boot.js
 │           │   ├── home.js
 │           │   ├── libraries.js
+│           │   ├── files.js
 │           │   ├── personalization.js
 │           │   └── system.js
 │           └── ui/
@@ -158,6 +165,7 @@ PARA/
 │       ├── accounts.toml
 │       ├── audio.toml
 │       ├── bear-home.toml
+│       ├── files.toml
 │       ├── hardware.toml
 │       ├── network.toml
 │       ├── optical.toml
@@ -203,7 +211,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.4.5`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.5.0`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -217,21 +225,23 @@ PARA/
 | `assets/background-matte-black.png` | Supplied Matte Black built-in wallpaper. | PNG, 1672×941 RGBA | Working and preserved byte-for-byte. | Add licensed source records and optimized display variants. Read by `state.js` and `personalization.js`. |
 | `assets/para-home-background.png` | Earlier independent purple planet source artwork retained for project history; it is not a selectable wallpaper. | PNG | Asset only. | Remove in a later asset cleanup after release migration review. No runtime file communicates with it. |
 | `assets/para-logo.png` | Official PARA logo supplied by the project owner and used byte-for-byte for system branding and power transitions. | PNG with alpha | Working; proportions and colors are unchanged. | Add vector/export variants only from the official source artwork. Used by `components.js`, `home.js`, `boot.js`, and `power-experience.js`. |
-| `assets/bear-home-room.png` | Clean 1672×941 room + furniture + PARA bear with zero baked interface. | PNG | Working and preserved byte-for-byte from the supplied art. | Add separate animation layers when proper assets exist. Used only by `libraries.js`. |
-| `styles.css` | Complete consumer design system: black/purple atmosphere, translucent panels, console spacing, 180–250 ms focus motion, disabled states, setup, apps, Bear Home, system pages, power confirmation, and full-screen power sequences. | Modern responsive CSS | Working. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
+| `assets/bear-home-room.png` | Clean 1672×941 room + furniture + PARA bear with zero baked interface. PARA preserves it for the future Bear Home exploration game. | PNG | Preserved byte-for-byte; intentionally unused by normal Files. | Split the bear and objects into animation layers when the direct-character game is built. Referenced only by `future/bear-home-game.js`. |
+| `styles.css` | Consumer design system plus a compact classic file-manager layout, black/purple console surfaces, focus motion, setup, apps, system pages, and power sequences. | Modern responsive CSS | Working. The old Bear hotspot/file-manager rules are removed. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
 | `src/app.js` | Runtime composition, route transitions, Control Center lifecycle, profile hydration, actions, controller prompts, service activation, and power-input locking. | JavaScript | Working. | Split domain controllers and add typed error boundaries. Talks to every screen, router, input, state, overlay, and API adapter. |
 | `src/router.js` | Restricts navigation to the screen manifest and keeps an in-shell back stack. | JavaScript + hash routing | Working. | Add route guards and activity suspension when real games/apps exist. |
 | `src/focus-manager.js` | Geometry-based directional focus, pointer focus, range adjustment, Tab compatibility, Enter, Escape, PARA tap/hold, and shoulder navigation. | JavaScript DOM APIs | Working. | Add wrap policies, virtual lists, RTL, focus groups, and announcements. |
 | `src/gamepad.js` | Normalizes Browser Gamepad input, detects controller families, and maps a dedicated or fallback button to PARA tap/hold. | JavaScript Gamepad API | Working when the browser exposes a controller. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
-| `src/state.js` | Stores first boot, local session, accessibility, selected Bear collection, and separate background/Control Center preferences for every profile. It maps the four built-in wallpaper ids to the supplied image files and still reads older profile ids safely. | JavaScript `localStorage` plus gateway synchronization | Working; selected wallpaper, fitting, and dimming survive navigation and restart. It is not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
-| `src/screen-manifest.js` | Authoritative set of 23 reachable screens. The Control Center is an overlay, not a route. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
-| `src/services/para-api.js` | One client boundary for capabilities, applications, host state, PipeWire controls, profile personalization, files, custom-image upload, and fixed power requests. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
+| `src/state.js` | Stores first boot, local session, accessibility, and separate background/Control Center preferences for every profile. It maps the four built-in wallpaper ids to supplied image files. | JavaScript `localStorage` plus gateway synchronization | Working; selected wallpaper, fitting, and dimming survive navigation and restart. It is not an identity store. | Move identity and authorization to a versioned account service while retaining per-profile settings. |
+| `src/screen-manifest.js` | Authoritative set of 22 reachable screens. Bear Home is not a route; the Control Center remains an overlay. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
+| `src/services/para-api.js` | Client boundary for capabilities, applications, Linux state, personalization, PARA Files browse/search/actions, volume actions, custom images, and fixed power requests. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
 | `src/services/power-adapter.js` | Separates session visuals from optional Linux suspend/reboot/poweroff requests. It also performs the browser restart handoff and graceful close attempt. | JavaScript Fetch, session storage, window lifecycle APIs | Working. Hosted poweroff ends permanently black if the window cannot close; local host actions require the gateway capability. | Replace browser lifecycle fallbacks with a dedicated installed shell bridge. Communicates with `para-api.js` and `power-experience.js`. |
 | `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
 | `src/screens/boot.js` | Startup, five reserved intro stages, and Welcome → Display → Network → Accessibility → Privacy → Account/Profile → Ready setup. | JavaScript + CSS animation | Working. Display/network values are live; final rendered startup assets do not exist yet. | Replace each animation stage without changing routing; add real calibration providers. |
 | `src/screens/auth.js` | “Who’s playing?”, Player One, Guest, selected-profile Continue, and Switch Profile. | JavaScript | Working as a local session flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
 | `src/screens/home.js` | Wallpaper-first PARA Home with exactly Continue, Explore, Create, Community, and System as a single horizontal tab row. Focus replaces one contextual strip; Explore and Create consume discovered applications, while System exposes only capability-backed actions. | JavaScript + inline SVG | Working. No Home dashboard cards, permanent widgets, fictional activity, or invented statistics are rendered. | Add resumable-activity and community providers; their existing quiet states will then be replaced with real content. Communicates with `para-api.js`, `state.js`, controller state, and the shared focus manager. |
-| `src/screens/libraries.js` | Installed Apps from the gateway, launch routing, clean Bear Home art, capability-gated spatial hotspots, and read-only file lists. | JavaScript | Working. Bear Home is one app; room controls exist only for readable folders or mounted media. | Add file opening via portals, indexed media, thumbnails, and mounted-volume navigation after permission design. |
+| `src/screens/libraries.js` | Installed Apps from the gateway and exact route/Linux application launching. Files appears as one normal built-in app only on a local session. | JavaScript | Working. It contains no Bear Home routing, hotspots, or fake apps. | Add lifecycle and sandbox metadata when the Linux application service exposes it. |
+| `src/screens/files.js` | Classic PARA Files shell: locations sidebar, history, path bar, search, four views, sorting, multi-select, context menus, properties, drag/drop, PC shortcuts, controller actions, Trash, and volume actions. | JavaScript DOM + Fetch | Working against actual gateway results. Mutating controls render only when the explicit local file-operation capability is present. | Add tabs, thumbnails, indexed content search, progress/cancel for large transfers, undo, conflict resolution, and portal-based opening. Communicates with `para-api.js`, `focus-manager.js`, and the Linux gateway. |
+| `src/future/bear-home-game.js` | Keeps the future Bear Home identity, supplied artwork path, direct-character input model, and room-object vocabulary separate from normal Files. | JavaScript descriptor | Reserved architecture only; it is not routed or rendered. | Build a real explorable 2D game with a separately animated bear and PARA Files service access. |
 | `src/screens/personalization.js` | Renders the four supplied built-ins first, live focus preview, click/confirm selection, staged Apply/Cancel, fitting, dimming, default restoration, then the separate custom-background chooser. It also owns Control Center arrangement. | JavaScript DOM events + platform file input | Working. A card press moves focus to the always-visible Apply action; built-ins work everywhere. The PNG/JPEG/WebP system chooser and upload appear only in a writable local Linux session. | Add approved-background policy once the account permission service exists. Communicates with `state.js`, `para-api.js`, and the shared focus manager. |
 | `src/screens/system.js` | Controller state, storage, settings, display, accessibility, network, account, power, health, and recovery. Its Power screen exposes Return Home, Sleep, Restart PARA, Turn Off PARA, Sign Out, and Recovery, with a focused shutdown confirmation. | JavaScript | Working with live information and safe local interface actions. | Add new pages only when a real system provider and safe action contract exist. |
 | `src/ui/control-center.js` | Builds the overlay without leaving the active route and filters controls against actual gateway/controller capability. | JavaScript templates + Fetch | Working. Notifications and app switching are absent because no provider exists. | Add providers for running apps and notifications, then expose them automatically. |
@@ -269,8 +279,8 @@ Moving focus between these five items replaces the previous context in roughly
 purple underline. The wallpaper remains the dominant surface and subtly shifts
 its ambient light by section.
 
-Reachable screens are Startup, Intro, Setup, Login, Profiles, Home, Apps, Bear
-Home, Files, Downloads, Controllers, Storage, Settings, Personalization,
+Reachable screens are Startup, Intro, Setup, Login, Profiles, Home, Apps,
+Files, Downloads, Controllers, Storage, Settings, Personalization,
 Background, Control Center settings, Display, Accessibility,
 Network, Account, Power, Repair & Health, and Recovery. Control Center floats
 over any of these screens without changing the current route.
@@ -280,6 +290,9 @@ Input mapping:
 - D-pad / left stick or Arrow keys: nearest control in that direction.
 - Connected controller primary control or Enter: select.
 - Connected controller back control or Escape: back.
+- Controller secondary or Shift+F10: open the selected file/location context
+  menu in PARA Files.
+- Controller options or `Y`: open additional PARA Files actions.
 - Tap the mapped PARA button or keyboard `M`: open/close Control Center.
 - Hold the mapped PARA button or keyboard `M` for 650 ms: return Home.
 - Shoulder buttons or Page Up/Page Down: switch major sections.
@@ -331,26 +344,35 @@ the settings boundary for a future `Allow Custom Backgrounds` account policy,
 but does not claim to enforce family permissions before an account authority
 exists.
 
-## Bear Home architecture
+## PARA Files and future Bear Home architecture
 
-The background image contains no controls. `libraries.js` can overlay semantic
-buttons on the TV, disc shelf, record player, desk, door, under-stairs storage,
-and PARA bear. A room-object button is created only when its XDG folder is
-readable or its corresponding device is actually mounted; the bear menu remains
-available. Percentage coordinates remain aligned because the stage is
-locked to the artwork's 1672:941 aspect ratio and uses `object-fit: contain`.
+PARA Files is the default file manager. It gets actual directory entries,
+metadata, XDG places, Recent items, Trash contents, and removable/optical
+volumes from the Linux gateway. The UI never manufactures entries. Details,
+List, Large Icons, and Small Icons are view transformations over the same
+service response. Controller focus uses the global geometry engine; mouse and
+keyboard add desktop selection, shortcuts, right click, and drag/drop.
 
-Labels are hidden until hover/focus. The shared focus manager compares element
-geometry, so directional input chooses the nearest object in the requested
-direction instead of walking an arbitrary list. Selecting a category asks the
-gateway for the corresponding XDG directory or mounted-media collection.
+The normal loopback run is read-only. `PARA_ENABLE_FILE_OPERATIONS=1` enables a
+separate capability for actual open, create, rename, copy, move, Trash, restore,
+mount, unmount, and eject requests. The UI hides write controls when the
+capability is absent. Transfers refuse destination conflicts rather than
+silently overwriting files. Render never receives local file capabilities.
+
+Bear Home is deliberately outside the route graph. Its original clean artwork
+is preserved, and `future/bear-home-game.js` records a direct-character control
+model: the bear will eventually walk to the television, shelves, desk, storage
+nook, or doors and then use PARA Files data. There are no current hotspots,
+selection capsule, static labels, or default file-manager links. This avoids
+turning concept art into a fake file interface while keeping the future game
+available for real implementation.
 
 ## Backend and Linux gateway
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `services/gateway/server.py` | Serves PARA Home plus versioned JSON/image endpoints, security headers, bind policy, bounded request validation, optional app launch, and optional fixed power actions. | Python standard library HTTP server | Working. Hosted binds disable local writes, application launch, and Linux power calls. | Replace transport for production scale while retaining the API and safety policy. Calls `system_layer.py`. |
-| `services/gateway/system_layer.py` | Reads identity, storage, network, XDG folders, apps, and mounts; classifies detected application roles; controls PipeWire; persists per-profile settings/images; and exposes only fixed `systemctl suspend`, `reboot`, or `poweroff` argument arrays after explicit local opt-in. | Python standard library + Linux files/APIs + `gio`/`wpctl`/`systemctl` | Working for local sessions; application launch and Linux power actions remain separate explicit opt-ins. | Split domains into narrow D-Bus/portal services, add polkit authorization, account authorization, udev/udisks2 events, and transactional migrations. |
+| `services/gateway/server.py` | Serves PARA Home plus versioned JSON/image endpoints, security headers, bind policy, bounded request validation, PARA Files endpoints, optional app launch, and optional fixed power/file/volume actions. | Python standard library HTTP server | Working. Hosted binds disable local file access, writes, application launch, and Linux power calls. | Replace transport for production scale while retaining the API and safety policy. Calls `system_layer.py`. |
+| `services/gateway/system_layer.py` | Reads system, storage, network, XDG folders, actual file metadata, Recent, Trash, lsblk volumes, apps, and mounts; performs bounded search; controls PipeWire; persists profile settings/images; and exposes fixed Linux actions only after the corresponding local opt-in. | Python standard library + Linux files/APIs + `gio`/`lsblk`/`udisksctl`/`wpctl`/`systemctl` | Working locally. Read-only PARA Files is on for loopback; application launch, file changes, volume changes, and power are explicit opt-ins. | Split domains into D-Bus/portal services, add polkit, file-transfer progress/cancel, index events, and transactional undo. |
 | `interfaces/openapi.yaml` | Contract for all gateway endpoints. | OpenAPI 3.1 | Current. | Add complete component schemas and generated clients. |
 | `packages/para-protocol/src/index.ts` | Shared API/controller/application types. | TypeScript | Current source package. | Generate from OpenAPI and publish internally. |
 | `config/services.json` | Declares operational and contract-only domains. | JSON | Working. | Add schema validation and runtime capability discovery. |
@@ -385,7 +407,8 @@ UI:
 |---|---|---|
 | `accounts.toml` | Local session | Identity broker, encrypted tokens, parental controls. |
 | `audio.toml` | Local PipeWire session | Event-driven volume, microphone, routing, and accessory state. |
-| `bear-home.toml` | Read-only | XDG directories, udisks2, indexing, portals. |
+| `bear-home.toml` | Future game; no route/provider | Direct-character 2D world consuming PARA Files through a constrained interface. |
+| `files.toml` | Local read; local write opt-in | XDG directories, GIO, Trash, lsblk, udisks2, Recent, search, and future indexed events. |
 | `hardware.toml` | Read-only | udev, sysfs, procfs, UPower, hwmon. |
 | `network.toml` | Read-only | Permission-aware network service when configuration is allowed. |
 | `optical.toml` | Mounted-media read-only | udev, udisks2, existing SCSI/UDF drivers. |
@@ -396,7 +419,7 @@ UI:
 | `power.toml` | Local opt-in | Dedicated session power broker over systemd-logind and polkit. |
 | `security.toml` | Contract only; no route | polkit, systemd sandboxing, Landlock/bubblewrap, signature verification. |
 | `updates.toml` | Contract only; no route | Signed atomic updater with rollback. |
-| `vrus.toml` | Contract only; no route | OpenXR, PipeWire, Wayland, and capability-scoped Bear Home data. |
+| `vrus.toml` | Contract only; no route | OpenXR, PipeWire, Wayland, and capability-scoped PARA Files data for a future Bear Home world. |
 
 ## Other important platform files
 
@@ -412,7 +435,7 @@ UI:
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `scripts/dev.sh` | Starts the loopback gateway; optional app launch and Linux power operations require separate environment flags. | Bash | Working. | Live reload and structured logging. |
+| `scripts/dev.sh` | Starts the loopback gateway. App launch, Linux power, and file/volume changes use three separate environment flags. | Bash | Working. Read-only PARA Files is available locally by default. | Live reload, structured logging, and portal policy. |
 | `scripts/render-start.sh` | Binds to Render's `PORT` with explicit nonlocal permission and no app launching. | Bash | Working. | Replace transport only if traffic requires it. |
 | `scripts/check.sh` | Runs structural validation, consumer-copy audit, browser entry-module parsing, unit tests, shell syntax, and Python compilation. | Bash | Working. | Add CSS lint, browser accessibility, and contract diffs. |
 | `scripts/smoke.sh` | Starts a temporary local gateway and checks health. | Bash + Python | Working. | Add endpoint and concurrency checks. |
@@ -420,10 +443,10 @@ UI:
 | `scripts/native-check.sh` | Compiles native boundaries when compilers are installed. | Bash | Working; skips absent optional compilers. | Add CMake presets, clippy, sanitizers, and cross-builds. |
 | `tools/validate_project.py` | Enforces routes, services, specs, required files, and absence of destructive script patterns. | Python | Working. | Validate JSON/OpenAPI schemas and cross-file links. |
 | `tools/audit_consumer_ui.mjs` | Renders every screen and setup step, then rejects engineering copy or dead-action markers. | JavaScript | Working when Node is installed. | Add browser accessibility-tree and localization audits. |
-| `tools/paractl.py` | Reads health, capabilities, system, storage, network, audio, apps, directories, and one profile's personalization. | Python | Working against a running gateway. | Add D-Bus/event inspection once native services exist. |
+| `tools/paractl.py` | Reads health, capabilities, system, storage, network, audio, apps, directories, a requested PARA Files location, and one profile's personalization. | Python | Working against a running gateway. | Add D-Bus/event inspection once native services exist. |
 | `tools/package_release.py` | Produces a source archive while excluding Git, caches, builds, and prior archives. | Python | Working. | Add reproducible timestamps, checksums, SBOM, and signatures. |
-| `tests/test_api.py` | Verifies gateway health, host-backed values, hidden app launch, desktop-metadata application roles, fixed power commands, opt-in policy, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, concurrency, and fuzz tests. |
-| `tests/test_repository.py` | Verifies route renderers, official assets, Bear hotspots, contextual Home, PARA tap/hold, complete Power actions, exact timeline constants, local opt-in safety, consumer copy, Render wiring, and retired-code removal. | Python `unittest` | Working. | Add DOM interaction and visual-regression tests. |
+| `tests/test_api.py` | Verifies gateway health, host-backed values, PARA Files browse/search over temporary real entries, opt-in file changes, default action denial, fixed power commands, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, transfer rollback, concurrency, and fuzz tests. |
+| `tests/test_repository.py` | Verifies route renderers, official assets, future Bear separation, PARA Files controls/shortcuts, contextual Home, PARA tap/hold, Power timing, local opt-in safety, Render wiring, and retired-code removal. | Python `unittest` | Working. | Add DOM interaction and visual-regression tests. |
 
 ## Build and run
 
@@ -468,8 +491,21 @@ This is local-only and explicitly opt-in:
 PARA_ENABLE_APP_LAUNCH=1 make dev
 ```
 
-Without that flag, Apps contains only working built-in PARA applications, which
-currently means Bear Home. Render never enables Linux application launching.
+Without that flag, a local Apps library contains only the working Files app.
+Render never enables Linux application discovery or launching.
+
+### Enable real file operations
+
+The default loopback run browses actual Linux files without altering them. To
+enable opening, creation, rename, copy, move, Trash, restore, mount, unmount,
+and eject on a machine where you intend those changes, deliberately start:
+
+```bash
+PARA_ENABLE_FILE_OPERATIONS=1 make dev
+```
+
+The gateway remains unprivileged and uses exact GIO/udisksctl argument arrays,
+but these are real file and device operations. Render never sets this flag.
 
 ### Enable real Linux power actions
 
@@ -499,7 +535,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.4.5.zip`.
+The archive is written to `dist/PARA-0.5.0.zip`.
 
 ## Render deployment
 
@@ -511,9 +547,9 @@ The included settings are:
 - Health check: `/api/v1/health`
 
 No environment variables or Supabase keys are required. Render supplies `PORT`
-automatically. The hosted interface can show Bear Home and its layout, but it
-cannot read a viewer's directories or launch a viewer's Linux applications;
-those capabilities require the local gateway on that machine.
+automatically. A hosted interface cannot read a viewer's directories or launch
+the viewer's Linux applications, so Files and installed host applications are
+omitted there; those capabilities require the local gateway on that machine.
 
 ## Current limitations
 
@@ -521,9 +557,11 @@ those capabilities require the local gateway on that machine.
 - The intro reserves the required stages with CSS; final rendered audio/video or
   WebGL assets do not exist.
 - Local profiles are session preferences, not authenticated identities.
-- Bear Home reads directory names and file metadata but does not open or mutate
-  files.
-- External and optical media are shown only after Linux has mounted them.
+- PARA Files reads actual paths in a local session. File changes require the
+  explicit file-operation flag and currently use simple conflict refusal rather
+  than progress, merge, undo, or overwrite dialogs.
+- External and optical devices come from lsblk. Unmounted devices are actionable
+  only when file operations and udisks2 tooling are available.
 - Linux application discovery/launch is intentionally disabled unless explicitly
   enabled on a loopback run.
 - Continue and Community currently show quiet empty states because resumable
@@ -551,12 +589,15 @@ those capabilities require the local gateway on that machine.
    access.
 3. Build the installed-app service around desktop portals, application lifecycle,
    sandbox permissions, and capability reporting.
-4. Add real media indexing/thumbnails and hotplug events for Bear Home.
+4. Add indexed content search, thumbnails, transfer progress/cancel, undo,
+   portal-scoped file opening, and hotplug events to PARA Files.
 5. Implement a native controller service using existing Linux input stacks and a
    shared mapping database.
 6. Design signed package, update, entitlement, security, and recovery systems
    before exposing ParaStore or privileged controls.
 7. Add a real account/permission provider for parental background approvals and
    policy enforcement without exposing one profile's wallpaper at login.
-8. Package PARA Home as an opt-in dedicated Linux session and test it on target
+8. Build Bear Home as a separate direct-character 2D application that consumes
+   PARA Files data without replacing the standard file manager.
+9. Package PARA Home as an opt-in dedicated Linux session and test it on target
    hardware without replacing existing desktop sessions.
