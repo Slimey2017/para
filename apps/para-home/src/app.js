@@ -96,8 +96,6 @@ const renderers = {
   background: backgroundScreen,
   "control-center-settings": controlCenterSettingsScreen,
 };
-const majorSections = ["home", "apps", "settings"];
-
 let cleanupScreen = null;
 let cleanupClock = null;
 let navigating = false;
@@ -107,6 +105,7 @@ let preferenceTimer = null;
 let idleSleepTimer = null;
 let idleDimTimer = null;
 let overlayCloseTimer = null;
+let activeInputDevice = "keyboard";
 
 function toast(title, message = "") {
   const node = document.createElement("div");
@@ -124,11 +123,19 @@ function toast(title, message = "") {
 }
 
 function updateControllerPrompts() {
-  document.documentElement.dataset.controller = controllerStatus.type;
+  const promptSource = activeInputDevice === "controller" ? controllerStatus : keyboardController();
+  document.documentElement.dataset.controller = promptSource.type;
+  document.documentElement.dataset.inputDevice = activeInputDevice;
   document.querySelectorAll("[data-prompt]").forEach((node) => {
-    node.textContent = controllerStatus.prompts[node.dataset.prompt] || "";
+    node.textContent = promptSource.prompts[node.dataset.prompt] || "";
   });
   if (router.current() === "controller") updateControllerScreen(controllerStatus);
+}
+
+function setActiveInputDevice(device) {
+  activeInputDevice = device;
+  focus.setInputDevice(device);
+  updateControllerPrompts();
 }
 
 async function estimateRefreshRate() {
@@ -295,9 +302,9 @@ function paraHold() {
 
 function shoulder(direction) {
   if (consumePowerInput()) return;
-  const currentIndex = majorSections.indexOf(router.current());
-  if (currentIndex < 0) return;
-  navigate(majorSections[(currentIndex + direction + majorSections.length) % majorSections.length]);
+  if (router.current() === "home") {
+    document.dispatchEvent(new CustomEvent("para-home-section-shift", { detail: { direction } }));
+  }
 }
 
 function secondary() {
@@ -312,6 +319,10 @@ function options() {
 
 const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder, secondary, options });
 document.addEventListener("para-focuschange", playNavigationSound);
+document.addEventListener("para-inputdevicechange", (event) => {
+  activeInputDevice = event.detail?.device || "keyboard";
+  updateControllerPrompts();
+});
 document.addEventListener("para-systemcue", (event) => playSystemCue(event.detail?.name));
 document.addEventListener("para-startup-sound", (event) => playSystemCue(event.detail?.cue || "startup"));
 document.addEventListener("para-downloadcomplete", (event) => {
@@ -343,6 +354,7 @@ const gamepad = new GamepadNavigation({
     document.dispatchEvent(new CustomEvent("para-controllerchange", { detail: controller }));
     if (controller.connected && !hadController) toast("Controller connected", `${controller.typeLabel} controls active`);
   },
+  inputDevice: setActiveInputDevice,
 });
 
 function rerender() {

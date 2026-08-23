@@ -99,7 +99,7 @@ export function notificationsScreen() {
 }
 
 export function aboutScreen() {
-  return page({ title: "About PARA", description: "System and build information.", eyebrow: "PARA OS Web", body: `<section class="about-build panel"><span class="eyebrow">Current build</span><h2>PARA OS Web · Build 0.7.0</h2><p>Linux console shell interface</p></section><div class="settings-grid">${tile({ title: "PARA Lab", meta: "Browser, display, and controller diagnostics", route: "para-lab", icon: "⌬", autofocus: true })}</div>` });
+  return page({ title: "About PARA", description: "System and build information.", eyebrow: "PARA OS Web", body: `<section class="about-build panel"><span class="eyebrow">Current build</span><h2>PARA OS Web · Build 0.7.1</h2><p>Linux console shell interface</p></section><div class="settings-grid">${tile({ title: "PARA Lab", meta: "Browser, display, and controller diagnostics", route: "para-lab", icon: "⌬", autofocus: true })}</div>` });
 }
 
 export function paraLabScreen() {

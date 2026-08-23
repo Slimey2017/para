@@ -12,11 +12,12 @@ chapters from Controller to Ready; configured profiles transition from the same
 startup directly into their session.
 
 PARA Home is wallpaper-first. Its only permanent navigation is Continue,
-Explore, Create, Community, and System in one horizontal row. Moving focus
-replaces the single contextual strip beneath that row. Continue is populated
-only after the current profile opens a real PARA route or detected application.
-Explore opens Games, Apps, PARA Demos, and ParaStore without filling the
-wallpaper with permanent dashboards.
+Explore, Create, and Community in one horizontal row below the branding.
+Moving focus replaces the single contextual strip beneath that row. Continue
+is populated only after the current profile opens a real PARA route or detected
+application. Explore opens Games, Apps, PARA Demos, and ParaStore without
+filling the wallpaper with permanent dashboards. System functions remain in
+the Control Center and Settings instead of occupying a fifth Home section.
 
 PARA Files is the normal file manager. A local run reads the actual home
 directory, existing XDG user folders, Recent, Trash, and removable or optical
@@ -53,6 +54,7 @@ These flags are never enabled by the Render launcher.
 ## Controls
 
 - Arrow keys / D-pad / left stick: spatial navigation
+- Page Up / Page Down or LB / RB: change Home section
 - Enter / controller primary: select or open
 - Escape / controller back: back
 - Shift+F10 / controller secondary: context menu in Files

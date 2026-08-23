@@ -3,34 +3,21 @@ import { paraApi, escapeHtml } from "../services/para-api.js";
 import { recentExperience } from "../services/experience-runtime.js";
 import { paraLogo } from "../ui/components.js";
 
-const paths = {
-  apps: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
-  controller: '<path d="M7 8h10a5 5 0 0 1 4.8 6.4l-1 3.3a2.2 2.2 0 0 1-3.7.9L14.8 16H9.2l-2.3 2.6a2.2 2.2 0 0 1-3.7-.9l-1-3.3A5 5 0 0 1 7 8Z"/><path d="M7 11v4M5 13h4"/><circle cx="17" cy="12" r=".8" class="icon-fill"/><circle cx="19" cy="14" r=".8" class="icon-fill"/>',
-  storage: '<path d="M4 6h16l2 12H2L4 6Z"/><path d="M3 15h18"/><circle cx="18" cy="17" r=".7" class="icon-fill"/>',
-  files: '<path d="M3 7h7l2 2h9v10H3V7Z"/><path d="M3 10h18"/>',
-  network: '<path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16a5.5 5.5 0 0 1 7 0"/><circle cx="12" cy="20" r="1" class="icon-fill"/>',
-  power: '<path d="M12 2v10"/><path d="M6.3 5.8a8 8 0 1 0 11.4 0"/>',
-};
-
 const sections = [
   { id: "continue", title: "Continue" },
   { id: "explore", title: "Explore" },
   { id: "create", title: "Create" },
   { id: "community", title: "Community" },
-  { id: "system", title: "System" },
 ];
 
-function icon(name, className = "home-icon") {
-  return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.apps}</svg>`;
-}
+let rememberedHomeSection = "continue";
 
 function initials(profile) {
   return profile.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P";
 }
 
-function mainNavigation() {
-  return sections.map(({ id, title }, index) => `<button class="home-section-tab" type="button" role="tab" id="home-tab-${id}" aria-controls="home-context" aria-selected="${index === 0}" data-home-section-target="${id}" ${index === 0 ? "data-autofocus='true'" : ""}><span>${title}</span></button>`).join("");
+function mainNavigation(selected) {
+  return sections.map(({ id, title }) => `<button class="home-section-tab" type="button" role="tab" id="home-tab-${id}" aria-controls="home-context" aria-selected="${id === selected}" data-home-section-target="${id}" data-focus-id="home-nav:${id}" ${id === selected ? "data-autofocus='true'" : ""}><span>${title}</span></button>`).join("");
 }
 
 function applicationArtwork(application) {
@@ -44,33 +31,24 @@ function applicationButton(application) {
   const destination = application.launch?.kind === "route"
     ? `data-route="${escapeHtml(application.launch.route)}"`
     : `data-action="launch-linux-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
-  return `<button class="home-app" type="button" ${destination}><span class="home-app__art">${applicationArtwork(application)}</span><strong>${name}</strong></button>`;
+  return `<button class="home-app" type="button" ${destination} data-focus-id="home-app:${escapeHtml(application.id)}"><span class="home-app__art">${applicationArtwork(application)}</span><strong>${name}</strong></button>`;
 }
 
-function quietState(section, title) {
-  return `<div class="home-context-empty"><span>${section}</span><h2>${title}</h2></div>`;
+function continueEmptyState() {
+  return `<div class="home-context-empty"><span>Continue</span><h2>Ready to play?</h2><p>Choose something from Explore.</p><button class="home-text-action" type="button" data-home-open-section="explore" data-focus-id="continue:explore">Open Explore <i aria-hidden="true">→</i></button></div>`;
 }
 
-function loadingState(section) {
-  return `<div class="home-context-empty home-context-empty--loading"><span>${section}</span><i aria-hidden="true"></i></div>`;
-}
-
-function applicationStrip(section, applications, emptyMessage) {
-  if (!applications.length) return quietState(section, emptyMessage);
-  return `<div class="home-context-heading"><span>${section}</span><small>${applications.length} ${applications.length === 1 ? "application" : "applications"}</small></div><div class="home-content-strip">${applications.map(applicationButton).join("")}</div>`;
-}
-
-function systemAction(title, route, iconName) {
-  return `<button class="home-system-action" type="button" data-route="${route}"><span>${icon(iconName)}</span><strong>${title}</strong></button>`;
+function quietState(section, title, detail = "") {
+  return `<div class="home-context-empty"><span>${section}</span><h2>${title}</h2>${detail ? `<p>${detail}</p>` : ""}</div>`;
 }
 
 function exploreAction(title, subtitle, route, mark) {
-  return `<button class="home-explore-action" type="button" data-route="${route}"><span aria-hidden="true">${mark}</span><strong>${title}</strong><small>${subtitle}</small></button>`;
+  return `<button class="home-explore-action" type="button" data-route="${route}" data-focus-id="home-route:${route}"><span aria-hidden="true">${mark}</span><strong>${title}</strong><small>${subtitle}</small></button>`;
 }
 
 function continueMarkup(experience) {
-  if (!experience) return quietState("Continue", "Nothing to continue");
-  return `<div class="home-resume" style="--resume-accent:${escapeHtml(experience.accent || "#9b5cff")}"><span class="home-resume__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</span><div><span>${escapeHtml(experience.kind || "Recent")}</span><h2>${escapeHtml(experience.title)}</h2><button class="action-button" data-route="${escapeHtml(experience.route)}">Resume</button></div></div>`;
+  if (!experience) return continueEmptyState();
+  return `<div class="home-resume" style="--resume-accent:${escapeHtml(experience.accent || "#9b5cff")}"><span class="home-resume__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</span><div><span>${escapeHtml(experience.kind || "Recent")}</span><h2>${escapeHtml(experience.title)}</h2><button class="action-button" data-route="${escapeHtml(experience.route)}" data-focus-id="continue:resume">Resume</button></div></div>`;
 }
 
 function contextMarkup(section, model) {
@@ -83,47 +61,60 @@ function contextMarkup(section, model) {
     const creatorApps = model.applications.filter((application) => application.roles?.includes("creator"));
     return `<div class="home-context-heading"><span>Create</span><small>Make something</small></div><div class="home-content-strip">${exploreAction("Creator Playground", "Draw, write, and build a beat", "creator", "✦")}${creatorApps.map(applicationButton).join("")}</div>`;
   }
-  const actions = [systemAction("Settings", "settings", "settings")];
-  if (model.capabilities.files) actions.push(systemAction("Files", "files", "files"));
-  if (model.controller?.connected) actions.push(systemAction("Controllers", "controller", "controller"));
-  if (model.capabilities.storage) actions.push(systemAction("Storage", "storage", "storage"));
-  if (model.capabilities.network) actions.push(systemAction("Network", "network", "network"));
-  if (model.capabilities.power) actions.push(systemAction("Power", "power", "power"));
-  return `<div class="home-context-heading"><span>System</span></div><div class="home-system-strip">${actions.join("")}</div>`;
+  return quietState("Community", "No updates available");
 }
 
 export function homeScreen() {
   const profile = getState().activeProfile || "P1";
-  return `<section class="home-ui" data-home-section="continue" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header"><button class="home-wordmark" type="button" data-action="open-control-center" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-status"><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><div class="home-canvas" aria-hidden="true"></div><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home">${mainNavigation()}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-continue" aria-live="polite">${quietState("Continue", "Nothing to continue")}</section></main></section>`;
+  const selected = sections.some(({ id }) => id === rememberedHomeSection) ? rememberedHomeSection : "continue";
+  return `<section class="home-ui" data-home-section="${selected}" data-focus-scope="home" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header" data-focus-zone="home-header" data-nav-down-zone="home-nav"><button class="home-wordmark" type="button" data-action="open-control-center" data-focus-id="home-header:para" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-status"><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" data-focus-id="home-header:profile" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home" data-focus-zone="home-nav" data-nav-up-zone="home-header" data-nav-down-zone="home-content">${mainNavigation(selected)}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-${selected}" aria-live="polite" data-focus-zone="home-content" data-focus-scope="home:${selected}" data-nav-up="home-nav:${selected}">${continueEmptyState()}</section></main><footer class="home-control-legend control-legend" aria-hidden="true"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span><span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span><span><b class="prompt-key" data-prompt="shoulderPrevious">PgUp</b><b class="prompt-key" data-prompt="shoulderNext">PgDn</b>Sections</span></footer></section>`;
 }
 
-export function activateHome({ focus, controller }) {
+export function activateHome({ focus }) {
   const root = document.querySelector(".home-ui");
   const context = root?.querySelector(".home-context");
   if (!root || !context) return () => {};
 
-  const model = { applications: [], capabilities: {}, controller, recent: recentExperience(), loading: true, failed: false };
-  let selected = "continue";
+  const model = { applications: [], recent: recentExperience() };
+  let selected = sections.some(({ id }) => id === root.dataset.homeSection) ? root.dataset.homeSection : "continue";
   let transitionTimer = null;
+  let enterFrame = null;
   let alive = true;
 
   const renderContext = (section, animate = true) => {
+    if (!sections.some(({ id }) => id === section)) return;
+    const previousIndex = sections.findIndex(({ id }) => id === selected);
+    const nextIndex = sections.findIndex(({ id }) => id === section);
+    const changed = section !== selected;
     selected = section;
+    rememberedHomeSection = section;
     root.dataset.homeSection = section;
     root.querySelectorAll("[data-home-section-target]").forEach((tab) => {
       tab.setAttribute("aria-selected", String(tab.dataset.homeSectionTarget === section));
     });
     context.setAttribute("aria-labelledby", `home-tab-${section}`);
+    context.dataset.focusScope = `home:${section}`;
+    context.dataset.navUp = `home-nav:${section}`;
     clearTimeout(transitionTimer);
+    if (enterFrame) cancelAnimationFrame(enterFrame);
+    const hadContextFocus = context.contains(focus.current);
     const update = () => {
       if (!alive || selected !== section) return;
       context.innerHTML = contextMarkup(section, model);
-      context.classList.remove("is-changing");
+      context.classList.remove("is-exiting-next", "is-exiting-previous");
+      if (hadContextFocus) focus.focusFirst({ zone: "home-content", scope: context });
+      if (animate && changed && !getState().reducedMotion) {
+        context.classList.add(nextIndex > previousIndex ? "is-entering-next" : "is-entering-previous");
+        enterFrame = requestAnimationFrame(() => requestAnimationFrame(() => {
+          context.classList.remove("is-entering-next", "is-entering-previous");
+        }));
+      }
     };
-    if (!animate || getState().reducedMotion) update();
+    if (!animate || !changed || getState().reducedMotion) update();
     else {
-      context.classList.add("is-changing");
-      transitionTimer = setTimeout(update, 105);
+      if (changed) focus.lockInput(145);
+      context.classList.add(nextIndex > previousIndex ? "is-exiting-next" : "is-exiting-previous");
+      transitionTimer = setTimeout(update, changed ? 95 : 1);
     }
   };
 
@@ -137,14 +128,24 @@ export function activateHome({ focus, controller }) {
     if (tab && tab.dataset.homeSectionTarget !== selected) renderContext(tab.dataset.homeSectionTarget);
   };
   const onClick = (event) => {
+    const sectionShortcut = event.target.closest?.("[data-home-open-section]");
+    if (sectionShortcut) {
+      const section = sectionShortcut.dataset.homeOpenSection;
+      renderContext(section);
+      return;
+    }
     const tab = tabFromEvent(event);
     if (!tab) return;
     renderContext(tab.dataset.homeSectionTarget);
     focus.setCurrent(tab, true);
   };
-  const onControllerChange = (event) => {
-    model.controller = event.detail;
-    if (selected === "system") renderContext(selected, false);
+  const onSectionShift = (event) => {
+    const direction = Number(event.detail?.direction) || 1;
+    const index = sections.findIndex(({ id }) => id === selected);
+    const next = sections[(index + direction + sections.length) % sections.length].id;
+    const fromContent = context.contains(focus.current);
+    renderContext(next);
+    if (!fromContent) focus.setCurrent(root.querySelector(`[data-home-section-target='${next}']`), true);
   };
   const onRuntimeChange = () => {
     model.recent = recentExperience();
@@ -154,25 +155,25 @@ export function activateHome({ focus, controller }) {
   root.addEventListener("focusin", onFocus);
   root.addEventListener("pointerover", onPointer);
   root.addEventListener("click", onClick);
-  document.addEventListener("para-controllerchange", onControllerChange);
+  document.addEventListener("para-home-section-shift", onSectionShift);
   document.addEventListener("para-runtimechange", onRuntimeChange);
 
-  Promise.allSettled([paraApi.capabilities(), paraApi.applications()]).then(([capabilities, applications]) => {
+  renderContext(selected, false);
+
+  paraApi.applications().then((applications) => {
     if (!alive) return;
-    if (capabilities.status === "fulfilled") model.capabilities = capabilities.value || {};
-    if (applications.status === "fulfilled") model.applications = applications.value.applications || [];
-    else model.failed = true;
-    model.loading = false;
+    model.applications = applications.applications || [];
     renderContext(selected, false);
-  });
+  }).catch(() => {});
 
   return () => {
     alive = false;
     clearTimeout(transitionTimer);
+    if (enterFrame) cancelAnimationFrame(enterFrame);
     root.removeEventListener("focusin", onFocus);
     root.removeEventListener("pointerover", onPointer);
     root.removeEventListener("click", onClick);
-    document.removeEventListener("para-controllerchange", onControllerChange);
+    document.removeEventListener("para-home-section-shift", onSectionShift);
     document.removeEventListener("para-runtimechange", onRuntimeChange);
   };
 }

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.7.0 is the working skeleton of a Linux-powered home console/PC
+PARA 0.7.1 is the working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -221,7 +221,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.7.0`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.7.1`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -239,8 +239,8 @@ PARA/
 | `styles.css` | Consumer design system plus the compact file manager, Home contexts, demo games, Creator Playground, Control Center, diagnostics, offline/crash surfaces, and power sequences. | Modern responsive CSS | Working with TV-safe responsive rules and reduced-motion fallbacks. | Add local fonts, HDR tokens, localization stress tests, and performance budgets. |
 | `src/app.js` | Runtime composition, route transitions, Control Center lifecycle, profile hydration, actions, controller prompts, continuity events, idle/offline/crash handling, and power-input locking. | JavaScript | Working. | Split domain controllers and add typed error reporting. Talks to every screen, router, input, state, overlay, and API adapter. |
 | `src/router.js` | Restricts navigation to the screen manifest and keeps an in-shell back stack. | JavaScript + hash routing | Working. | Add route guards and activity suspension when real games/apps exist. |
-| `src/focus-manager.js` | Geometry-based directional focus, pointer focus, range adjustment, Tab compatibility, Enter, Escape, `P`/legacy `M` PARA tap/hold, and shoulder navigation. | JavaScript DOM APIs | Working and emits navigation-sound events. | Add wrap policies, virtual lists, RTL, focus groups, and announcements. |
-| `src/gamepad.js` | Normalizes Browser Gamepad input, detects controller families, maps a dedicated or fallback button to PARA tap/hold, and publishes real button/stick activity for Controller settings. | JavaScript Gamepad API | Working when the browser exposes a controller. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
+| `src/focus-manager.js` | Shared spatial focus engine with geometry ranking, navigation zones, per-zone memory, explicit directional overrides, transition locks, pointer/controller handoff, range adjustment, normalized keyboard repeat, Tab compatibility, Enter, Escape, `P`/legacy `M` PARA tap/hold, and shoulder navigation. | JavaScript DOM APIs | Working across every current PARA screen and emits input-device/focus events. | Add virtual lists, RTL policies, and screen-reader focus announcements. |
+| `src/gamepad.js` | Normalizes Browser Gamepad input, chooses the first controller that provides meaningful input, enforces a `0.28` stick deadzone, applies `350 ms`/`120 ms` held-input timing, detects controller families, maps PARA tap/hold, and publishes real button/stick activity. | JavaScript Gamepad API | Working when the browser exposes a controller; one controller owns UI navigation at a time and disconnects fail back to keyboard/mouse. | Connect to a native controller service for remapping, battery, haptics, and hotplug metadata. |
 | `src/state.js` | Versioned per-profile storage for all 14 setup choices, profiles, wallpaper, Control Center order, sounds, recent/running experiences, demos, downloads, notifications, Marks, and creator work. | JavaScript `localStorage` plus gateway preference synchronization | Working; the complete web session survives navigation and restart. It is not a remote identity store. | Move identity/authorization to a versioned account service and large binary saves to IndexedDB. |
 | `src/screen-manifest.js` | Authoritative set of 37 reachable screens. Bear Home is not a route; the Control Center remains an overlay. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
 | `src/services/demo-catalog.js` | Defines the three shipped browser demo packages, routes, truthful sizes, and visual identities. | JavaScript data module | Working; every entry has a playable destination. | Replace the in-repository catalog with signed package metadata when ParaStore has a package service. |
@@ -255,7 +255,7 @@ PARA/
 | `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
 | `src/screens/boot.js` | Renders black → violet point → circular ignition → official P formation → PARA wordmark, then Controller → Language & Region → Display Area → Internet → PARA Account → Gaming Accounts → Other Accounts → Privacy → Accessibility → Audio → Power & Sleep → Background → Updates & Storage → Ready. | JavaScript, `requestAnimationFrame`, CSS transitions, Web Audio test tone | Working. The visual startup is exactly 8000 ms; display, network, audio, storage, controller, and background chapters consume actual available data. Unsupported account connections remain disabled and every chapter is skippable where appropriate. | Add signed account providers, full localization, HDR calibration, update status, and the native light/audio bridge. |
 | `src/screens/auth.js` | “Who’s playing?” with P1, P2, Guest, Add User, selected-profile Continue, and Switch Profile. | JavaScript | Working as a persistent local profile flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
-| `src/screens/home.js` | Wallpaper-first Home with exactly Continue, Explore, Create, Community, and System in one row. Continue reads the real profile activity record; the other tabs reveal one contextual strip of working routes. | JavaScript + inline SVG | Working without permanent dashboard panels. | Add native game/application activity providers so Linux processes can join the same continuity model. |
+| `src/screens/home.js` | Wallpaper-first Home with exactly Continue, Explore, Create, and Community in one floating row below the branding. It defines header/navigation/content focus zones, remembers the last section for the current shell session, remembers content focus per section, and exposes one contextual strip at a time. | JavaScript templates + shared focus events | Working without permanent dashboard panels; a fresh launch defaults to Continue. | Add native game/application and social providers so Linux processes can join the same continuity model. |
 | `src/screens/experiences.js` | ParaStore, installed Games, PARA Demos, three canvas games, Creator Playground, official project Community feed, and PARA Marks. | JavaScript Canvas, Web Audio, Pointer Events, templates | Working. Demo install/open/remove, gameplay, saved drawing/notes, music pads, project posts, and earned Marks are functional. | Split each experience into a sandboxed package and add signed catalog/download metadata. Communicates with demo/runtime/state services. |
 | `src/screens/libraries.js` | Installed Apps from the gateway and exact route/Linux application launching. Files appears as one normal built-in app only on a local session. | JavaScript | Working. It contains no Bear Home routing, hotspots, or fake apps. | Add lifecycle and sandbox metadata when the Linux application service exposes it. |
 | `src/screens/files.js` | Classic PARA Files shell: locations sidebar, history, path bar, search, four views, sorting, multi-select, context menus, properties, drag/drop, PC shortcuts, controller actions, Trash, and volume actions. | JavaScript DOM + Fetch | Working against actual gateway results. Mutating controls render only when the explicit local file-operation capability is present. | Add tabs, thumbnails, indexed content search, progress/cancel for large transfers, undo, conflict resolution, and portal-based opening. Communicates with `para-api.js`, `focus-manager.js`, and the Linux gateway. |
@@ -288,7 +288,7 @@ Other Accounts, Privacy, Accessibility, Audio, Power & Sleep, Background,
 Updates & Storage, and Ready. Account connections are optional; unavailable
 providers are disabled instead of producing a false connection result.
 
-PARA Home retains the required five primary items in one horizontal row. They
+PARA Home uses four primary items in one horizontal row. They
 behave as contextual tabs, not giant cards or website links:
 
 - `Continue` — resumes the most recently opened game or application for the
@@ -297,13 +297,14 @@ behave as contextual tabs, not giant cards or website links:
 - `Create` — opens Creator Playground plus detected Linux creator applications.
 - `Community` — opens real PARA build announcements and patch notes, without
   pretending sample people or social activity exist.
-- `System` — reveals a compact row containing Settings and only the system
-  actions supported by current capability/controller state.
 
-Moving focus between these five items replaces the previous context in roughly
-220 ms. The selected item grows slightly, brightens, and gains a restrained
-purple underline. The wallpaper remains the dominant surface and subtly shifts
-its ambient light by section.
+System functions stay in Settings and the compact Control Center. Moving focus
+between the four Home items replaces the previous context in roughly 180–280
+ms. The selected item grows slightly, brightens, and gains a restrained purple
+underline. LB/RB changes sections; moving down enters the content zone; moving
+up returns to the selected section. Each section remembers its last focused
+content item for the shell session. The wallpaper remains the dominant surface
+and subtly shifts its ambient light by section.
 
 Reachable screens include Startup, Intro, all 14 Setup chapters, Login,
 Profiles, Add User, Home, Apps, Games, Demos, ParaStore, three games, Creator,
@@ -576,7 +577,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.7.0.zip`.
+The archive is written to `dist/PARA-0.7.1.zip`.
 
 ## Render deployment
 

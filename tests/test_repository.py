@@ -69,16 +69,34 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('files: filesScreen', app)
         self.assertNotIn('"bear-home"', app)
 
-    def test_home_keeps_five_primary_buttons(self):
+    def test_home_keeps_four_primary_sections_and_system_out(self):
         screen = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
-        for title in ["Continue", "Explore", "Create", "Community", "System"]:
+        for title in ["Continue", "Explore", "Create", "Community"]:
             self.assertEqual(screen.count(f'title: "{title}"'), 1)
+        section_block = screen.split("const sections = [", 1)[1].split("];", 1)[0]
+        self.assertNotIn('title: "System"', section_block)
         self.assertNotIn("para-home-dashboard.png", screen)
         self.assertIn("activateHome", screen)
         self.assertIn('role="tablist"', screen)
         self.assertIn("contextMarkup", screen)
+        self.assertIn("Ready to play?", screen)
+        self.assertIn('data-home-open-section="explore"', screen)
+        self.assertIn('data-focus-zone="home-nav"', screen)
+        self.assertIn('data-focus-zone="home-content"', screen)
+        self.assertIn("rememberedHomeSection", screen)
         self.assertNotIn("home-launcher", screen)
         self.assertNotIn("home-widget", screen)
+
+    def test_shared_navigation_engine_is_spatial_and_gamepad_native(self):
+        focus = (ROOT / "apps/para-home/src/focus-manager.js").read_text(encoding="utf-8")
+        gamepad = (ROOT / "apps/para-home/src/gamepad.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        for marker in ["data-focus-zone", "this.memory", "getBoundingClientRect", "alignmentPenalty", "lockInput", "POINTER_HANDOFF_DISTANCE = 6"]:
+            self.assertIn(marker, focus)
+        for marker in ["DEADZONE = 0.28", "REPEAT_DELAY_MS = 350", "REPEAT_RATE_MS = 120", "activeIndex", "navigator.getGamepads", "find(meaningful)"]:
+            self.assertIn(marker, gamepad)
+        self.assertIn('para-home-section-shift', app)
+        self.assertNotIn('const majorSections = ["home", "apps", "settings"]', app)
 
     def test_official_logo_is_used_without_generated_ring(self):
         logo = ROOT / "apps/para-home/assets/para-logo.png"
