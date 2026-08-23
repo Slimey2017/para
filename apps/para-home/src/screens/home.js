@@ -1,6 +1,6 @@
 import { getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
-import { profileRuntime, recentExperiences } from "../services/experience-runtime.js";
+import { profileRuntime, pruneContinueQueue, recentExperiences } from "../services/experience-runtime.js";
 import { paraLogo } from "../ui/components.js";
 
 const sections = [
@@ -51,8 +51,12 @@ function flowAction(title, subtitle, route, mark, focusId = `home-route:${route}
 }
 
 function activityTime(experience, now = Date.now()) {
-  const elapsed = Math.max(0, now - Number(experience.lastOpened || now));
-  const prefix = experience.kind === "Game" ? "Last played" : "Used";
+  const timestamp = Number(experience.lastOpened || experience.installedAt || experience.queuedAt || 0);
+  if (!timestamp) return "Available";
+  const elapsed = Math.max(0, now - timestamp);
+  const prefix = experience.lastOpened
+    ? (experience.kind === "Game" ? "Last played" : "Used")
+    : "Installed";
   const minutes = Math.floor(elapsed / 60_000);
   if (minutes < 1) return "Just now";
   if (minutes < 60) return `${prefix} ${minutes}m ago`;
@@ -64,22 +68,21 @@ function activityTime(experience, now = Date.now()) {
   return `${prefix} ${new Date(experience.lastOpened).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
-function recentRow(experience, index, recent) {
-  const focusId = `recent:${experience.id}`;
-  const up = index === 0 ? "continue:resume" : `recent:${recent[index - 1].id}`;
-  const down = index < recent.length - 1 ? `recent:${recent[index + 1].id}` : "";
-  return `<button class="home-recent-row" type="button" data-route="${escapeHtml(experience.route)}" data-focus-id="${escapeHtml(focusId)}" data-nav-left="${escapeHtml(focusId)}" data-nav-right="${escapeHtml(focusId)}"${navigationAttributes(up, down)} style="--recent-accent:${escapeHtml(experience.accent || "#9b5cff")}"><span class="home-recent-row__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</span><span class="home-recent-row__copy"><strong>${escapeHtml(experience.title)}</strong><small>${escapeHtml(experience.kind || "App")}</small></span><time>${escapeHtml(activityTime(experience))}</time></button>`;
+function continueItem(experience, index, queue) {
+  const focusId = `continue:item:${experience.id}`;
+  const up = index === 0 ? "home-nav:continue" : `continue:item:${queue[index - 1].id}`;
+  const down = index < queue.length - 1 ? `continue:item:${queue[index + 1].id}` : "";
+  const activity = activityTime(experience);
+  const status = experience.queueStatus || activity;
+  const action = experience.queueStatus ? "Play" : "Resume";
+  const platform = experience.platform || experience.kind || "App";
+  return `<button class="home-continue-item" type="button" data-continue-item data-continue-id="${escapeHtml(experience.id)}" data-route="${escapeHtml(experience.route)}" data-focus-id="${escapeHtml(focusId)}" data-nav-left="${escapeHtml(focusId)}" data-nav-right="${escapeHtml(focusId)}"${navigationAttributes(up, down)} style="--continue-accent:${escapeHtml(experience.accent || "#9b5cff")}" aria-label="${escapeHtml(`${experience.title}. ${status}. ${action}`)}"><span class="home-continue-item__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</span><span class="home-continue-item__copy"><small>${escapeHtml(platform)}</small><strong>${escapeHtml(experience.title)}</strong><span data-continue-summary>${escapeHtml(status)}</span><span class="home-continue-item__details"><time data-continue-time>${escapeHtml(activity)}</time><i aria-hidden="true"></i><b>${action}</b></span></span></button>`;
 }
 
 function continueMarkup(experiences) {
-  const current = experiences[0];
-  if (!current) return continueEmptyState();
-  const recent = experiences.slice(1, 7);
-  const recentMarkup = recent.length
-    ? `<section class="home-recent-section" aria-labelledby="home-recent-title"><h3 id="home-recent-title">Recently Played</h3><div class="home-recent-list">${recent.map((experience, index) => recentRow(experience, index, recent)).join("")}</div></section>`
-    : "";
-  const firstRecent = recent.length ? `recent:${recent[0].id}` : "";
-  return `<div class="home-continue-flow"><div class="home-resume" style="--resume-accent:${escapeHtml(current.accent || "#9b5cff")}"><span class="home-resume__art" aria-hidden="true">${escapeHtml(current.mark || "◉")}</span><div><span>${escapeHtml(current.kind || "Recent")}</span><h2>${escapeHtml(current.title)}</h2><button class="action-button" data-route="${escapeHtml(current.route)}" data-focus-id="continue:resume"${navigationAttributes("home-nav:continue", firstRecent)}>Resume</button></div></div>${recentMarkup}</div>`;
+  const queue = experiences.slice(0, 10);
+  if (!queue.length) return continueEmptyState();
+  return `<div class="home-continue-carousel" aria-label="Continue">${queue.map((experience, index) => continueItem(experience, index, queue)).join("")}</div>`;
 }
 
 function contextMarkup(section, model) {
@@ -119,7 +122,7 @@ function contextMarkup(section, model) {
 }
 
 function primaryFocusId(section, model) {
-  if (section === "continue") return model.recent.length ? "continue:resume" : "continue:explore";
+  if (section === "continue") return model.recent.length ? `continue:item:${model.recent[0].id}` : "continue:explore";
   if (section === "explore") return "home-route:games";
   if (section === "community") return "home-route:community";
   if (section === "create") return model.runtime.creator.note || model.runtime.creator.drawing ? "create:recent-project" : "create:playground";
@@ -141,7 +144,43 @@ export function activateHome({ focus }) {
   let selected = sections.some(({ id }) => id === root.dataset.homeSection) ? root.dataset.homeSection : "continue";
   let transitionTimer = null;
   let enterFrame = null;
+  let centerFrame = null;
   let alive = true;
+
+  const prepareContinueCarousel = (selectedItem = null) => {
+    const carousel = context.querySelector(".home-continue-carousel");
+    const item = selectedItem || carousel?.querySelector("[data-continue-item]");
+    if (!carousel || !item) return;
+    const centerSpace = Math.max(28, (context.clientHeight - item.offsetHeight) / 2);
+    carousel.style.setProperty("--continue-center-space", `${centerSpace}px`);
+  };
+
+  const updateContinueFocus = (target) => {
+    const item = target?.closest?.("[data-continue-item]");
+    const rows = [...context.querySelectorAll("[data-continue-item]")];
+    if (!item || !context.contains(item) || !rows.length) {
+      context.classList.remove("is-carousel-active");
+      return;
+    }
+    const selectedIndex = rows.indexOf(item);
+    context.classList.add("is-carousel-active");
+    rows.forEach((row, index) => {
+      row.dataset.focusDistance = String(Math.min(3, Math.abs(index - selectedIndex)));
+      row.dataset.focusSide = index < selectedIndex ? "previous" : index > selectedIndex ? "next" : "current";
+    });
+    prepareContinueCarousel(item);
+    focus.lockInput(190);
+    if (centerFrame) cancelAnimationFrame(centerFrame);
+    centerFrame = requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!alive || !item.isConnected) return;
+      prepareContinueCarousel(item);
+      const top = item.offsetTop - (context.clientHeight - item.offsetHeight) / 2;
+      context.scrollTo({
+        top: Math.max(0, top),
+        behavior: getState().reducedMotion ? "auto" : "smooth",
+      });
+    }));
+  };
 
   const renderContext = (section, animate = true) => {
     if (!sections.some(({ id }) => id === section)) return;
@@ -166,7 +205,9 @@ export function activateHome({ focus }) {
     const update = () => {
       if (!alive || selected !== section) return;
       context.innerHTML = contextMarkup(section, model);
-      context.classList.remove("is-exiting-next", "is-exiting-previous");
+      context.classList.remove("is-exiting-next", "is-exiting-previous", "is-carousel-active");
+      if (changed) context.scrollTop = 0;
+      prepareContinueCarousel();
       if (hadContextFocus) focus.focusFirst({ zone: "home-content", scope: context });
       if (animate && changed && !getState().reducedMotion) {
         context.classList.add(nextIndex > previousIndex ? "is-entering-next" : "is-entering-previous");
@@ -212,6 +253,10 @@ export function activateHome({ focus }) {
     renderContext(next);
     if (!fromContent) focus.setCurrent(root.querySelector(`[data-home-section-target='${next}']`), true);
   };
+  const onFocusChange = (event) => {
+    const target = event.detail?.target;
+    if (target && root.contains(target)) updateContinueFocus(target);
+  };
   const onRuntimeChange = () => {
     model.recent = recentExperiences();
     model.runtime = profileRuntime();
@@ -223,17 +268,30 @@ export function activateHome({ focus }) {
   root.addEventListener("click", onClick);
   document.addEventListener("para-home-section-shift", onSectionShift);
   document.addEventListener("para-runtimechange", onRuntimeChange);
+  document.addEventListener("para-focuschange", onFocusChange);
 
   renderContext(selected, false);
 
   const activityTimer = window.setInterval(() => {
-    if (selected === "continue" && model.recent.length) renderContext(selected, false);
+    if (selected !== "continue" || !model.recent.length) return;
+    const experiences = new Map(model.recent.map((experience) => [experience.id, experience]));
+    context.querySelectorAll("[data-continue-item]").forEach((row) => {
+      const experience = experiences.get(row.dataset.continueId);
+      if (!experience) return;
+      const activity = activityTime(experience);
+      const time = row.querySelector("[data-continue-time]");
+      const summary = row.querySelector("[data-continue-summary]");
+      if (time) time.textContent = activity;
+      if (summary && !experience.queueStatus) summary.textContent = activity;
+    });
   }, 60_000);
 
   paraApi.applications().then((applications) => {
     if (!alive) return;
     model.applications = applications.applications || [];
-    renderContext(selected, false);
+    model.recent = pruneContinueQueue(model.applications.map((application) => application.id));
+    model.runtime = profileRuntime();
+    if (["continue", "explore", "create"].includes(selected)) renderContext(selected, false);
   }).catch(() => {});
 
   return () => {
@@ -241,10 +299,12 @@ export function activateHome({ focus }) {
     window.clearInterval(activityTimer);
     clearTimeout(transitionTimer);
     if (enterFrame) cancelAnimationFrame(enterFrame);
+    if (centerFrame) cancelAnimationFrame(centerFrame);
     root.removeEventListener("focusin", onFocus);
     root.removeEventListener("pointerover", onPointer);
     root.removeEventListener("click", onClick);
     document.removeEventListener("para-home-section-shift", onSectionShift);
     document.removeEventListener("para-runtimechange", onRuntimeChange);
+    document.removeEventListener("para-focuschange", onFocusChange);
   };
 }

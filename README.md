@@ -15,7 +15,11 @@ PARA Home is wallpaper-first. Its only permanent navigation is Continue,
 Explore, Create, and Community in one horizontal row below the branding.
 Moving focus replaces the single contextual strip beneath that row. Continue
 is populated only after the current profile opens a real PARA route or detected
-application. Explore opens Games, Apps, PARA Demos, and ParaStore without
+application. It keeps the current Resume feature at the top and then shows up
+to ten installed or recently used experiences in a centered vertical queue.
+Successful installs enter automatically, launches move to the top without
+duplicates, and removing an installed demo removes its Continue entry.
+Explore, Create, and Community use the same downward content rhythm without
 filling the wallpaper with permanent dashboards. System functions remain in
 the Control Center and Settings instead of occupying a fifth Home section.
 

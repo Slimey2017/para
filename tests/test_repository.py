@@ -87,19 +87,29 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("home-launcher", screen)
         self.assertNotIn("home-widget", screen)
 
-    def test_home_content_flows_downward_from_resume(self):
+    def test_home_continue_queue_centers_real_activity(self):
         screen = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
         runtime = (ROOT / "apps/para-home/src/services/experience-runtime.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
         self.assertIn("export function recentExperiences()", runtime)
-        self.assertIn("Recently Played", screen)
-        self.assertIn("experiences.slice(1, 7)", screen)
-        self.assertIn('data-focus-id="continue:resume"', screen)
+        self.assertIn("CONTINUE_LIMIT = 10", runtime)
+        self.assertIn("queueInstalledExperience", runtime)
+        self.assertIn('queueStatus: "Ready to play"', runtime)
+        self.assertIn("queueInstalledEntries(runtime, completedDemos)", runtime)
+        self.assertIn("runtime.recent.filter((item) => item.id !== `demo:${id}`)", runtime)
+        self.assertIn("experiences.slice(0, 10)", screen)
+        self.assertIn("home-continue-carousel", screen)
+        self.assertIn("updateContinueFocus", screen)
+        self.assertIn("focus.lockInput(190)", screen)
+        self.assertIn("context.scrollTo", screen)
         self.assertIn('data-nav-left="${escapeHtml(focusId)}"', screen)
         self.assertIn('data-nav-right="${escapeHtml(focusId)}"', screen)
         for heading in ["Games", "Apps", "Demos", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates"]:
             self.assertIn(heading, screen)
-        self.assertIn("home-recent-row", css)
+        for distance in range(4):
+            self.assertIn(f'data-focus-distance="{distance}"', css)
+        self.assertIn("--continue-center-space", css)
+        self.assertNotIn("home-recent-row", css)
         self.assertIn("home-flow-row", css)
         self.assertIn("overflow-y: auto", css)
 

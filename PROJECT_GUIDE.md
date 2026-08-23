@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PARA 0.7.1 is the working skeleton of a Linux-powered home console/PC
+PARA 0.7.2 is the working skeleton of a Linux-powered home console/PC
 shell. Linux remains the operating system and supplies processes, graphics,
 input, filesystems, networking, device discovery, and drivers. PARA supplies a
 controller-first consumer interface and narrow service boundaries over those
@@ -221,7 +221,7 @@ PARA/
 | `Makefile` | Stable entry points: `dev`, `check`, `smoke`, `render-check`, `native-check`, and `package`. | Make | Working. | Add release, formatting, coverage, and client-generation targets. Delegates to `scripts/` and `tools/`. |
 | `README.md` | Short run/deploy handoff. | Markdown | Current. | Add screenshots and distro compatibility after real hardware testing. |
 | `PROJECT_GUIDE.md` | Complete architecture and file-by-file status. | Markdown + Mermaid | Current. | Keep synchronized with routes, service specs, and deployment behavior. |
-| `VERSION` | Single source for gateway and archive version. | Plain text | `0.7.1`. | Automate from signed releases later. |
+| `VERSION` | Single source for gateway and archive version. | Plain text | `0.7.2`. | Automate from signed releases later. |
 | `render.yaml` | Render Blueprint build, start, and health-check configuration. | YAML | Working. | Add a production observability policy if PARA is publicly operated. Calls `scripts/render-start.sh`. |
 
 ## PARA Home frontend
@@ -244,7 +244,7 @@ PARA/
 | `src/state.js` | Versioned per-profile storage for all 14 setup choices, profiles, wallpaper, Control Center order, sounds, recent/running experiences, demos, downloads, notifications, Marks, and creator work. | JavaScript `localStorage` plus gateway preference synchronization | Working; the complete web session survives navigation and restart. It is not a remote identity store. | Move identity/authorization to a versioned account service and large binary saves to IndexedDB. |
 | `src/screen-manifest.js` | Authoritative set of 37 reachable screens. Bear Home is not a route; the Control Center remains an overlay. | JavaScript | Working and validated. | Add capability-gated route registration for installed integrations. |
 | `src/services/demo-catalog.js` | Defines the three shipped browser demo packages, routes, truthful sizes, and visual identities. | JavaScript data module | Working; every entry has a playable destination. | Replace the in-repository catalog with signed package metadata when ParaStore has a package service. |
-| `src/services/experience-runtime.js` | Records resumable/recent experiences, running items, profile-scoped demo installs, timed local install tasks, notifications, Marks, and demo storage. | JavaScript + `localStorage` state events | Working for included PARA web experiences. | Connect Linux process lifecycle and a signed download manager without changing Home/Control Center consumers. |
+| `src/services/experience-runtime.js` | Maintains the deduplicated ten-item Continue queue, prioritizes the active experience and successful installs, removes uninstalled demos, records launches, exposes running items, and owns profile-scoped installs, notifications, Marks, and demo storage. | JavaScript + `localStorage` state events | Working for included PARA web experiences; successful installs enter Continue before first launch and reinstalling re-enters the queue. | Connect Linux process lifecycle and a signed download manager without changing Home/Control Center consumers. |
 | `src/services/live-clock.js` | Formats browser-local system time as `h:mm AM/PM`, updates at exact minute boundaries, updates all `data-clock` surfaces, and returns an unmount cleanup. | JavaScript `Intl.DateTimeFormat` + aligned timeout | Working and shared by Home, profiles, apps, Files, System, and games. | Use a native session time-change signal in the installed shell. |
 | `src/services/microphone.js` | Reads browser microphone capability/permission and owns the real media stream for Control Center on/off. | MediaDevices + Permissions APIs | Working where the browser permits microphone access; blocked permission remains honest. | Hand off to PipeWire/session policy in the installed Linux shell. |
 | `src/services/para-api.js` | Client boundary for capabilities, applications, Linux state, personalization, PARA Files browse/search/actions, volume actions, custom images, and fixed power requests. | JavaScript Fetch API | Working. | Generate it from OpenAPI and add typed cancellation/retry policy. Talks only to `/api/v1`. |
@@ -255,7 +255,7 @@ PARA/
 | `src/ui/components.js` | Shared brand, living background, page frame, tiles, list rows, toggles, progress, and dynamic controller legends. | JavaScript templates | Working. Controls without a route or action render disabled. | Move to tested Web Components or another compositor-compatible UI toolkit. |
 | `src/screens/boot.js` | Renders black → violet point → circular ignition → official P formation → PARA wordmark, then Controller → Language & Region → Display Area → Internet → PARA Account → Gaming Accounts → Other Accounts → Privacy → Accessibility → Audio → Power & Sleep → Background → Updates & Storage → Ready. | JavaScript, `requestAnimationFrame`, CSS transitions, Web Audio test tone | Working. The visual startup is exactly 8000 ms; display, network, audio, storage, controller, and background chapters consume actual available data. Unsupported account connections remain disabled and every chapter is skippable where appropriate. | Add signed account providers, full localization, HDR calibration, update status, and the native light/audio bridge. |
 | `src/screens/auth.js` | “Who’s playing?” with P1, P2, Guest, Add User, selected-profile Continue, and Switch Profile. | JavaScript | Working as a persistent local profile flow. | Add a genuine identity provider before exposing PIN, recovery, or remote accounts. |
-| `src/screens/home.js` | Wallpaper-first Home with exactly Continue, Explore, Create, and Community in one floating row below the branding. It defines header/navigation/content focus zones, remembers the last section for the current shell session, remembers content focus per section, and exposes one contextual strip at a time. | JavaScript templates + shared focus events | Working without permanent dashboard panels; a fresh launch defaults to Continue. | Add native game/application and social providers so Linux processes can join the same continuity model. |
+| `src/screens/home.js` | Wallpaper-first Home with exactly Continue, Explore, Create, and Community in one fixed row below the branding. Continue renders the real ten-item queue as a vertically centered focus carousel whose neighboring items dim by distance; Explore/Create/Community remain compact downward flows. | JavaScript templates + shared focus events | Working without permanent dashboard panels; focus movement centers the selected experience, expands truthful status/action detail, locks duplicate input during motion, and returns Up from the first item to navigation. | Add native play-time and platform metadata when Linux process tracking supplies it. |
 | `src/screens/experiences.js` | ParaStore, installed Games, PARA Demos, three canvas games, Creator Playground, official project Community feed, and PARA Marks. | JavaScript Canvas, Web Audio, Pointer Events, templates | Working. Demo install/open/remove, gameplay, saved drawing/notes, music pads, project posts, and earned Marks are functional. | Split each experience into a sandboxed package and add signed catalog/download metadata. Communicates with demo/runtime/state services. |
 | `src/screens/libraries.js` | Installed Apps from the gateway and exact route/Linux application launching. Files appears as one normal built-in app only on a local session. | JavaScript | Working. It contains no Bear Home routing, hotspots, or fake apps. | Add lifecycle and sandbox metadata when the Linux application service exposes it. |
 | `src/screens/files.js` | Classic PARA Files shell: locations sidebar, history, path bar, search, four views, sorting, multi-select, context menus, properties, drag/drop, PC shortcuts, controller actions, Trash, and volume actions. | JavaScript DOM + Fetch | Working against actual gateway results. Mutating controls render only when the explicit local file-operation capability is present. | Add tabs, thumbnails, indexed content search, progress/cancel for large transfers, undo, conflict resolution, and portal-based opening. Communicates with `para-api.js`, `focus-manager.js`, and the Linux gateway. |
@@ -291,8 +291,10 @@ providers are disabled instead of producing a false connection result.
 PARA Home uses four primary items in one horizontal row. They
 behave as contextual tabs, not giant cards or website links:
 
-- `Continue` — resumes the most recently opened game or application for the
-  current profile; it stays quiet before anything has been opened.
+- `Continue` — a deduplicated rolling queue of at most ten real experiences.
+  The active item stays first, successful installs enter near the top as
+  “Ready to play,” launches move an item to the top, and uninstalling a demo
+  removes its entry without affecting other installed content.
 - `Explore` — opens working Games, Apps, PARA Demos, and ParaStore routes.
 - `Create` — opens Creator Playground plus detected Linux creator applications.
 - `Community` — opens real PARA build announcements and patch notes, without
@@ -302,9 +304,12 @@ System functions stay in Settings and the compact Control Center. Moving focus
 between the four Home items replaces the previous context in roughly 180–280
 ms. The selected item grows slightly, brightens, and gains a restrained purple
 underline. LB/RB changes sections; moving down enters the content zone; moving
-up returns to the selected section. Each section remembers its last focused
-content item for the shell session. The wallpaper remains the dominant surface
-and subtly shifts its ambient light by section.
+up returns to the selected section. Inside Continue, the selected experience
+stays vertically centered while neighbors move around it and fade by distance;
+the first item's Up relationship returns to the fixed navigation. Horizontal
+movement is locked within each queue item. Each section remembers its focused content item for the
+shell session. The wallpaper remains the dominant surface and subtly shifts
+its ambient light by section.
 
 Reachable screens include Startup, Intro, all 14 Setup chapters, Login,
 Profiles, Add User, Home, Apps, Games, Demos, ParaStore, three games, Creator,
@@ -577,7 +582,7 @@ make native-check
 make package
 ```
 
-The archive is written to `dist/PARA-0.7.1.zip`.
+The archive is written to `dist/PARA-0.7.2.zip`.
 
 ## Render deployment
 
