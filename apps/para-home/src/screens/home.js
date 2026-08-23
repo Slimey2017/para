@@ -79,10 +79,18 @@ function continueItem(experience, index, queue) {
   return `<button class="home-continue-item" type="button" data-continue-item data-continue-id="${escapeHtml(experience.id)}" data-route="${escapeHtml(experience.route)}" data-focus-id="${escapeHtml(focusId)}" data-nav-left="${escapeHtml(focusId)}" data-nav-right="${escapeHtml(focusId)}"${navigationAttributes(up, down)} style="--continue-accent:${escapeHtml(experience.accent || "#9b5cff")}" aria-label="${escapeHtml(`${experience.title}. ${status}. ${action}`)}"><span class="home-continue-item__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</span><span class="home-continue-item__copy"><small>${escapeHtml(platform)}</small><strong>${escapeHtml(experience.title)}</strong><span data-continue-summary>${escapeHtml(status)}</span><span class="home-continue-item__details"><time data-continue-time>${escapeHtml(activity)}</time><i aria-hidden="true"></i><b>${action}</b></span></span></button>`;
 }
 
+function continueHero(experience) {
+  if (!experience) return "";
+  const activity = activityTime(experience);
+  const action = experience.queueStatus ? "Play" : "Resume";
+  const platform = experience.platform || experience.kind || "App";
+  return `<aside class="home-continue-hero" data-continue-hero aria-live="polite" style="--continue-accent:${escapeHtml(experience.accent || "#9b5cff")}"><div class="home-continue-hero__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</div><div class="home-continue-hero__copy"><span>${escapeHtml(platform)}</span><h2>${escapeHtml(experience.title)}</h2><p>${escapeHtml(experience.queueStatus || activity)}</p><div class="home-continue-hero__meta"><strong>${action}</strong><i aria-hidden="true"></i><small>${escapeHtml(activity)}</small></div></div><div class="home-continue-hero__hint">Selected in Continue</div></aside>`;
+}
+
 function continueMarkup(experiences) {
   const queue = experiences.slice(0, 10);
-  if (!queue.length) return continueEmptyState();
-  return `<div class="home-continue-carousel" aria-label="Continue">${queue.map((experience, index) => continueItem(experience, index, queue)).join("")}</div>`;
+  if (!queue.length) return `<div class="home-continue-empty-layout">${continueEmptyState()}<aside class="home-home-actions" aria-label="Quick actions"><span>Get started</span><h2>Build your PARA library.</h2><p>Install games and apps, then your latest activity will appear here automatically.</p><div><button type="button" data-route="parastore" data-focus-id="continue:store">Open ParaStore</button><button type="button" data-route="games" data-focus-id="continue:library">Game Library</button></div></aside></div>`;
+  return `<div class="home-continue-layout"><div class="home-continue-carousel" aria-label="Continue">${queue.map((experience, index) => continueItem(experience, index, queue)).join("")}</div>${continueHero(queue[0])}</div>`;
 }
 
 function contextMarkup(section, model) {
@@ -92,8 +100,7 @@ function contextMarkup(section, model) {
     const actions = [
       ["Games", "Installed for this profile", "games", "◉"],
       ["Apps", model.applications.length ? `${model.applications.length} available` : "Open the app library", "apps", "▦"],
-      ["Demos", model.runtime.installedDemos.length ? `${model.runtime.installedDemos.length} installed` : "Playable PARA experiences", "demos", "◇"],
-      ["ParaStore", "Discover and install demos", "parastore", "▱"],
+      ["ParaStore", "Discover games and apps", "parastore", "▱"],
     ];
     return `<div class="home-flow">${actions.map(([title, subtitle, route, mark], index) => `<section class="home-flow-section"><h3>${title}</h3><div class="home-flow-list">${flowAction(title, subtitle, route, mark, `home-route:${route}`, index === 0 ? "home-nav:explore" : `home-route:${actions[index - 1][2]}`, index < actions.length - 1 ? `home-route:${actions[index + 1][2]}` : "")}</div></section>`).join("")}</div>`;
   }
@@ -131,9 +138,13 @@ function primaryFocusId(section, model) {
 
 export function homeScreen() {
   const profile = getState().activeProfile || "P1";
+  const runtime = profileRuntime();
+  const activeDownloads = runtime.downloads.filter((item) => item.status === "downloading").length;
+  const unreadNotifications = runtime.notifications.length;
   const selected = sections.some(({ id }) => id === rememberedHomeSection) ? rememberedHomeSection : "continue";
-  return `<section class="home-ui" data-home-section="${selected}" data-focus-scope="home" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header" data-focus-zone="home-header" data-nav-down-zone="home-nav"><button class="home-wordmark" type="button" data-action="open-control-center" data-focus-id="home-header:para" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-status"><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" data-focus-id="home-header:profile" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home" data-focus-zone="home-nav" data-nav-up-zone="home-header" data-nav-down-zone="home-content">${mainNavigation(selected)}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-${selected}" aria-live="polite" data-focus-zone="home-content" data-focus-scope="home:${selected}" data-nav-up="home-nav:${selected}">${continueEmptyState()}</section></main><footer class="home-control-legend control-legend" aria-hidden="true"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span><span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span><span><b class="prompt-key" data-prompt="shoulderPrevious">PgUp</b><b class="prompt-key" data-prompt="shoulderNext">PgDn</b>Sections</span></footer></section>`;
+  return `<section class="home-ui" data-home-section="${selected}" data-focus-scope="home" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header" data-focus-zone="home-header" data-nav-down-zone="home-nav"><button class="home-wordmark" type="button" data-action="open-control-center" data-focus-id="home-header:para" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-header__activity" aria-label="System activity"><span><i aria-hidden="true"></i>${activeDownloads ? `${activeDownloads} download${activeDownloads === 1 ? "" : "s"}` : "Downloads clear"}</span><span>${unreadNotifications ? `${unreadNotifications} notification${unreadNotifications === 1 ? "" : "s"}` : "No new alerts"}</span></div><div class="home-status"><button class="home-settings" type="button" data-route="settings" data-focus-id="home-header:settings" aria-label="Open Settings"><span aria-hidden="true">⚙</span><strong>Settings</strong></button><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" data-focus-id="home-header:profile" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home" data-focus-zone="home-nav" data-nav-up-zone="home-header" data-nav-down-zone="home-content">${mainNavigation(selected)}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-${selected}" aria-live="polite" data-focus-zone="home-content" data-focus-scope="home:${selected}" data-nav-up="home-nav:${selected}">${continueEmptyState()}</section></main><footer class="home-control-legend control-legend" aria-hidden="true"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span><span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span><span><b class="prompt-key" data-prompt="shoulderPrevious">PgUp</b><b class="prompt-key" data-prompt="shoulderNext">PgDn</b>Sections</span></footer></section>`;
 }
+
 
 export function activateHome({ focus }) {
   const root = document.querySelector(".home-ui");
@@ -164,6 +175,9 @@ export function activateHome({ focus }) {
     }
     const selectedIndex = rows.indexOf(item);
     context.classList.add("is-carousel-active");
+    const selectedExperience = model.recent.find((experience) => experience.id === item.dataset.continueId);
+    const hero = context.querySelector("[data-continue-hero]");
+    if (hero && selectedExperience) hero.outerHTML = continueHero(selectedExperience);
     rows.forEach((row, index) => {
       row.dataset.focusDistance = String(Math.min(3, Math.abs(index - selectedIndex)));
       row.dataset.focusSide = index < selectedIndex ? "previous" : index > selectedIndex ? "next" : "current";
