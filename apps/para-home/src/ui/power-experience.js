@@ -67,6 +67,7 @@ export function beginSleep({ returnFocus = null } = {}) {
   if (activeSequence) return;
   const startedAt = performance.now();
   preparePowerAction();
+  document.dispatchEvent(new CustomEvent("para-systemcue", { detail: { name: "sleep" } }));
   const node = startOverlay("sleep", "Entering Sleep", returnFocus);
   scheduleAt(startedAt, SLEEP_LOGO_MS, () => node.classList.add("has-logo", "is-pulsing"));
   scheduleAt(startedAt, SLEEP_MESSAGE_MS, () => node.classList.add("has-message"));
@@ -84,6 +85,7 @@ export function beginPowerSequence(action, { returnFocus = null } = {}) {
   const message = action === "poweroff" ? "Turning off PARA" : "Restarting PARA";
   const startedAt = performance.now();
   preparePowerAction();
+  document.dispatchEvent(new CustomEvent("para-systemcue", { detail: { name: action === "poweroff" ? "shutdown" : "startup" } }));
   const node = startOverlay(action, message, returnFocus);
 
   scheduleAt(startedAt, POWER_TIMELINE_MS.FADE_END, () => node.classList.add("has-logo"));

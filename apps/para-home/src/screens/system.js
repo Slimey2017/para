@@ -1,9 +1,10 @@
-import { getState } from "../state.js";
+import { getProfilePreferences, getProfileRuntime, getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { page, tile, listRow, progress, toggleRow } from "../ui/components.js";
+import { demoStorageBytes } from "../services/experience-runtime.js";
 
 export function controllerScreen() {
-  return page({ title: "Controllers", description: "Controllers available to PARA.", eyebrow: "Input", body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section><div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="para">PARA</b><strong>PARA</strong><small>Tap controls · hold Home</small></span></div></div>` });
+  return page({ title: "Controllers", description: "Controllers available to PARA.", eyebrow: "Input", body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"><i data-controller-live-stick></i><b data-controller-live-button="0"></b><b data-controller-live-button="1"></b><b data-controller-live-button="2"></b><b data-controller-live-button="3"></b></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section><div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="para">PARA</b><strong>PARA</strong><small>Tap controls · hold Home</small></span></div></div>` });
 }
 
 export function updateControllerScreen(controller) {
@@ -14,6 +15,17 @@ export function updateControllerScreen(controller) {
   name.textContent = controller.connected ? controller.name : "No controller connected";
   detail.textContent = controller.connected ? `${controller.typeLabel} controls active` : "Connect a controller, then press any button.";
   map.hidden = !controller.connected;
+}
+
+export function activateControllerScreen() {
+  const onInput = (event) => {
+    const { buttons = [], axes = [] } = event.detail || {};
+    document.querySelectorAll("[data-controller-live-button]").forEach((node) => node.classList.toggle("is-pressed", Boolean(buttons[Number(node.dataset.controllerLiveButton)])));
+    const stick = document.querySelector("[data-controller-live-stick]");
+    if (stick) stick.style.transform = `translate(${Math.round((axes[0] || 0) * 8)}px, ${Math.round((axes[1] || 0) * 8)}px)`;
+  };
+  document.addEventListener("para-controllerinput", onInput);
+  return () => document.removeEventListener("para-controllerinput", onInput);
 }
 
 export function storageScreen() {
@@ -27,7 +39,8 @@ export async function activateStorage() {
     const payload = await paraApi.storage();
     const primary = payload.primary;
     const mounts = (payload.mounts || []).filter((mount) => mount.external);
-    container.innerHTML = `<section class="storage-overview panel"><div class="panel__head"><div><span class="eyebrow">Primary storage</span><h2>${primary.total_gb} GB</h2></div><strong>${primary.free_gb} GB free</strong></div>${progress(primary.used_percent)}<p class="storage-usage">${primary.used_gb} GB used</p></section><section class="storage-mounts"><h2>Connected drives</h2>${mounts.length ? `<div class="drive-grid">${mounts.map((mount) => `<div class="drive-card"><span>▯</span><strong>${escapeHtml(mount.name)}</strong><small>${mount.free_gb} GB free · ${escapeHtml(mount.filesystem)}</small></div>`).join("")}</div>` : `<div class="library-empty library-empty--small"><span>▯</span><h2>No external drives connected</h2></div>`}</section>`;
+    const demoBytes = demoStorageBytes();
+    container.innerHTML = `<section class="storage-overview panel"><div class="panel__head"><div><span class="eyebrow">Primary storage</span><h2>${primary.total_gb} GB</h2></div><strong>${primary.free_gb} GB free</strong></div>${progress(primary.used_percent)}<p class="storage-usage">${primary.used_gb} GB used</p></section>${demoBytes ? `<section class="panel demo-storage"><div><span class="eyebrow">PARA demos</span><h2>${(demoBytes / 1_000_000).toFixed(1)} MB</h2></div><button class="action-button action-button--ghost" data-route="games">Manage</button></section>` : ""}<section class="storage-mounts"><h2>Connected drives</h2>${mounts.length ? `<div class="drive-grid">${mounts.map((mount) => `<div class="drive-card"><span>▯</span><strong>${escapeHtml(mount.name)}</strong><small>${mount.free_gb} GB free · ${escapeHtml(mount.filesystem)}</small></div>`).join("")}</div>` : `<div class="library-empty library-empty--small"><span>▯</span><h2>No external drives connected</h2></div>`}</section>`;
   } catch { container.innerHTML = `<div class="library-empty"><span>▯</span><h2>Storage information is unavailable</h2></div>`; }
 }
 
@@ -35,6 +48,7 @@ export function settingsScreen() {
   const items = [
     ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
     ["Display", "Screen information and interface size", "display", "▭"],
+    ["Audio", "PARA sounds and output controls", "audio-settings", "◖"],
     ["Network", "Connections available to PARA", "network", "⌁"],
     ["Controllers", "Gamepads available to PARA", "controller", "◇"],
     ["Storage", "Disk usage and mounted drives", "storage", "▯"],
@@ -43,6 +57,9 @@ export function settingsScreen() {
     ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
     ["Power", "Session controls", "power", "○"],
     ["Repair & health", "PARA and system status", "health", "+"],
+    ["Notifications", "Recent PARA events", "notifications", "◌"],
+    ["About", "Build information and PARA Lab", "about", "i"],
+    ["Reset", "Replay setup with a clean profile", "reset-para", "↺"],
   ];
   return page({ title: "System", description: "Manage the parts of PARA available on this system.", eyebrow: "Settings", className: "settings-page", body: `<div class="settings-grid">${items.map((item, index) => tile({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus: index === 0, className: "settings-tile" })).join("")}</div>` });
 }
@@ -68,13 +85,63 @@ export async function activateNetwork() {
     const payload = await paraApi.network();
     if (!payload.interfaces?.length) { container.innerHTML = `<div class="library-empty library-empty--small"><span>⌁</span><h2>No network interfaces found</h2></div>`; return; }
     container.innerHTML = `<div class="network-interface-list">${payload.interfaces.map((item) => `<div class="network-interface"><span>${item.kind === "wifi" ? "⌁" : "↔"}</span><div><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "wifi" ? "Wi-Fi" : "Ethernet"}</small></div><b class="${item.connected ? "is-connected" : ""}">${item.connected ? "Connected" : escapeHtml(item.state)}</b></div>`).join("")}</div>`;
-  } catch { container.innerHTML = `<div class="library-empty library-empty--small"><span>⌁</span><h2>Network information is unavailable</h2></div>`; }
+  } catch { container.innerHTML = `<div class="network-browser-state"><span>⌁</span><div><strong>${navigator.onLine ? "Online" : "Offline"}</strong><small>Browser connection status</small></div></div>`; }
+}
+
+export function audioSettingsScreen() {
+  const sound = getProfilePreferences().sound;
+  return page({ title: "Audio", description: "Sound controls for PARA.", eyebrow: "System", body: `<div class="panel"><div class="list">${toggleRow({ title: "Interface sounds", meta: "Focus, confirm, and notification sounds", action: "toggle-interface-sounds", value: sound.interfaceSounds, icon: "◖", autofocus: true })}</div><label class="settings-slider"><span><strong>Interface volume</strong><small>Applies to PARA navigation sounds</small></span><input type="range" min="0" max="100" step="1" value="${sound.volume}" data-interface-volume /><output data-interface-volume-output>${sound.volume}%</output></label></div>` });
+}
+
+export function notificationsScreen() {
+  const notifications = getProfileRuntime().notifications;
+  return page({ title: "Notifications", description: "Recent events for this profile.", eyebrow: "System", body: notifications.length ? `<div class="notification-list">${notifications.map((note, index) => `<button class="notification-row" ${note.route ? `data-route="${escapeHtml(note.route)}"` : "disabled"} ${index === 0 ? "data-autofocus='true'" : ""}><span>◌</span><div><strong>${escapeHtml(note.title)}</strong><small>${new Date(note.createdAt).toLocaleDateString()}</small></div></button>`).join("")}</div>` : `<div class="library-empty"><span>◌</span><h2>You’re all caught up</h2></div>` });
+}
+
+export function aboutScreen() {
+  return page({ title: "About PARA", description: "System and build information.", eyebrow: "PARA OS Web", body: `<section class="about-build panel"><span class="eyebrow">Current build</span><h2>PARA OS Web · Build 0.7.0</h2><p>Linux console shell interface</p></section><div class="settings-grid">${tile({ title: "PARA Lab", meta: "Browser, display, and controller diagnostics", route: "para-lab", icon: "⌬", autofocus: true })}</div>` });
+}
+
+export function paraLabScreen() {
+  return page({ title: "PARA Lab", description: "Live diagnostic information for this session.", eyebrow: "Experimental", body: `<div class="lab-grid" data-para-lab><div><span>Frame rate</span><strong data-lab-fps>Reading…</strong></div><div><span>Resolution</span><strong data-lab-resolution>Reading…</strong></div><div><span>Browser</span><strong data-lab-browser>Reading…</strong></div><div><span>Gamepads</span><strong data-lab-gamepads>Reading…</strong></div><div><span>Connection</span><strong data-lab-online>Reading…</strong></div></div>` });
+}
+
+export function activateParaLab() {
+  let alive = true;
+  let frames = 0;
+  let started = performance.now();
+  let frame = 0;
+  const update = () => {
+    if (!alive) return;
+    frames += 1;
+    const now = performance.now();
+    if (now - started >= 1000) {
+      const fps = document.querySelector("[data-lab-fps]");
+      if (fps) fps.textContent = `${Math.round(frames * 1000 / (now - started))} FPS`;
+      frames = 0; started = now;
+      const resolution = document.querySelector("[data-lab-resolution]");
+      const browser = document.querySelector("[data-lab-browser]");
+      const gamepads = document.querySelector("[data-lab-gamepads]");
+      const online = document.querySelector("[data-lab-online]");
+      if (resolution) resolution.textContent = `${window.innerWidth} × ${window.innerHeight}`;
+      if (browser) browser.textContent = navigator.userAgentData?.brands?.at(-1)?.brand || navigator.userAgent.split(" ").at(-1)?.split("/")[0] || "Browser";
+      if (gamepads) gamepads.textContent = `${[...(navigator.getGamepads?.() || [])].filter(Boolean).length} connected`;
+      if (online) online.textContent = navigator.onLine ? "Online" : "Offline";
+    }
+    frame = requestAnimationFrame(update);
+  };
+  frame = requestAnimationFrame(update);
+  return () => { alive = false; cancelAnimationFrame(frame); };
+}
+
+export function resetParaScreen() {
+  return page({ title: "Reset PARA", description: "Remove profiles, settings, demos, and saved activity from this browser.", eyebrow: "System", body: `<section class="reset-panel panel"><span>↺</span><div><h2>Start over?</h2><p>PARA will replay the startup and all 14 setup chapters.</p></div><button class="action-button" data-action="reset-first-boot" data-autofocus="true">Reset PARA</button></section>` });
 }
 
 export function accountScreen() {
-  const profile = getState().activeProfile || "Player One";
-  const initials = profile === "Player One" ? "P1" : profile.slice(0, 2).toUpperCase();
-  return page({ title: "Account", description: "The profile used for this PARA session.", eyebrow: "Local profile", body: `<section class="account-hero panel"><span class="avatar">${escapeHtml(initials)}</span><div><h2>${escapeHtml(profile)}</h2><p>Stored on this device</p></div><button class="action-button action-button--ghost" data-route="profiles" data-autofocus="true">Switch Profile</button></section><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}</div>` });
+  const profile = getState().activeProfile || "P1";
+  const initials = profile.slice(0, 2).toUpperCase();
+  return page({ title: "Account", description: "The profile used for this PARA session.", eyebrow: "Local profile", body: `<section class="account-hero panel"><span class="avatar">${escapeHtml(initials)}</span><div><h2>${escapeHtml(profile)}</h2><p>Stored on this device</p></div><button class="action-button action-button--ghost" data-route="profiles" data-autofocus="true">Switch Profile</button></section><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Marks", meta: "Milestones earned on PARA", route: "marks", icon: "◇" })}${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}</div>` });
 }
 
 export function powerScreen() {

@@ -3,6 +3,7 @@ import {
   getProfilePreferences, getState, previewBackground, setProfilePreferences,
 } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
+import { applyBrowserBackground, saveBrowserBackground } from "../services/profile-assets.js";
 import { page, tile } from "../ui/components.js";
 import { controlCenterDefinitions } from "../ui/control-center.js";
 
@@ -138,11 +139,7 @@ export function activateBackgroundScreen({ focus, changed }) {
   document.querySelector("[data-background-dim]")?.addEventListener("input", onDimming);
   updateBackgroundChoiceState(session);
 
-  paraApi.capabilities().then((capabilities) => {
-    if (activeBackgroundSession === session && custom) custom.hidden = !capabilities.custom_backgrounds;
-  }).catch(() => {
-    if (activeBackgroundSession === session && custom) custom.hidden = true;
-  });
+  if (custom) custom.hidden = !(globalThis.File && globalThis.indexedDB);
 
   return () => {
     pageElement?.removeEventListener("focusin", onChoiceFocus);
@@ -166,10 +163,24 @@ export function cancelBackgroundPreview(focus) {
 
 export async function applyCustomBackground(focus) {
   if (!pendingBackground) return false;
-  const profile = getState().activeProfile || "Player One";
+  const profile = getState().activeProfile || "P1";
   try {
-    const result = await paraApi.uploadBackground(profile, pendingBackground);
-    setProfilePreferences({ background: { selection: "custom", revision: result.revision } }, profile);
+    let source = "browser";
+    let revision = Date.now();
+    try {
+      const capabilities = await paraApi.capabilities();
+      if (capabilities.custom_backgrounds) {
+        const result = await paraApi.uploadBackground(profile, pendingBackground);
+        source = "host";
+        revision = result.revision;
+      } else {
+        revision = await saveBrowserBackground(profile, pendingBackground);
+      }
+    } catch {
+      revision = await saveBrowserBackground(profile, pendingBackground);
+    }
+    setProfilePreferences({ background: { selection: "custom", source, revision } }, profile);
+    if (source === "browser") await applyBrowserBackground(profile);
     if (activeBackgroundSession) {
       activeBackgroundSession.committed = "custom";
       activeBackgroundSession.staged = "custom";
@@ -239,15 +250,12 @@ export async function activateControlCenterSettings({ focus, controller }) {
   if (!container) return;
   let capabilities = {};
   try { capabilities = await paraApi.capabilities(); } catch { capabilities = {}; }
-  const allowed = ["home"];
-  if (capabilities.switcher) allowed.push("switcher");
+  const allowed = ["home", "switcher", "downloads", "audio"];
   if (capabilities.notifications) allowed.push("notifications");
   if (capabilities.friends) allowed.push("friends");
-  if (capabilities.downloads) allowed.push("downloads");
   if (capabilities.music) allowed.push("music");
   if (capabilities.network) allowed.push("network");
-  if (capabilities.audio) allowed.push("audio");
-  if (capabilities.microphone) allowed.push("microphone");
+  if (capabilities.microphone || navigator.mediaDevices?.getUserMedia) allowed.push("microphone");
   if (controller.connected) allowed.push("controllers");
   allowed.push("profile", "power");
   const preferences = getProfilePreferences().controlCenter;

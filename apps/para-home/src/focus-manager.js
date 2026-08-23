@@ -34,12 +34,14 @@ export class FocusManager {
   setCurrent(target, focus = false) {
     if (!target || !target.matches?.(FOCUSABLE)) return;
     if (this.current && this.current !== target) this.current.removeAttribute("data-focused");
+    const changed = this.current !== target;
     this.current = target;
     target.setAttribute("data-focused", "true");
     if (focus) {
       target.focus({ preventScroll: true });
       target.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
     }
+    if (changed) document.dispatchEvent(new CustomEvent("para-focuschange", { detail: { target } }));
   }
 
   move(direction) {
@@ -85,7 +87,7 @@ export class FocusManager {
     } else if (event.key === "Escape") {
       event.preventDefault();
       this.handlers.back();
-    } else if (event.key.toLowerCase() === "m" && !this.paraKeyDown) {
+    } else if (["p", "m"].includes(event.key.toLowerCase()) && !this.paraKeyDown) {
       event.preventDefault();
       this.paraKeyDown = true;
       this.paraHoldTimer = setTimeout(() => {
@@ -106,7 +108,7 @@ export class FocusManager {
   }
 
   onKeyUp(event) {
-    if (event.key.toLowerCase() !== "m" || !this.paraKeyDown) return;
+    if (!["p", "m"].includes(event.key.toLowerCase()) || !this.paraKeyDown) return;
     event.preventDefault();
     this.paraKeyDown = false;
     if (this.paraHoldTimer) {

@@ -1,5 +1,5 @@
-const STORAGE_KEY = "para.home.state.v4";
-const LEGACY_STORAGE_KEYS = ["para.home.state.v3", "para.home.state.v2"];
+const STORAGE_KEY = "para.home.state.v5";
+const LEGACY_STORAGE_KEYS = ["para.home.state.v4", "para.home.state.v3", "para.home.state.v2"];
 
 export const DEFAULT_BACKGROUND_ID = "para-aurora";
 export const BUILT_IN_BACKGROUND_IDS = Object.freeze(["para-aurora", "para-horizon", "para-midnight", "solid-black"]);
@@ -30,7 +30,7 @@ function detectedSetupChoices() {
     safeArea: 0,
     networkChoice: "current",
     accountMode: "offline",
-    profileName: "Player One",
+    profileName: "P1",
     gamingAccounts: {},
     otherAccounts: {},
     sleepMinutes: 30,
@@ -46,8 +46,10 @@ const defaults = {
   highContrast: false,
   largeText: false,
   displayMode: "Living room",
+  profiles: ["P1", "P2"],
   setupChoices: detectedSetupChoices(),
   profilePreferences: {},
+  profileRuntime: {},
 };
 
 export function defaultProfilePreferences() {
@@ -55,6 +57,19 @@ export function defaultProfilePreferences() {
     background: { selection: DEFAULT_BACKGROUND_ID, fit: "fill", dim: 42, blur: 18, revision: 0 },
     home: { order: [...DEFAULT_HOME_WIDGET_ORDER], hidden: [] },
     controlCenter: { order: [...DEFAULT_CONTROL_CENTER_ORDER], hidden: [] },
+    sound: { interfaceSounds: true, volume: 62 },
+  };
+}
+
+export function defaultProfileRuntime() {
+  return {
+    recent: [],
+    running: [],
+    installedDemos: [],
+    downloads: [],
+    notifications: [],
+    marks: [],
+    creator: { note: "", drawing: "" },
   };
 }
 
@@ -69,6 +84,22 @@ function mergeProfilePreferences(value = {}) {
       order: [...(value.controlCenter?.order || base.controlCenter.order)],
       hidden: [...(value.controlCenter?.hidden || [])],
     },
+    sound: { ...base.sound, ...(value.sound || {}) },
+  };
+}
+
+function mergeProfileRuntime(value = {}) {
+  const base = defaultProfileRuntime();
+  return {
+    ...base,
+    ...value,
+    recent: [...(value.recent || [])],
+    running: [...(value.running || [])],
+    installedDemos: [...(value.installedDemos || [])],
+    downloads: [...(value.downloads || [])],
+    notifications: [...(value.notifications || [])],
+    marks: [...(value.marks || [])],
+    creator: { ...base.creator, ...(value.creator || {}) },
   };
 }
 
@@ -76,25 +107,59 @@ function load() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY) || LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) || "{}";
     const parsed = JSON.parse(stored);
+    const profilePreferences = { ...(parsed.profilePreferences || {}) };
+    const profileRuntime = { ...(parsed.profileRuntime || {}) };
+    if (profilePreferences["Player One"] && !profilePreferences.P1) profilePreferences.P1 = profilePreferences["Player One"];
+    if (profileRuntime["Player One"] && !profileRuntime.P1) profileRuntime.P1 = profileRuntime["Player One"];
+    const profiles = [...new Set((parsed.profiles || ["P1", "P2"]).map((name) => name === "Player One" ? "P1" : name))];
+    if (!profiles.includes("P1")) profiles.unshift("P1");
+    if (!profiles.includes("P2")) profiles.push("P2");
     return {
       ...defaults,
       ...parsed,
-      setupChoices: { ...detectedSetupChoices(), ...(parsed.setupChoices || {}) },
-      profilePreferences: { ...(parsed.profilePreferences || {}) },
+      activeProfile: parsed.activeProfile === "Player One" ? "P1" : parsed.activeProfile,
+      profiles,
+      setupChoices: { ...detectedSetupChoices(), ...(parsed.setupChoices || {}), profileName: parsed.setupChoices?.profileName === "Player One" ? "P1" : (parsed.setupChoices?.profileName || "P1") },
+      profilePreferences,
+      profileRuntime,
     };
   } catch {
-    return { ...defaults, setupChoices: detectedSetupChoices(), profilePreferences: {} };
+    return { ...defaults, setupChoices: detectedSetupChoices(), profilePreferences: {}, profileRuntime: {} };
   }
 }
 
 let state = load();
 
 export function getState() {
-  return { ...state, profilePreferences: { ...state.profilePreferences } };
+  return { ...state, profiles: [...state.profiles], profilePreferences: { ...state.profilePreferences }, profileRuntime: { ...state.profileRuntime } };
 }
 
-export function getProfilePreferences(profile = state.activeProfile || "Player One") {
+export function getProfilePreferences(profile = state.activeProfile || "P1") {
   return mergeProfilePreferences(state.profilePreferences[profile]);
+}
+
+export function getProfileRuntime(profile = state.activeProfile || "P1") {
+  return mergeProfileRuntime(state.profileRuntime[profile]);
+}
+
+export function setProfileRuntime(patch, profile = state.activeProfile || "P1") {
+  const current = getProfileRuntime(profile);
+  const next = mergeProfileRuntime({
+    ...current,
+    ...patch,
+    creator: { ...current.creator, ...(patch.creator || {}) },
+  });
+  state = { ...state, profileRuntime: { ...state.profileRuntime, [profile]: next } };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return next;
+}
+
+export function addProfile(name) {
+  const clean = String(name || "").trim().slice(0, 24);
+  if (!clean || state.profiles.some((profile) => profile.toLowerCase() === clean.toLowerCase())) return false;
+  state = { ...state, profiles: [...state.profiles, clean] };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return true;
 }
 
 export function setState(patch) {
@@ -113,7 +178,7 @@ export function setSetupAccountChoice(group, provider, value) {
   return setState({ setupChoices: { [group]: { ...choices, [provider]: value } } });
 }
 
-export function setProfilePreferences(patch, profile = state.activeProfile || "Player One") {
+export function setProfilePreferences(patch, profile = state.activeProfile || "P1") {
   const current = getProfilePreferences(profile);
   const next = mergeProfilePreferences({
     ...current,
@@ -121,6 +186,7 @@ export function setProfilePreferences(patch, profile = state.activeProfile || "P
     background: { ...current.background, ...(patch.background || {}) },
     home: { ...current.home, ...(patch.home || {}) },
     controlCenter: { ...current.controlCenter, ...(patch.controlCenter || {}) },
+    sound: { ...current.sound, ...(patch.sound || {}) },
   });
   state = { ...state, profilePreferences: { ...state.profilePreferences, [profile]: next } };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -128,7 +194,7 @@ export function setProfilePreferences(patch, profile = state.activeProfile || "P
   return next;
 }
 
-export function replaceProfilePreferences(preferences, profile = state.activeProfile || "Player One") {
+export function replaceProfilePreferences(preferences, profile = state.activeProfile || "P1") {
   const next = mergeProfilePreferences(preferences);
   state = { ...state, profilePreferences: { ...state.profilePreferences, [profile]: next } };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -137,7 +203,7 @@ export function replaceProfilePreferences(preferences, profile = state.activePro
 }
 
 export function resetState() {
-  state = { ...defaults, setupChoices: detectedSetupChoices(), profilePreferences: {} };
+  state = { ...defaults, profiles: ["P1", "P2"], setupChoices: detectedSetupChoices(), profilePreferences: {}, profileRuntime: {} };
   localStorage.removeItem(STORAGE_KEY);
   LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   applyPreferences();
@@ -156,6 +222,7 @@ export function postStartupDestination() {
 function wallpaperValues(profile, preferences) {
   const background = preferences.background;
   if (background.selection === "custom") {
+    if (background.source === "browser") return { image: "none", color: "#030208" };
     const url = `/api/v1/backgrounds/custom?profile=${encodeURIComponent(profile)}&v=${Number(background.revision) || 0}`;
     return { image: `url("${url}")`, color: "#030208" };
   }
@@ -170,7 +237,7 @@ function applyWallpaper(wallpaper) {
 }
 
 export function previewBackground(selection, customUrl = "") {
-  const profile = state.activeProfile || "Player One";
+  const profile = state.activeProfile || "P1";
   const preferences = getProfilePreferences(profile);
   if (customUrl) {
     applyWallpaper({ image: `url("${customUrl}")`, color: "#030208" });
@@ -181,7 +248,7 @@ export function previewBackground(selection, customUrl = "") {
 
 export function applyPreferences() {
   const root = document.documentElement;
-  const profile = state.activeProfile || "Player One";
+  const profile = state.activeProfile || "P1";
   const preferences = getProfilePreferences(profile);
   const wallpaper = wallpaperValues(profile, preferences);
   root.dataset.reducedMotion = String(state.reducedMotion);

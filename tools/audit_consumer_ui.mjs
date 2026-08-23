@@ -11,22 +11,38 @@ const libraries = await import("../apps/para-home/src/screens/libraries.js");
 const files = await import("../apps/para-home/src/screens/files.js");
 const system = await import("../apps/para-home/src/screens/system.js");
 const personalization = await import("../apps/para-home/src/screens/personalization.js");
+const experiences = await import("../apps/para-home/src/screens/experiences.js");
 
 const renderers = {
   startup: boot.startupScreen,
   intro: boot.introScreen,
   profiles: auth.profilesScreen,
+  "create-profile": auth.createProfileScreen,
   login: auth.loginScreen,
   home: home.homeScreen,
   apps: libraries.appsScreen,
+  games: experiences.gamesScreen,
+  demos: experiences.demosScreen,
+  parastore: experiences.paraStoreScreen,
+  creator: experiences.creatorScreen,
+  community: experiences.communityScreen,
+  marks: experiences.marksScreen,
+  "demo-pong": () => experiences.gameScreen("demo-pong"),
+  "demo-racer": () => experiences.gameScreen("demo-racer"),
+  "demo-platformer": () => experiences.gameScreen("demo-platformer"),
   files: files.filesScreen,
   downloads: files.downloadsScreen,
   controller: system.controllerScreen,
   storage: system.storageScreen,
   settings: system.settingsScreen,
   display: system.displayScreen,
+  "audio-settings": system.audioSettingsScreen,
   accessibility: system.accessibilityScreen,
   network: system.networkScreen,
+  notifications: system.notificationsScreen,
+  about: system.aboutScreen,
+  "para-lab": system.paraLabScreen,
+  "reset-para": system.resetParaScreen,
   account: system.accountScreen,
   power: system.powerScreen,
   health: system.healthScreen,

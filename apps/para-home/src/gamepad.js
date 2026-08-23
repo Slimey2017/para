@@ -69,6 +69,9 @@ export class GamepadNavigation {
   read(gamepad) {
     const pressed = gamepad.buttons.map((button) => button.pressed);
     const edge = (index) => pressed[index] && !this.previous[index];
+    if (pressed.some((value, index) => value !== this.previous[index]) || gamepad.axes.some((value) => Math.abs(value) > .08)) {
+      document.dispatchEvent(new CustomEvent("para-controllerinput", { detail: { buttons: pressed, axes: [...gamepad.axes] } }));
+    }
     if (edge(0)) this.handlers.confirm();
     if (edge(1)) this.handlers.back();
     if (edge(2)) this.handlers.secondary();

@@ -2,7 +2,7 @@ import { Router } from "./router.js";
 import { FocusManager } from "./focus-manager.js";
 import { GamepadNavigation, keyboardController } from "./gamepad.js";
 import {
-  applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getState, postStartupDestination,
+  addProfile, applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getState, postStartupDestination,
   replaceProfilePreferences, resetState, setProfilePreferences, setSetupAccountChoice,
   setSetupChoice, setState, startupDestination,
 } from "./state.js";
@@ -10,17 +10,23 @@ import {
   SETUP_CHAPTERS, startupScreen, introScreen, setupScreen, activateIntro,
   activateSetupChapter, playSetupAudioTest, updateSetupControllerStatus,
 } from "./screens/boot.js";
-import { profilesScreen, loginScreen } from "./screens/auth.js";
+import { createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
   appsScreen, activateApps, filterApps, launchLinuxApplication,
 } from "./screens/libraries.js";
 import { filesScreen, downloadsScreen, activateFiles, filesBack } from "./screens/files.js";
 import {
-  controllerScreen, updateControllerScreen, storageScreen, activateStorage,
+  controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
-  accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen,
+  accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen, audioSettingsScreen,
+  notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen,
 } from "./screens/system.js";
+import {
+  gamesScreen, demosScreen, paraStoreScreen, gameScreen, activateDemoGame,
+  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen,
+  playCreatorTone, clearCreatorDrawing,
+} from "./screens/experiences.js";
 import {
   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
   cancelBackgroundPreview, applyCustomBackground, applyBackgroundSelection,
@@ -32,6 +38,16 @@ import {
   resetControlCenterData, showControlCenterContext,
 } from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
+import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
+import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
+import {
+  activeDownloads, recordExperience, refreshDemoDownloads, removeDemo, startDemoInstall,
+} from "./services/experience-runtime.js";
+import { toggleMicrophone } from "./services/microphone.js";
+import {
+  playConfirmSound, playNavigationSound, playNotificationSound, playSystemCue,
+  setInterfaceSoundVolume, toggleInterfaceSounds,
+} from "./services/sound-effects.js";
 import { takeRestartSequence } from "./services/power-adapter.js";
 import {
   beginPowerSequence, beginSleep, cancelTurnOffConfirmation, confirmTurnOff,
@@ -47,8 +63,18 @@ const renderers = {
   setup: setupScreen,
   login: loginScreen,
   profiles: profilesScreen,
+  "create-profile": createProfileScreen,
   home: homeScreen,
   apps: appsScreen,
+  games: gamesScreen,
+  demos: demosScreen,
+  parastore: paraStoreScreen,
+  creator: creatorScreen,
+  community: communityScreen,
+  marks: marksScreen,
+  "demo-pong": () => gameScreen("demo-pong"),
+  "demo-racer": () => gameScreen("demo-racer"),
+  "demo-platformer": () => gameScreen("demo-platformer"),
   files: filesScreen,
   downloads: downloadsScreen,
   controller: controllerScreen,
@@ -56,7 +82,12 @@ const renderers = {
   settings: settingsScreen,
   display: displayScreen,
   accessibility: accessibilityScreen,
+  "audio-settings": audioSettingsScreen,
   network: networkScreen,
+  notifications: notificationsScreen,
+  about: aboutScreen,
+  "para-lab": paraLabScreen,
+  "reset-para": resetParaScreen,
   account: accountScreen,
   power: powerScreen,
   health: healthScreen,
@@ -68,11 +99,13 @@ const renderers = {
 const majorSections = ["home", "apps", "settings"];
 
 let cleanupScreen = null;
+let cleanupClock = null;
 let navigating = false;
 let controllerStatus = keyboardController();
 let overlayReturnFocus = null;
 let preferenceTimer = null;
 let idleSleepTimer = null;
+let idleDimTimer = null;
 let overlayCloseTimer = null;
 
 function toast(title, message = "") {
@@ -88,20 +121,6 @@ function toast(title, message = "") {
   }
   toastRegion.append(node);
   setTimeout(() => node.remove(), 3200);
-}
-
-function updateClock() {
-  const now = new Date();
-  const setup = getState().setupChoices;
-  let value;
-  try {
-    value = new Intl.DateTimeFormat(`${setup.language || "en"}-${setup.region || "US"}`, { hour: "numeric", minute: "2-digit", timeZone: setup.timeZone || undefined }).format(now);
-  } catch {
-    value = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(now);
-  }
-  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
-  document.querySelectorAll("[data-clock]").forEach((clock) => { clock.textContent = value; });
-  document.querySelectorAll("[data-greeting]").forEach((node) => { node.textContent = greeting; });
 }
 
 function updateControllerPrompts() {
@@ -142,12 +161,16 @@ async function updateDisplayInfo() {
 function render(route) {
   cleanupScreen?.();
   cleanupScreen = null;
+  cleanupClock?.();
+  cleanupClock = null;
   root.innerHTML = (renderers[route] || homeScreen)();
   root.classList.remove("is-leaving");
   root.classList.add("is-entering");
   requestAnimationFrame(() => root.classList.remove("is-entering"));
   navigating = false;
-  updateClock();
+  cleanupClock = mountLiveClock(root);
+  const background = getProfilePreferences().background;
+  if (background.selection === "custom" && background.source === "browser") void applyBrowserBackground(getState().activeProfile || "P1");
   updateControllerPrompts();
   updateDisplayInfo();
   focus.focusFirst();
@@ -162,8 +185,15 @@ function render(route) {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
     activateApps({ focus });
+  } else if (["demo-pong", "demo-racer", "demo-platformer"].includes(route)) {
+    cleanupScreen = activateDemoGame({ route });
+  } else if (route === "creator") {
+    cleanupScreen = activateCreator();
+  } else if (route === "community") {
+    cleanupScreen = activateCommunity();
   } else if (route === "files" || route === "downloads") {
     cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
+    if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
   } else if (route === "storage") {
     activateStorage();
   } else if (route === "network") {
@@ -172,12 +202,15 @@ function render(route) {
     activateHealth();
   } else if (route === "controller") {
     updateControllerScreen(controllerStatus);
+    cleanupScreen = activateControllerScreen();
+  } else if (route === "para-lab") {
+    cleanupScreen = activateParaLab();
   } else if (route === "background") {
     cleanupScreen = activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
   } else if (route === "control-center-settings") {
     activateControlCenterSettings({ focus, controller: controllerStatus });
   } else if (route === "setup") {
-    cleanupScreen = activateSetupChapter({ controller: controllerStatus, focus, changed: () => { schedulePreferenceSave(getState().activeProfile || getState().setupChoices.profileName || "Player One"); rerender(); } });
+    cleanupScreen = activateSetupChapter({ controller: controllerStatus, focus, changed: () => { schedulePreferenceSave(getState().activeProfile || getState().setupChoices.profileName || "P1"); rerender(); } });
   }
 }
 
@@ -195,7 +228,10 @@ function navigate(route, options = {}, target = null) {
 
 function confirm(target = focus.current) {
   if (consumePowerInput()) return;
-  if (target && !target.disabled && target.getAttribute("aria-disabled") !== "true") target.click();
+  if (target && !target.disabled && target.getAttribute("aria-disabled") !== "true") {
+    playConfirmSound();
+    target.click();
+  }
 }
 
 function back() {
@@ -233,7 +269,7 @@ function closeControlCenter(restore = true) {
     overlay.hidden = true;
     overlay.classList.remove("is-closing");
     overlay.innerHTML = "";
-    resetControlCenterData();
+    resetControlCenterData(overlay);
     if (returnTarget?.isConnected) focus.setCurrent(returnTarget, true);
     overlayReturnFocus = null;
   }, getState().reducedMotion ? 1 : 210);
@@ -275,6 +311,21 @@ function options() {
 }
 
 const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder, secondary, options });
+document.addEventListener("para-focuschange", playNavigationSound);
+document.addEventListener("para-systemcue", (event) => playSystemCue(event.detail?.name));
+document.addEventListener("para-startup-sound", (event) => playSystemCue(event.detail?.cue || "startup"));
+document.addEventListener("para-downloadcomplete", (event) => {
+  const item = event.detail?.downloads?.[0];
+  if (item) {
+    playNotificationSound();
+    toast(`${item.title} is ready`);
+  }
+  if (["demos", "parastore", "games"].includes(router.current())) rerender();
+});
+document.addEventListener("para-markearned", (event) => {
+  playNotificationSound();
+  toast("Mark earned", event.detail?.title || "New milestone");
+});
 const gamepad = new GamepadNavigation({
   move: (direction) => { if (!consumePowerInput()) { resetIdleSleep(); focus.move(direction); } },
   confirm: () => confirm(),
@@ -310,7 +361,7 @@ async function hydrateProfile(profile) {
 function schedulePreferenceSave(profileOverride = "") {
   clearTimeout(preferenceTimer);
   preferenceTimer = setTimeout(async () => {
-    const profile = profileOverride || getState().activeProfile || "Player One";
+    const profile = profileOverride || getState().activeProfile || "P1";
     try { await paraApi.savePersonalization(profile, getProfilePreferences(profile)); } catch { /* local state remains active */ }
   }, 240);
 }
@@ -334,6 +385,7 @@ async function openLinuxApplication(target) {
   const name = target.dataset.appName || "Application";
   try {
     await launchLinuxApplication(target.dataset.appId);
+    recordExperience({ id: target.dataset.appId, title: name, route: "apps", kind: "App", accent: "#9161ff", mark: name.slice(0, 1).toUpperCase() });
     toast(`Opening ${name}`);
   } catch {
     toast(`${name} couldn’t be opened`);
@@ -352,8 +404,9 @@ async function handleAction(action, target) {
       rerender();
       break;
     case "finish-setup":
+      addProfile(state.setupChoices.profileName || "P1");
       setState({ firstBootComplete: true, setupStep: SETUP_CHAPTERS.length - 1 });
-      loginToHome(state.activeProfile || state.setupChoices.profileName || "Player One", target);
+      loginToHome(state.activeProfile || state.setupChoices.profileName || "P1", target);
       break;
     case "setup-use-controller":
       if (controllerStatus.connected) setSetupChoice("inputMode", "controller");
@@ -368,7 +421,8 @@ async function handleAction(action, target) {
       toast("Network", "Set up later");
       break;
     case "setup-account-offline": {
-      const profile = state.setupChoices.profileName?.trim() || "Player One";
+      const profile = state.setupChoices.profileName?.trim() || "P1";
+      addProfile(profile);
       setState({ activeProfile: profile, setupChoices: { accountMode: "offline", profileName: profile } });
       toast("Offline profile ready", profile);
       break;
@@ -383,7 +437,7 @@ async function handleAction(action, target) {
       rerender();
       break;
     case "setup-background": {
-      const profile = state.activeProfile || state.setupChoices.profileName || "Player One";
+      const profile = state.activeProfile || state.setupChoices.profileName || "P1";
       setProfilePreferences({ background: { selection: target.dataset.backgroundId } }, profile);
       schedulePreferenceSave(profile);
       rerender();
@@ -396,12 +450,22 @@ async function handleAction(action, target) {
       if (!(await playSetupAudioTest())) toast("Sound couldn’t play");
       break;
     case "select-profile":
-      setState({ activeProfile: target.dataset.profile || "Player One" });
+      setState({ activeProfile: target.dataset.profile || "P1" });
       navigate("login", {}, target);
       break;
     case "profile-login":
-      loginToHome(target.dataset.profile || state.activeProfile || "Player One", target);
+      loginToHome(target.dataset.profile || state.activeProfile || "P1", target);
       break;
+    case "create-profile": {
+      const name = document.querySelector("[data-new-profile-name]")?.value || "";
+      if (!addProfile(name)) {
+        toast("Choose another name");
+        break;
+      }
+      setState({ activeProfile: name.trim() });
+      navigate("login", { replace: true }, target);
+      break;
+    }
     case "guest-login":
       loginToHome("Guest", target);
       break;
@@ -429,8 +493,15 @@ async function handleAction(action, target) {
       beginPowerSequence("poweroff", { returnFocus: target });
       break;
     case "reset-first-boot":
+      try { await clearProfileAssets(); } catch { /* browser storage may already be empty */ }
       resetState();
       navigate("intro", { replace: true }, target);
+      break;
+    case "restart-current-app":
+      render(router.current());
+      break;
+    case "return-home-after-crash":
+      router.go("home", { replace: true });
       break;
     case "toggle-reduced":
       toggle("reducedMotion", "Reduce motion");
@@ -479,6 +550,39 @@ async function handleAction(action, target) {
       } catch { /* the control disappears when the host capability is unavailable */ }
       break;
     }
+    case "toggle-browser-microphone":
+      await toggleMicrophone();
+      await populateControlCenter({ overlay, controller: controllerStatus, focus });
+      showControlCenterContext("microphone", true, focus);
+      break;
+    case "toggle-interface-sounds":
+      toast("Interface sounds", toggleInterfaceSounds() ? "On" : "Off");
+      schedulePreferenceSave();
+      rerender();
+      break;
+    case "install-demo":
+      if (startDemoInstall(target.dataset.demoId)) {
+        toast("Installing demo", target.closest(".demo-card")?.querySelector("h2")?.textContent || "Download started");
+        rerender();
+      }
+      break;
+    case "filter-store":
+      document.querySelectorAll("[data-store-category]").forEach((button) => button.classList.toggle("is-active", button === target));
+      break;
+    case "start-current-demo":
+      break;
+    case "remove-demo":
+      removeDemo(target.dataset.demoId);
+      toast("Demo removed");
+      rerender();
+      break;
+    case "play-creator-tone":
+      playCreatorTone(target);
+      break;
+    case "clear-creator-drawing":
+      clearCreatorDrawing();
+      toast("Sketch cleared");
+      break;
     case "open-background-picker":
       openBackgroundPicker();
       break;
@@ -568,7 +672,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("change", async (event) => {
   if (event.target.matches("[data-setup-setting]")) {
     setSetupChoice(event.target.dataset.setupSetting, event.target.value);
-    updateClock();
+    updateLiveClocks(root);
     return;
   }
   if (event.target.matches("[data-setup-safe-area]")) {
@@ -581,6 +685,10 @@ document.addEventListener("change", async (event) => {
       const output = overlay.querySelector("[data-audio-output]");
       if (output && audio.output) output.textContent = `${audio.output.volume}%`;
     } catch { /* the current level remains visible */ }
+  }
+  if (event.target.matches("[data-interface-volume]")) {
+    setInterfaceSoundVolume(event.target.value);
+    schedulePreferenceSave();
   }
 });
 
@@ -602,12 +710,20 @@ document.addEventListener("input", (event) => {
     const output = overlay.querySelector("[data-audio-output]");
     if (output) output.textContent = `${event.target.value}%`;
   }
+  if (event.target.matches("[data-interface-volume]")) {
+    setInterfaceSoundVolume(event.target.value);
+    document.querySelectorAll("[data-interface-volume-output], [data-audio-output]").forEach((output) => { output.textContent = `${event.target.value}%`; });
+  }
 });
 
 function resetIdleSleep() {
   clearTimeout(idleSleepTimer);
+  clearTimeout(idleDimTimer);
   idleSleepTimer = null;
+  idleDimTimer = null;
+  document.documentElement.classList.remove("is-idle");
   const state = getState();
+  if (state.firstBootComplete && state.loggedIn) idleDimTimer = setTimeout(() => document.documentElement.classList.add("is-idle"), 90_000);
   const minutes = Number(state.setupChoices.sleepMinutes) || 0;
   if (!state.firstBootComplete || !state.loggedIn || minutes <= 0) return;
   idleSleepTimer = setTimeout(() => beginSleep({ returnFocus: focus.current }), minutes * 60_000);
@@ -615,6 +731,40 @@ function resetIdleSleep() {
 
 document.addEventListener("pointerdown", resetIdleSleep, { passive: true });
 document.addEventListener("keydown", resetIdleSleep, { passive: true });
+
+function updateOnlineState() {
+  document.documentElement.dataset.online = String(navigator.onLine);
+  let banner = document.querySelector("[data-offline-banner]");
+  if (!navigator.onLine && !banner) {
+    banner = document.createElement("div");
+    banner.className = "offline-banner";
+    banner.dataset.offlineBanner = "";
+    banner.innerHTML = `<span>⌁</span><div><strong>PARA is offline</strong><small>Local games, Files, and Creator remain available.</small></div>`;
+    document.body.append(banner);
+  } else if (navigator.onLine && banner) banner.remove();
+}
+
+function showCrashScreen(error) {
+  if (document.querySelector("[data-crash-screen]")) return;
+  closeControlCenter(false);
+  cleanupScreen?.();
+  cleanupClock?.();
+  const detail = String(error?.stack || error?.message || error || "Unknown error");
+  root.innerHTML = `<section class="screen crash-screen" data-crash-screen><img src="./assets/para-logo.png" alt="" /><span class="eyebrow">PARA encountered a problem.</span><h1>This experience stopped unexpectedly.</h1><div><button class="action-button" data-action="restart-current-app" data-autofocus="true">Restart App</button><button class="action-button action-button--ghost" data-action="return-home-after-crash">Return Home</button></div><details><summary>Technical details</summary><pre></pre></details></section>`;
+  root.querySelector("pre").textContent = detail;
+  focus.focusFirst();
+}
+
+window.addEventListener("error", (event) => showCrashScreen(event.error || event.message));
+window.addEventListener("unhandledrejection", (event) => showCrashScreen(event.reason));
+window.addEventListener("online", updateOnlineState);
+window.addEventListener("offline", updateOnlineState);
+window.addEventListener("keydown", (event) => {
+  if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "l") {
+    event.preventDefault();
+    navigate("para-lab");
+  }
+});
 
 if (new URLSearchParams(location.search).get("reset") === "1") {
   resetState();
@@ -626,7 +776,8 @@ async function start() {
   const state = getState();
   if (state.loggedIn && state.activeProfile) await hydrateProfile(state.activeProfile);
   gamepad.start();
-  setInterval(updateClock, 30_000);
+  updateOnlineState();
+  window.setInterval(() => refreshDemoDownloads(), 500);
   resetIdleSleep();
   router.resolve();
 }

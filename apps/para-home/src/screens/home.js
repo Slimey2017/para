@@ -1,5 +1,6 @@
 import { getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
+import { recentExperience } from "../services/experience-runtime.js";
 import { paraLogo } from "../ui/components.js";
 
 const paths = {
@@ -63,19 +64,24 @@ function systemAction(title, route, iconName) {
   return `<button class="home-system-action" type="button" data-route="${route}"><span>${icon(iconName)}</span><strong>${title}</strong></button>`;
 }
 
+function exploreAction(title, subtitle, route, mark) {
+  return `<button class="home-explore-action" type="button" data-route="${route}"><span aria-hidden="true">${mark}</span><strong>${title}</strong><small>${subtitle}</small></button>`;
+}
+
+function continueMarkup(experience) {
+  if (!experience) return quietState("Continue", "Nothing to continue");
+  return `<div class="home-resume" style="--resume-accent:${escapeHtml(experience.accent || "#9b5cff")}"><span class="home-resume__art" aria-hidden="true">${escapeHtml(experience.mark || "◉")}</span><div><span>${escapeHtml(experience.kind || "Recent")}</span><h2>${escapeHtml(experience.title)}</h2><button class="action-button" data-route="${escapeHtml(experience.route)}">Resume</button></div></div>`;
+}
+
 function contextMarkup(section, model) {
-  if (section === "continue") return quietState("Continue", "Nothing to continue");
-  if (section === "community") return quietState("Community", "No community services are connected");
+  if (section === "continue") return continueMarkup(model.recent);
+  if (section === "community") return `<div class="home-context-heading"><span>Community</span><small>Official PARA updates</small></div><div class="home-system-strip">${exploreAction("PARA Updates", "News, patches, and Lab notes", "community", "◎")}</div>`;
   if (section === "explore") {
-    if (model.loading) return loadingState("Explore");
-    if (model.failed) return quietState("Explore", "Apps couldn’t be loaded");
-    return applicationStrip("Explore", model.applications, "No applications available");
+    return `<div class="home-context-heading"><span>Explore</span><small>Games, apps, and demos</small></div><div class="home-explore-strip">${exploreAction("Games", "Installed for this profile", "games", "◉")}${exploreAction("Apps", "Available on PARA", "apps", "▦")}${exploreAction("Demos", "Small playable experiences", "demos", "◇")}${exploreAction("ParaStore", "Install free demos", "parastore", "▱")}</div>`;
   }
   if (section === "create") {
-    if (model.loading) return loadingState("Create");
-    if (model.failed) return quietState("Create", "Creation apps couldn’t be loaded");
     const creatorApps = model.applications.filter((application) => application.roles?.includes("creator"));
-    return applicationStrip("Create", creatorApps, "No creation apps found");
+    return `<div class="home-context-heading"><span>Create</span><small>Make something</small></div><div class="home-content-strip">${exploreAction("Creator Playground", "Draw, write, and build a beat", "creator", "✦")}${creatorApps.map(applicationButton).join("")}</div>`;
   }
   const actions = [systemAction("Settings", "settings", "settings")];
   if (model.capabilities.files) actions.push(systemAction("Files", "files", "files"));
@@ -87,7 +93,7 @@ function contextMarkup(section, model) {
 }
 
 export function homeScreen() {
-  const profile = getState().activeProfile || "Player One";
+  const profile = getState().activeProfile || "P1";
   return `<section class="home-ui" data-home-section="continue" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header"><button class="home-wordmark" type="button" data-action="open-control-center" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-status"><time class="home-status__clock" data-clock>--:--</time><button class="home-profile" type="button" data-route="account" aria-label="Open ${escapeHtml(profile)} profile"><span>${escapeHtml(initials(profile))}</span></button></div></header><div class="home-canvas" aria-hidden="true"></div><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home">${mainNavigation()}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-continue" aria-live="polite">${quietState("Continue", "Nothing to continue")}</section></main></section>`;
 }
 
@@ -96,7 +102,7 @@ export function activateHome({ focus, controller }) {
   const context = root?.querySelector(".home-context");
   if (!root || !context) return () => {};
 
-  const model = { applications: [], capabilities: {}, controller, loading: true, failed: false };
+  const model = { applications: [], capabilities: {}, controller, recent: recentExperience(), loading: true, failed: false };
   let selected = "continue";
   let transitionTimer = null;
   let alive = true;
@@ -140,11 +146,16 @@ export function activateHome({ focus, controller }) {
     model.controller = event.detail;
     if (selected === "system") renderContext(selected, false);
   };
+  const onRuntimeChange = () => {
+    model.recent = recentExperience();
+    if (["continue", "explore"].includes(selected)) renderContext(selected, false);
+  };
 
   root.addEventListener("focusin", onFocus);
   root.addEventListener("pointerover", onPointer);
   root.addEventListener("click", onClick);
   document.addEventListener("para-controllerchange", onControllerChange);
+  document.addEventListener("para-runtimechange", onRuntimeChange);
 
   Promise.allSettled([paraApi.capabilities(), paraApi.applications()]).then(([capabilities, applications]) => {
     if (!alive) return;
@@ -162,5 +173,6 @@ export function activateHome({ focus, controller }) {
     root.removeEventListener("pointerover", onPointer);
     root.removeEventListener("click", onClick);
     document.removeEventListener("para-controllerchange", onControllerChange);
+    document.removeEventListener("para-runtimechange", onRuntimeChange);
   };
 }

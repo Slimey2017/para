@@ -1,5 +1,6 @@
 import { brand, hints, livingBackground, paraLogo, toggleRow } from "../ui/components.js";
 import { paraApi, escapeHtml, formatBytes } from "../services/para-api.js";
+import { applyBrowserBackground, saveBrowserBackground } from "../services/profile-assets.js";
 import {
   BACKGROUND_OPTIONS, BUILT_IN_BACKGROUND_IDS, getProfilePreferences, getState,
   setProfilePreferences,
@@ -88,7 +89,7 @@ function setupBackgroundChoices(selected) {
 function setupBody(step) {
   const state = getState();
   const choices = state.setupChoices;
-  const profile = state.activeProfile || choices.profileName || "Player One";
+  const profile = state.activeProfile || choices.profileName || "P1";
   const background = getProfilePreferences(profile).background.selection;
   const bodies = [
     `<div class="setup-question setup-question--center"><div class="setup-controller-symbol" aria-hidden="true"><i></i></div><span class="eyebrow">Controller</span><h1>How will you control PARA?</h1><p class="lede">Connect a PulseWave Controller by USB-C and press the PARA button, or continue with keyboard and mouse.</p><div class="setup-controller-state" data-setup-controller-status><strong>Waiting for a controller</strong><span>Keyboard and mouse are ready</span></div><div class="setup-choice-grid setup-choice-grid--two">${choiceButton({ title: "Connected controller", meta: "Press the PARA button to choose it", action: "setup-use-controller", selected: choices.inputMode === "controller", disabled: true, icon: "◉", extra: "data-setup-controller-choice" })}${choiceButton({ title: "Keyboard & mouse", meta: "Continue in PC mode", action: "setup-use-keyboard", selected: choices.inputMode === "keyboard", autofocus: true, icon: "⌨" })}</div></div>`,
@@ -239,10 +240,22 @@ export function activateSetupBackground({ focus, changed }) {
   const onChange = async () => {
     const file = input.files?.[0];
     if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) return;
-    const profile = getState().activeProfile || getState().setupChoices.profileName || "Player One";
+    const profile = getState().activeProfile || getState().setupChoices.profileName || "P1";
     try {
-      const saved = await paraApi.uploadBackground(profile, file);
-      setProfilePreferences({ background: { selection: "custom", revision: saved.revision } }, profile);
+      let source = "browser";
+      let revision = Date.now();
+      try {
+        const capabilities = await paraApi.capabilities();
+        if (capabilities.custom_backgrounds) {
+          const saved = await paraApi.uploadBackground(profile, file);
+          source = "host";
+          revision = saved.revision;
+        } else revision = await saveBrowserBackground(profile, file);
+      } catch {
+        revision = await saveBrowserBackground(profile, file);
+      }
+      setProfilePreferences({ background: { selection: "custom", source, revision } }, profile);
+      if (source === "browser") await applyBrowserBackground(profile);
       if (result) result.textContent = "Custom background selected";
       changed();
     } catch {
@@ -251,7 +264,7 @@ export function activateSetupBackground({ focus, changed }) {
     }
   };
   input.addEventListener("change", onChange);
-  paraApi.capabilities().then((capabilities) => { custom.hidden = !capabilities.custom_backgrounds; }).catch(() => { custom.hidden = true; });
+  custom.hidden = !(globalThis.File && globalThis.indexedDB);
   return () => input.removeEventListener("change", onChange);
 }
 

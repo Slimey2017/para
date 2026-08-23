@@ -1,5 +1,7 @@
 import { getProfilePreferences, getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
+import { activeDownloads, profileRuntime, runningExperiences } from "../services/experience-runtime.js";
+import { microphoneState } from "../services/microphone.js";
 
 const definitions = {
   home: { title: "Home", icon: "home" },
@@ -56,13 +58,17 @@ function contextMarkup(id) {
     const available = active || currentData.network?.interfaces?.[0];
     return `<div class="control-center-context__copy"><span>Network</span><strong>${active ? "Connected" : "Available connections"}</strong>${available ? `<small>${escapeHtml(available.name)}</small>` : ""}</div>${actionButton("Network Settings", `data-route="network"`, true)}`;
   }
-  if (id === "audio" && currentData.audio?.output) {
-    const output = currentData.audio.output;
-    return `<div class="control-center-context__copy"><span>Sound</span><strong><output data-audio-output>${output.volume}%</output></strong><small>${output.muted ? "Muted" : "System output"}</small></div><label class="control-center-volume"><span>Volume</span><input type="range" min="0" max="100" step="2" value="${output.volume}" aria-label="Audio volume" data-audio-volume data-context-autofocus="true" /></label>`;
+  if (id === "audio") {
+    const output = currentData.audio?.output;
+    const volume = output?.volume ?? currentData.preferences.sound.volume;
+    return `<div class="control-center-context__copy"><span>Sound</span><strong><output data-audio-output>${volume}%</output></strong><small>${output ? (output.muted ? "Muted" : "System output") : "PARA interface"}</small></div><label class="control-center-volume"><span>Volume</span><input type="range" min="0" max="100" step="2" value="${volume}" aria-label="Audio volume" ${output ? "data-audio-volume" : "data-interface-volume"} data-context-autofocus="true" /></label>`;
   }
-  if (id === "microphone" && currentData.audio?.microphone) {
-    const microphone = currentData.audio.microphone;
-    return `<div class="control-center-context__copy"><span>Microphone</span><strong>${microphone.muted ? "Muted" : "Active"}</strong><small>${microphone.volume}% input level</small></div>${actionButton(microphone.muted ? "Unmute" : "Mute", `data-action="toggle-microphone" data-microphone-muted="${microphone.muted}"`, true)}`;
+  if (id === "microphone") {
+    const systemMicrophone = currentData.audio?.microphone;
+    if (systemMicrophone) return `<div class="control-center-context__copy"><span>Microphone</span><strong>${systemMicrophone.muted ? "Muted" : "Active"}</strong><small>${systemMicrophone.volume}% input level</small></div>${actionButton(systemMicrophone.muted ? "Unmute" : "Mute", `data-action="toggle-microphone" data-microphone-muted="${systemMicrophone.muted}"`, true)}`;
+    const microphone = currentData.microphone;
+    const title = microphone.state === "active" ? "Active" : microphone.state === "blocked" ? "Permission blocked" : "Off";
+    return `<div class="control-center-context__copy"><span>Microphone</span><strong>${title}</strong><small>${microphone.state === "blocked" ? "Allow microphone access in browser settings" : "Browser microphone"}</small></div>${microphone.state !== "blocked" ? actionButton(microphone.active ? "Turn Off" : "Turn On", `data-action="toggle-browser-microphone"`, true) : ""}`;
   }
   if (id === "controllers") {
     return `<div class="control-center-context__copy"><span>Controller</span><strong>${escapeHtml(currentData.controller.typeLabel)}</strong><small>Connected</small></div>${actionButton("Controller Settings", `data-route="controller"`, true)}`;
@@ -74,27 +80,30 @@ function contextMarkup(id) {
     return `<div class="control-center-context__copy"><span>Power</span><strong>Choose a power action</strong></div><div class="control-center-power">${actionButton("Sleep", `data-action="enter-sleep"`, true)}${actionButton("Restart PARA", `data-action="restart-shell"`)}${actionButton("Shut Down", `data-action="confirm-turn-off"`)}</div>`;
   }
   if (id === "switcher") {
-    return `<div class="control-center-context__copy"><span>Running</span><strong>No other apps running</strong></div>`;
+    const running = runningExperiences();
+    return running.length ? `<div class="control-center-context__copy"><span>Running</span><strong>${running.length} ${running.length === 1 ? "experience" : "experiences"}</strong></div><div class="control-center-running">${running.map((item, index) => actionButton(`${escapeHtml(item.kind)} · ${escapeHtml(item.title)}`, `data-route="${escapeHtml(item.route)}"`, index === 0)).join("")}</div>` : `<div class="control-center-context__copy"><span>Switcher</span><strong>No other apps running</strong></div>`;
   }
   if (id === "notifications") {
-    return `<div class="control-center-context__copy"><span>Notifications</span><strong>No new notifications</strong></div>`;
+    const count = currentData.runtime.notifications.length;
+    return `<div class="control-center-context__copy"><span>Notifications</span><strong>${count ? `${count} new` : "You’re all caught up"}</strong></div>${count ? actionButton("View Notifications", `data-route="notifications"`, true) : ""}`;
   }
   if (id === "downloads") {
-    return `<div class="control-center-context__copy"><span>Downloads</span><strong>No active downloads</strong></div>`;
+    const downloads = activeDownloads();
+    if (!downloads.length) return `<div class="control-center-context__copy"><span>Downloads</span><strong>No active downloads</strong></div>${actionButton("Open ParaStore", `data-route="parastore"`, true)}`;
+    return `<div class="control-center-context__copy"><span>Downloading</span><strong>${escapeHtml(downloads[0].title)}</strong><small>${downloads[0].progress || 0}%</small></div><div class="control-center-download"><i style="width:${downloads[0].progress || 0}%"></i></div>`;
   }
   return "";
 }
 
-function availableIds({ capabilities, network, audio, controller, profile }) {
-  const ids = ["home"];
-  if (capabilities.switcher) ids.push("switcher");
-  if (capabilities.notifications) ids.push("notifications");
+function availableIds({ capabilities, network, audio, microphone, controller, profile, runtime }) {
+  const ids = ["home", "switcher"];
+  if (runtime.notifications.length) ids.push("notifications");
   if (capabilities.friends) ids.push("friends");
-  if (capabilities.downloads) ids.push("downloads");
+  ids.push("downloads");
   if (capabilities.music) ids.push("music");
   if (capabilities.network && network?.interfaces?.length) ids.push("network");
-  if (capabilities.audio && audio?.output) ids.push("audio");
-  if (capabilities.microphone && audio?.microphone) ids.push("microphone");
+  ids.push("audio");
+  if (audio?.microphone || microphone.available) ids.push("microphone");
   if (controller.connected) ids.push("controllers");
   if (profile) ids.push("profile");
   ids.push("power");
@@ -136,6 +145,7 @@ export async function populateControlCenter({ overlay, controller, focus }) {
   let capabilities = {};
   let network = null;
   let audio = null;
+  let microphone = { available: false, active: false, state: "unavailable" };
   try {
     capabilities = await paraApi.capabilities();
     const requests = [];
@@ -146,10 +156,13 @@ export async function populateControlCenter({ overlay, controller, focus }) {
     capabilities = {};
   }
 
+  microphone = await microphoneState();
+
   const profile = getState().activeProfile;
-  currentData = { capabilities, network, audio, controller, profile };
-  const available = availableIds(currentData);
   const preferences = getProfilePreferences();
+  const runtime = profileRuntime();
+  currentData = { capabilities, network, audio, microphone, controller, profile, preferences, runtime };
+  const available = availableIds(currentData);
   const hidden = new Set(preferences.controlCenter.hidden.filter((id) => !["home", "power"].includes(id)));
   const ordered = [...preferences.controlCenter.order, ...available.filter((id) => !preferences.controlCenter.order.includes(id))]
     .filter((id, index, all) => available.includes(id) && !hidden.has(id) && all.indexOf(id) === index);
@@ -168,9 +181,16 @@ export async function populateControlCenter({ overlay, controller, focus }) {
   const target = panel.querySelector(`[data-control-center-id="${selected}"]`) || panel.querySelector("button");
   if (target) focus.setCurrent(target, true);
   showControlCenterContext(selected);
+  window.clearInterval(overlay._paraControlCenterTimer);
+  overlay._paraControlCenterTimer = window.setInterval(() => {
+    if (overlay.hidden || lastSelectedId !== "downloads") return;
+    currentData.runtime = profileRuntime();
+    showControlCenterContext("downloads");
+  }, 500);
 }
 
-export function resetControlCenterData() {
+export function resetControlCenterData(overlay = null) {
+  if (overlay?._paraControlCenterTimer) window.clearInterval(overlay._paraControlCenterTimer);
   currentData = null;
 }
 

@@ -215,8 +215,37 @@ class RepositoryTests(unittest.TestCase):
         self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
         self.assertFalse((ROOT / "services/mock-api/server.py").exists())
         manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
-        for route in ["store", "creator", "social", "calls", "notifications", "updates", "subscription"]:
+        for route in ["store", "social", "calls", "updates", "subscription"]:
             self.assertNotRegex(manifest, rf'id:\s*"{route}"')
+
+    def test_live_clock_uses_one_shared_minute_aligned_helper(self):
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        clock = (ROOT / "apps/para-home/src/services/live-clock.js").read_text(encoding="utf-8")
+        self.assertIn('mountLiveClock(root)', app)
+        self.assertIn('hour12: true', clock)
+        self.assertIn('60_000 - (now.getSeconds() * 1000 + now.getMilliseconds())', clock)
+        self.assertIn('window.clearTimeout(timer)', clock)
+        self.assertNotIn('setInterval(updateClock', app)
+
+    def test_demo_continuity_and_control_center_sources_are_persistent(self):
+        state = (ROOT / "apps/para-home/src/state.js").read_text(encoding="utf-8")
+        runtime = (ROOT / "apps/para-home/src/services/experience-runtime.js").read_text(encoding="utf-8")
+        experiences = (ROOT / "apps/para-home/src/screens/experiences.js").read_text(encoding="utf-8")
+        control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+        self.assertIn('para.home.state.v5', state)
+        for field in ["recent", "running", "installedDemos", "downloads", "notifications", "creator"]:
+            self.assertIn(field, state)
+        for demo in ["Pulse Pong", "Neon Lane", "Violet Step"]:
+            self.assertIn(demo, (ROOT / "apps/para-home/src/services/demo-catalog.js").read_text(encoding="utf-8"))
+        self.assertIn('recordExperience', runtime)
+        self.assertIn('startDemoInstall', runtime)
+        self.assertIn('canvas', experiences)
+        for item in ['"home", "switcher"', 'ids.push("downloads")', 'ids.push("audio")', 'ids.push("microphone")']:
+            self.assertIn(item, control)
+
+    def test_para_keyboard_button_supports_p(self):
+        focus = (ROOT / "apps/para-home/src/focus-manager.js").read_text(encoding="utf-8")
+        self.assertIn('["p", "m"]', focus)
 
 
 if __name__ == "__main__":

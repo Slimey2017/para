@@ -1,3 +1,6 @@
+import { getState } from "../state.js";
+import { escapeHtml } from "../services/para-api.js";
+
 export function paraLogo(className = "brand__logo") {
   return `<img class="${className}" src="./assets/para-logo.png" alt="" aria-hidden="true" />`;
 }
@@ -11,7 +14,9 @@ export function livingBackground() {
 }
 
 export function topbar({ section = "PARA" } = {}) {
-  return `<header class="topbar">${brand()}<div class="topbar__center">${section}</div><div class="topbar__right"><button class="topbar-icon" data-route="network" aria-label="Network settings">⌁</button><time class="clock" data-clock>--:--</time><button class="avatar avatar--small" data-route="account" aria-label="Open account settings">P1</button></div></header>`;
+  const profile = getState().activeProfile || "P1";
+  const initials = profile.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P";
+  return `<header class="topbar">${brand()}<div class="topbar__center">${section}</div><div class="topbar__right"><button class="topbar-icon" data-route="network" aria-label="Network settings">⌁</button><time class="clock" data-clock>--:--</time><button class="avatar avatar--small" data-route="account" aria-label="Open ${escapeHtml(profile)} account settings">${escapeHtml(initials)}</button></div></header>`;
 }
 
 export function head(title, description, eyebrow = "") {

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PARA Linux Gateway API
-  version: 0.6.0
+  version: 0.7.0
   description: Linux system information, local profile personalization, PARA Files, safe session controls, and explicitly enabled local application, file, volume, and power actions.
 servers:
   - url: http://127.0.0.1:4173/api/v1
