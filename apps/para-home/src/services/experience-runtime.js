@@ -29,6 +29,10 @@ export function recentExperience() {
   return refreshDemoDownloads().recent[0] || null;
 }
 
+export function recentExperiences() {
+  return refreshDemoDownloads().recent;
+}
+
 export function runningExperiences() {
   return refreshDemoDownloads().running;
 }

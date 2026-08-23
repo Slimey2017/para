@@ -87,6 +87,22 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("home-launcher", screen)
         self.assertNotIn("home-widget", screen)
 
+    def test_home_content_flows_downward_from_resume(self):
+        screen = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
+        runtime = (ROOT / "apps/para-home/src/services/experience-runtime.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        self.assertIn("export function recentExperiences()", runtime)
+        self.assertIn("Recently Played", screen)
+        self.assertIn("experiences.slice(1, 7)", screen)
+        self.assertIn('data-focus-id="continue:resume"', screen)
+        self.assertIn('data-nav-left="${escapeHtml(focusId)}"', screen)
+        self.assertIn('data-nav-right="${escapeHtml(focusId)}"', screen)
+        for heading in ["Games", "Apps", "Demos", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates"]:
+            self.assertIn(heading, screen)
+        self.assertIn("home-recent-row", css)
+        self.assertIn("home-flow-row", css)
+        self.assertIn("overflow-y: auto", css)
+
     def test_shared_navigation_engine_is_spatial_and_gamepad_native(self):
         focus = (ROOT / "apps/para-home/src/focus-manager.js").read_text(encoding="utf-8")
         gamepad = (ROOT / "apps/para-home/src/gamepad.js").read_text(encoding="utf-8")
