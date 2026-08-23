@@ -3,7 +3,7 @@ import { DEMOS, demoById, demoByRoute } from "../services/demo-catalog.js";
 import {
   activeDownloads, installedDemos, profileRuntime, recordExperience, refreshDemoDownloads,
 } from "../services/experience-runtime.js";
-import { escapeHtml, formatBytes } from "../services/para-api.js";
+import { escapeHtml, formatBytes, paraApi } from "../services/para-api.js";
 import { brand, hints, page } from "../ui/components.js";
 
 function demoArt(demo) {
@@ -46,13 +46,46 @@ export function demosScreen() {
 }
 
 export function paraStoreScreen() {
-  const installed = new Set(installedDemos().map((demo) => demo.id));
   return page({
     title: "ParaStore",
-    description: "Install free PARA demos included with this build.",
+    description: "Games and apps published for PARA.",
     eyebrow: "Store",
     className: "parastore-page",
-    body: `<section class="store-feature"><div><span class="eyebrow">Featured demos</span><h2>Play something small.</h2><p>Every demo installs into this profile and appears in Games.</p></div><span class="store-feature__orb" aria-hidden="true"></span></section><nav class="store-categories" aria-label="Store categories"><button class="is-active" data-action="filter-store" data-store-category="Featured" data-autofocus="true">Featured</button><button data-action="filter-store" data-store-category="Free Demos">Free Demos</button></nav><div class="demo-library" data-demo-library>${DEMOS.map((demo) => demoCard(demo, { installed: installed.has(demo.id) })).join("")}</div>`,
+    body: `<section class="store-feature"><div><span class="eyebrow">ParaStore</span><h2>Find your next game.</h2><p>Published developer releases appear here automatically.</p></div><span class="store-feature__orb" aria-hidden="true"></span></section><nav class="store-categories" aria-label="Store categories"><button class="is-active" data-autofocus="true">Featured</button><button>Games</button><button>Apps</button></nav><div class="store-live-grid" data-live-store><div class="library-empty"><span>◌</span><h2>Loading ParaStore…</h2><p>Checking the published catalog.</p></div></div>`,
+  });
+}
+
+function liveStoreCard(item) {
+  const meta = item.store_metadata || {};
+  const description = meta.short_description || "Published on ParaStore";
+  const type = item.project_type || "GAME";
+  const genre = meta.genre || type;
+  const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
+  return `<article class="store-live-card" tabindex="0"><div class="store-live-card__art"><span>${escapeHtml((item.title || "P").slice(0,1).toUpperCase())}</span><small>${escapeHtml(item.runtime || "PARA")}</small></div><div class="store-live-card__copy"><span>${escapeHtml(genre)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.release_notes || "Ready to play")}</small></div></div></article>`;
+}
+
+export function activateParaStore() {
+  const host = document.querySelector("[data-live-store]");
+  if (!host) return () => {};
+  let alive = true;
+  paraApi.storeCatalog().then((payload) => {
+    if (!alive) return;
+    const items = payload.items || [];
+    host.innerHTML = items.length ? items.map(liveStoreCard).join("") : `<div class="library-empty"><span>▱</span><h2>No published titles yet</h2><p>Approved releases will appear here.</p></div>`;
+  }).catch((error) => {
+    if (!alive) return;
+    host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`;
+  });
+  return () => { alive = false; };
+}
+
+export function messagesScreen() {
+  return page({
+    title: "Messages",
+    description: "Chat with friends across PARA.",
+    eyebrow: "Community",
+    className: "messages-page",
+    body: `<div class="messages-shell"><aside class="messages-list"><div class="messages-list__head"><h2>Chats</h2><button aria-label="New message">＋</button></div><button class="message-thread is-active" data-autofocus="true"><i>S</i><span><strong>PARA Friends</strong><small>Welcome to Messages</small></span><time>Now</time></button><button class="message-thread"><i>＋</i><span><strong>Start a conversation</strong><small>Find a friend to message</small></span></button></aside><section class="message-conversation"><header><div><strong>PARA Friends</strong><small>Messages stay with your profile</small></div></header><div class="message-conversation__body"><div class="message-bubble"><span>PARA</span><p>Chat is ready for the social service. Friends, parties, voice, and real-time messages can plug into this screen next.</p></div></div><form class="message-composer" onsubmit="return false"><button type="button">＋</button><input placeholder="Message" aria-label="Message"/><button type="button">Send</button></form></section></div>`,
   });
 }
 

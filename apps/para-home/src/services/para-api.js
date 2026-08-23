@@ -12,6 +12,7 @@ async function request(path, options = {}) {
 export const paraApi = {
   capabilities: () => request("/api/v1/capabilities"),
   applications: () => request("/api/v1/apps"),
+  storeCatalog: () => request("/api/v1/store/catalog"),
   launchApplication: (id) => request("/api/v1/apps/launch", { method: "POST", body: JSON.stringify({ id }) }),
   system: () => request("/api/v1/system"),
   storage: () => request("/api/v1/storage"),

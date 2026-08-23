@@ -8,6 +8,10 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
 import mimetypes
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 import sys
 from urllib.parse import parse_qs, urlparse
@@ -16,6 +20,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HOME_ROOT = REPO_ROOT / "apps" / "para-home"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import system_layer  # noqa: E402
+
+
+
+def store_catalog() -> tuple[int, dict]:
+    """Read the public ParaStore catalog from Supabase without exposing keys to the browser."""
+    base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
+    if not base or not key:
+        return 503, {"error": "catalog_not_configured", "items": []}
+    url = f"{base}/rest/v1/catalog_entries?select=id,project_id,package_id,title,project_type,runtime,architectures,store_metadata,asset_references,release_notes,published_at,status&status=eq.PUBLISHED&order=published_at.desc"
+    request = urllib.request.Request(url, headers={"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=6) as response:
+            items = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return 502, {"error": "catalog_unavailable", "detail": str(error), "items": []}
+    return 200, {"source": "parastore", "items": items if isinstance(items, list) else []}
 
 
 def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, dict]:
@@ -36,6 +57,8 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
         location = (query or {}).get("path", ["home"])[0]
         term = (query or {}).get("q", [""])[0]
         return system_layer.search_files(location, term)
+    if path == "/api/v1/store/catalog":
+        return store_catalog()
     if path == "/api/v1/personalization":
         profile = (query or {}).get("profile", [""])[0]
         return system_layer.personalization(profile)

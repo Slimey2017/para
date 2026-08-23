@@ -104,7 +104,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("context.scrollTo", screen)
         self.assertIn('data-nav-left="${escapeHtml(focusId)}"', screen)
         self.assertIn('data-nav-right="${escapeHtml(focusId)}"', screen)
-        for heading in ["Games", "Apps", "Demos", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates"]:
+        for heading in ["Games", "Apps", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates", "Messages"]:
             self.assertIn(heading, screen)
         for distance in range(4):
             self.assertIn(f'data-focus-distance="{distance}"', css)
@@ -279,8 +279,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('para.home.state.v5', state)
         for field in ["recent", "running", "installedDemos", "downloads", "notifications", "creator"]:
             self.assertIn(field, state)
+        catalog = (ROOT / "apps/para-home/src/services/demo-catalog.js").read_text(encoding="utf-8")
+        self.assertIn("DEMOS = Object.freeze([])", catalog)
         for demo in ["Pulse Pong", "Neon Lane", "Violet Step"]:
-            self.assertIn(demo, (ROOT / "apps/para-home/src/services/demo-catalog.js").read_text(encoding="utf-8"))
+            self.assertNotIn(demo, catalog)
         self.assertIn('recordExperience', runtime)
         self.assertIn('startDemoInstall', runtime)
         self.assertIn('canvas', experiences)

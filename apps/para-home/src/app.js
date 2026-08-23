@@ -24,7 +24,7 @@ import {
 } from "./screens/system.js";
 import {
   gamesScreen, demosScreen, paraStoreScreen, gameScreen, activateDemoGame,
-  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen,
+  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore,
   playCreatorTone, clearCreatorDrawing,
 } from "./screens/experiences.js";
 import {
@@ -71,6 +71,7 @@ const renderers = {
   parastore: paraStoreScreen,
   creator: creatorScreen,
   community: communityScreen,
+  messages: messagesScreen,
   marks: marksScreen,
   "demo-pong": () => gameScreen("demo-pong"),
   "demo-racer": () => gameScreen("demo-racer"),
@@ -198,6 +199,8 @@ function render(route) {
     cleanupScreen = activateCreator();
   } else if (route === "community") {
     cleanupScreen = activateCommunity();
+  } else if (route === "parastore") {
+    cleanupScreen = activateParaStore();
   } else if (route === "files" || route === "downloads") {
     cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
     if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
