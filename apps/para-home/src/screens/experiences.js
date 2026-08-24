@@ -10,6 +10,48 @@ function demoArt(demo) {
   return `<span class="demo-art" style="--demo-accent:${demo.accent}"><i>${demo.mark}</i><b></b></span>`;
 }
 
+const STORE_INSTALL_KEY = "para.store.installed.v1";
+
+function installedStoreItems() {
+  const profile = getState().activeProfile || "P1";
+  try {
+    const all = JSON.parse(localStorage.getItem(STORE_INSTALL_KEY) || "{}");
+    return Array.isArray(all[profile]) ? all[profile] : [];
+  } catch { return []; }
+}
+
+function saveInstalledStoreItems(items) {
+  const profile = getState().activeProfile || "P1";
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(STORE_INSTALL_KEY) || "{}"); } catch { all = {}; }
+  all[profile] = items;
+  localStorage.setItem(STORE_INSTALL_KEY, JSON.stringify(all));
+}
+
+export function installStoreItem(item) {
+  if (!item?.id) return false;
+  const items = installedStoreItems();
+  saveInstalledStoreItems([{ ...item, installedAt: Date.now() }, ...items.filter((entry) => entry.id !== item.id)]);
+  recordExperience({
+    id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game",
+    kind: item.project_type === "APP" ? "App" : "Game", accent: "#8d43ff",
+    mark: (item.title || "P").slice(0, 1).toUpperCase(), storeId: item.id, queueStatus: "Ready to play",
+  });
+  return true;
+}
+
+export function uninstallStoreItem(id) {
+  saveInstalledStoreItems(installedStoreItems().filter((item) => item.id !== id));
+}
+
+export function isStoreItemInstalled(id) {
+  return installedStoreItems().some((item) => item.id === id);
+}
+
+function installedStoreCard(item, autofocus = false) {
+  return `<article class="demo-card"><span class="demo-art" style="--demo-accent:#8d43ff"><i>${escapeHtml((item.title || "P")[0])}</i><b></b></span><div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
+}
+
 function demoCard(demo, { installed = false, autofocus = false } = {}) {
   const download = activeDownloads().find((item) => item.id === demo.id);
   const action = installed
@@ -22,17 +64,23 @@ function demoCard(demo, { installed = false, autofocus = false } = {}) {
 }
 
 export function gamesScreen() {
+  const storeGames = installedStoreItems().filter((item) => (item.project_type || "GAME") === "GAME");
   const demos = installedDemos();
+  const cards = [
+    ...storeGames.map((item, index) => installedStoreCard(item, index === 0)),
+    ...demos.map((demo, index) => demoCard(demo, { installed: true, autofocus: storeGames.length === 0 && index === 0 })),
+  ];
   return page({
     title: "Games",
     description: "Games installed for this profile.",
     eyebrow: "Explore",
     className: "demo-library-page",
-    body: demos.length
-      ? `<div class="demo-library">${demos.map((demo, index) => demoCard(demo, { installed: true, autofocus: index === 0 })).join("")}</div>`
-      : `<div class="library-empty"><span>◉</span><h2>No games installed</h2><button class="action-button" data-route="parastore" data-autofocus="true">Find Demos</button></div>`,
+    body: cards.length
+      ? `<div class="demo-library">${cards.join("")}</div>`
+      : `<div class="library-empty"><span>◉</span><h2>No games installed</h2><button class="action-button" data-route="parastore" data-autofocus="true">Open ParaStore</button></div>`,
   });
 }
+
 
 export function demosScreen() {
   const installed = new Set(installedDemos().map((demo) => demo.id));
@@ -124,7 +172,7 @@ export function activateStoreProduct() {
             <p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p>
             <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small></div>
             <div class="store-product-actions">
-              <a class="action-button" href="/api/v1/store/download?id=${encodeURIComponent(item.id)}" download>Download</a>
+              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}">Install</button>`}
               <button class="action-button action-button--ghost" data-action="store-more-info">•••</button>
             </div>
           </div>
@@ -141,6 +189,31 @@ export function activateStoreProduct() {
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>Product unavailable</h2><p>${escapeHtml(error.message || "Could not load product")}</p></div>`;
   });
   return () => { alive = false; };
+}
+
+export function storeGameScreen() {
+  return page({
+    title: "Game",
+    description: "Running from your PARA library.",
+    eyebrow: "PARA",
+    className: "store-game-page",
+    body: `<section class="store-game-runtime" data-store-game-runtime><div class="library-empty"><span>◌</span><h2>Starting game…</h2></div></section>`,
+  });
+}
+
+export function activateStoreGame() {
+  const host = document.querySelector("[data-store-game-runtime]");
+  if (!host) return () => {};
+  const id = sessionStorage.getItem("para.store.launch") || "";
+  const item = installedStoreItems().find((entry) => entry.id === id);
+  if (!item) {
+    host.innerHTML = `<div class="library-empty"><span>!</span><h2>Game is not installed</h2><button class="action-button" data-route="parastore">Open ParaStore</button></div>`;
+    return () => {};
+  }
+  recordExperience({ id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game", kind: "Game", accent: "#8d43ff", mark: (item.title || "P")[0], storeId: item.id });
+  const source = `/api/v1/store/content/${encodeURIComponent(item.id)}/index.html`;
+  host.innerHTML = `<div class="store-game-toolbar"><button class="action-button action-button--ghost" data-route="games">← Library</button><strong>${escapeHtml(item.title || "Game")}</strong></div><iframe class="store-game-frame" src="${source}" sandbox="allow-scripts allow-pointer-lock allow-forms" allow="gamepad; autoplay; fullscreen" referrerpolicy="no-referrer" title="${escapeHtml(item.title || "PARA game")}"></iframe>`;
+  return () => {};
 }
 
 export function messagesScreen() {

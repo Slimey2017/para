@@ -114,6 +114,37 @@ def store_download(item_id: str) -> tuple[int, bytes, str, str]:
     return 200, memory.getvalue(), "application/zip", filename
 
 
+def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+    """Serve one file from a published WEB build for the sandboxed PARA web runtime."""
+    status, item = store_product(item_id)
+    if status != 200:
+        return status, json.dumps(item).encode(), "application/json"
+    if str(item.get("runtime") or "") not in {"WEB", "JAVASCRIPT", "UNITY_WEBGL"}:
+        return 409, b'{"error":"runtime_not_web"}', "application/json"
+    release_id = str(item.get("current_release_id") or "")
+    if not release_id:
+        return 409, b'{"error":"release_missing"}', "application/json"
+    status, releases = _supabase_get_json(f"/rest/v1/releases?select=id,build_id,status&id=eq.{urllib.parse.quote(release_id, safe='')}&status=eq.PUBLISHED&limit=1")
+    if status >= 400 or not isinstance(releases, list) or not releases:
+        return 409, b'{"error":"release_unavailable"}', "application/json"
+    build_id = str(releases[0].get("build_id") or "")
+    relative = urllib.parse.unquote(relative_path or "index.html").lstrip("/")
+    if not relative or ".." in Path(relative).parts:
+        return 400, b'{"error":"invalid_path"}', "application/json"
+    encoded = urllib.parse.quote(relative, safe="/")
+    status, files = _supabase_get_json(f"/rest/v1/build_files?select=path&build_id=eq.{urllib.parse.quote(build_id, safe='')}&path=eq.{encoded}&limit=1")
+    if status >= 400 or not isinstance(files, list) or not files:
+        return 404, b'{"error":"file_not_found"}', "application/json"
+    prefix = str(item.get("download_reference") or "")
+    if prefix.endswith("/index.html"):
+        prefix = prefix[:-len("/index.html")]
+    file_status, body, storage_type = _storage_fetch("developer-builds", f"{prefix}/{relative}")
+    if file_status != 200:
+        return file_status, body or b'{"error":"file_unavailable"}', storage_type or "application/octet-stream"
+    guessed = mimetypes.guess_type(relative)[0] or storage_type or "application/octet-stream"
+    return 200, body, guessed
+
+
 def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, dict]:
     routes = {
         "/api/v1/health": system_layer.health,
@@ -154,12 +185,17 @@ class ParaHandler(SimpleHTTPRequestHandler):
         sys.stdout.write(f"[para] {self.address_string()} {format_string % args}\n")
 
     def end_headers(self) -> None:
+        is_store_game = self.path.startswith("/api/v1/store/content/")
         if not self.path.startswith("/api/"):
             self.send_header("Cache-Control", "no-cache")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        if is_store_game:
+            self.send_header("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+        else:
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+            self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
         self.send_header("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=(), usb=()")
         super().end_headers()
 
@@ -213,6 +249,17 @@ class ParaHandler(SimpleHTTPRequestHandler):
                 self._send_json(404, {"error": "not_found"})
             else:
                 self._send_file(path, content_type)
+            return
+        if request.path.startswith("/api/v1/store/content/"):
+            rest = request.path[len("/api/v1/store/content/"):]
+            item_id, _, relative = rest.partition("/")
+            status, body, content_type = store_content(urllib.parse.unquote(item_id), relative or "index.html")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if request.path == "/api/v1/store/asset":
             path = parse_qs(request.query).get("path", [""])[0]

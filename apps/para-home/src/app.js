@@ -25,6 +25,7 @@ import {
 import {
   gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, gameScreen, activateDemoGame,
   creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct,
+  storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem,
   playCreatorTone, clearCreatorDrawing,
 } from "./screens/experiences.js";
 import {
@@ -70,6 +71,7 @@ const renderers = {
   demos: demosScreen,
   parastore: paraStoreScreen,
   "store-product": storeProductScreen,
+  "store-game": storeGameScreen,
   creator: creatorScreen,
   community: communityScreen,
   messages: messagesScreen,
@@ -204,6 +206,8 @@ function render(route) {
     cleanupScreen = activateParaStore();
   } else if (route === "store-product") {
     cleanupScreen = activateStoreProduct();
+  } else if (route === "store-game") {
+    cleanupScreen = activateStoreGame();
   } else if (route === "files" || route === "downloads") {
     cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
     if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
@@ -650,6 +654,36 @@ async function handleAction(action, target) {
       if (target.dataset.storeId) {
         sessionStorage.setItem("para.store.product", target.dataset.storeId);
         navigate("store-product", {}, target);
+      }
+      break;
+    case "install-store-game": {
+      const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
+      try {
+        const item = await paraApi.storeProduct(id);
+        if (!["WEB", "JAVASCRIPT", "UNITY_WEBGL"].includes(item.runtime)) {
+          toast("Install unavailable", "This web preview currently installs WEB titles only.");
+          break;
+        }
+        if (installStoreItem(item)) {
+          toast(`${item.title || "Game"} installed`, "Ready to play");
+          rerender();
+        }
+      } catch (error) {
+        toast("Install failed", error.message || "Could not install this title");
+      }
+      break;
+    }
+    case "play-store-game":
+      if (target.dataset.storeId) {
+        sessionStorage.setItem("para.store.launch", target.dataset.storeId);
+        navigate("store-game", {}, target);
+      }
+      break;
+    case "uninstall-store-game":
+      if (target.dataset.storeId) {
+        uninstallStoreItem(target.dataset.storeId);
+        toast("Game removed", "It can be installed again from ParaStore");
+        rerender();
       }
       break;
     case "store-more-info":
