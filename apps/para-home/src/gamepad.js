@@ -114,12 +114,21 @@ export class GamepadNavigation {
       document.dispatchEvent(new CustomEvent("para-controllerinput", { detail: { buttons: pressed, axes: [...gamepad.axes], index: gamepad.index } }));
     }
 
-    if (edge(0)) this.handlers.confirm();
-    if (edge(1)) this.handlers.back();
-    if (edge(2)) this.handlers.secondary();
-    if (edge(3)) this.handlers.options();
-    if (edge(4)) this.handlers.shoulder(-1);
-    if (edge(5)) this.handlers.shoulder(1);
+    // When a published game is running, PARA must stop treating ordinary
+    // gamepad buttons/sticks as shell navigation. The embedded game reads the
+    // same controller through the Gamepad API. PARA keeps only its dedicated
+    // system button so gameplay cannot accidentally move Home focus or leave
+    // the runtime.
+    const gameRuntimeActive = Boolean(document.querySelector(".store-game-frame"));
+
+    if (!gameRuntimeActive) {
+      if (edge(0)) this.handlers.confirm();
+      if (edge(1)) this.handlers.back();
+      if (edge(2)) this.handlers.secondary();
+      if (edge(3)) this.handlers.options();
+      if (edge(4)) this.handlers.shoulder(-1);
+      if (edge(5)) this.handlers.shoulder(1);
+    }
 
     const paraIndex = gamepad.buttons.length > 16 ? 16 : 9;
     if (pressed[paraIndex] && !this.previous[paraIndex]) {
@@ -137,10 +146,14 @@ export class GamepadNavigation {
     const right = Boolean(pressed[15] || (preferHorizontal && axisX >= DEADZONE));
     const up = Boolean(pressed[12] || (!preferHorizontal && axisY <= -DEADZONE));
     const down = Boolean(pressed[13] || (!preferHorizontal && axisY >= DEADZONE));
-    this.repeatDirection("left", left, now);
-    this.repeatDirection("right", right, now);
-    this.repeatDirection("up", up, now);
-    this.repeatDirection("down", down, now);
+    if (!gameRuntimeActive) {
+      this.repeatDirection("left", left, now);
+      this.repeatDirection("right", right, now);
+      this.repeatDirection("up", up, now);
+      this.repeatDirection("down", down, now);
+    } else {
+      this.directionState.clear();
+    }
     this.previous = pressed;
   }
 }

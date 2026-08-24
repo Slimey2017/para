@@ -45,23 +45,40 @@ export async function activateStorage() {
 }
 
 export function settingsScreen() {
-  const items = [
-    ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
-    ["Display", "Screen information and interface size", "display", "▭"],
-    ["Audio", "PARA sounds and output controls", "audio-settings", "◖"],
-    ["Network", "Connections available to PARA", "network", "⌁"],
-    ["Controllers", "Gamepads available to PARA", "controller", "◇"],
-    ["Storage", "Disk usage and mounted drives", "storage", "▯"],
-    ["Files", "Browse files and connected storage", "files", "▱"],
-    ["Account", "Local PARA profile", "account", "●"],
-    ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
-    ["Power", "Session controls", "power", "○"],
-    ["Repair & health", "PARA and system status", "health", "+"],
-    ["Notifications", "Recent PARA events", "notifications", "◌"],
-    ["About", "Build information and PARA Lab", "about", "i"],
-    ["Reset", "Replay setup with a clean profile", "reset-para", "↺"],
+  const groups = [
+    ["Console", [
+      ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
+      ["Display", "Screen information and interface size", "display", "▭"],
+      ["Audio", "PARA sounds and output controls", "audio-settings", "◖"],
+      ["Controllers", "Connected gamepads and controller help", "controller", "◇"],
+    ]],
+    ["Connections & storage", [
+      ["Network", "Wi-Fi, Ethernet, and connection status", "network", "⌁"],
+      ["Storage", "Disk usage and mounted drives", "storage", "▯"],
+      ["Files", "Browse files and connected storage", "files", "▱"],
+      ["Notifications", "Recent PARA events", "notifications", "◌"],
+    ]],
+    ["Profile & access", [
+      ["Account", "Local PARA profile", "account", "●"],
+      ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
+      ["Power", "Sleep, restart, and shutdown", "power", "○"],
+    ]],
+    ["System", [
+      ["Repair & health", "PARA and system status", "health", "+"],
+      ["About", "Build information and PARA Lab", "about", "i"],
+      ["Reset", "Replay setup with a clean profile", "reset-para", "↺"],
+    ]],
   ];
-  return page({ title: "System", description: "Manage the parts of PARA available on this system.", eyebrow: "Settings", className: "settings-page", body: `<div class="settings-grid">${items.map((item, index) => tile({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus: index === 0, className: "settings-tile" })).join("")}</div>` });
+  let autofocus = true;
+  const body = groups.map(([label, items]) => {
+    const rows = items.map((item) => {
+      const row = listRow({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus });
+      autofocus = false;
+      return row;
+    }).join("");
+    return `<section class="settings-group" data-focus-zone="settings-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}"><h2>${label}</h2><div class="settings-list">${rows}</div></section>`;
+  }).join("");
+  return page({ title: "Settings", description: "Everything for your console, grouped so it is easy to reach from the couch.", eyebrow: "PARA", className: "settings-page settings-page--comfortable", body: `<div class="settings-comfort-shell">${body}</div>` });
 }
 
 export function displayScreen() {

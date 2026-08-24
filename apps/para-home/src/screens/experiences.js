@@ -213,33 +213,65 @@ export function activateStoreGame() {
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>Game is not installed</h2><button class="action-button" data-route="parastore">Open ParaStore</button></div>`;
     return () => {};
   }
+
   recordExperience({ id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game", kind: "Game", accent: "#8d43ff", mark: (item.title || "P")[0], storeId: item.id });
   const source = `/api/v1/store/content/${encodeURIComponent(item.id)}/index.html`;
-  host.innerHTML = `<div class="store-game-toolbar"><button class="action-button action-button--ghost" data-route="games">← Library</button><strong>${escapeHtml(item.title || "Game")}</strong><span class="store-game-toolbar__state">PARA Web Runtime</span></div><iframe class="store-game-frame" data-store-game-frame src="${source}" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-downloads" allow="gamepad; autoplay; fullscreen" referrerpolicy="same-origin" title="${escapeHtml(item.title || "PARA game")}"></iframe>`;
-
-  const frame = host.querySelector("[data-store-game-frame]");
+  let alive = true;
+  let frame = null;
   let runtimeReady = false;
+
+  host.innerHTML = `<div class="store-game-boot"><span class="store-game-boot__spinner"></span><strong>Starting ${escapeHtml(item.title || "Game")}</strong><small>Preparing PARA Web Runtime…</small></div>`;
+
+  const start = async () => {
+    try {
+      // Preflight the published entry point so a JSON/API error never gets
+      // mistaken for a game document.
+      const response = await fetch(source, { cache: "no-store" });
+      const type = response.headers.get("content-type") || "";
+      if (!response.ok) throw new Error(`Game entry point returned ${response.status}`);
+      if (!type.includes("text/html")) throw new Error(`Game entry point is ${type || "not HTML"}`);
+      if (!alive) return;
+
+      host.innerHTML = `<div class="store-game-toolbar"><button class="store-game-exit" data-route="games">← Library</button><div><strong>${escapeHtml(item.title || "Game")}</strong><small>PARA Web Runtime</small></div><span class="store-game-toolbar__state">Running</span></div><iframe class="store-game-frame" data-store-game-frame src="${source}" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-downloads" allow="gamepad; autoplay; fullscreen" referrerpolicy="same-origin" title="${escapeHtml(item.title || "PARA game")}"></iframe><div class="store-game-help"><b>PARA</b><span>System controls</span><small>The game owns the sticks and face buttons while running.</small></div>`;
+      frame = host.querySelector("[data-store-game-frame]");
+      requestAnimationFrame(() => frame?.focus?.());
+
+      // Some browser games use location.href = "/" as a restart/home action.
+      // Inside the PARA web shell that would otherwise load PARA Home inside
+      // the game frame. Keep those navigations pinned to the title runtime.
+      frame?.addEventListener("load", () => {
+        if (!alive || !frame) return;
+        try {
+          const path = frame.contentWindow?.location?.pathname || "";
+          if (path === "/" || path === "/index.html") {
+            frame.src = source;
+            return;
+          }
+          frame.focus?.();
+        } catch (_) {}
+      });
+
+      frame?.addEventListener("error", () => {
+        if (!alive) return;
+        host.innerHTML = `<div class="library-empty"><span>!</span><h2>The game could not start</h2><p>PARA could not load the published web build.</p><button class="action-button" data-route="store-product" data-autofocus="true">Back to product</button></div>`;
+      }, { once: true });
+    } catch (error) {
+      if (!alive) return;
+      host.innerHTML = `<div class="library-empty"><span>!</span><h2>The game could not start</h2><p>${escapeHtml(error.message || "Published build is unavailable")}</p><button class="action-button" data-route="store-product" data-autofocus="true">Back to product</button></div>`;
+    }
+  };
+
   const onMessage = (event) => {
     if (event.source !== frame?.contentWindow) return;
     if (event.data?.type === "para-game-runtime-ready" && event.data?.id === item.id) runtimeReady = true;
   };
   window.addEventListener("message", onMessage);
-
-  const onLoad = () => {
-    if (!frame) return;
-    try {
-      const path = frame.contentWindow?.location?.pathname || "";
-      if ((path === "/" || path === "/index.html") && runtimeReady) {
-        runtimeReady = false;
-        frame.src = source;
-      }
-    } catch (_) {}
-  };
-  frame?.addEventListener("load", onLoad);
+  void start();
 
   return () => {
+    alive = false;
     window.removeEventListener("message", onMessage);
-    frame?.removeEventListener("load", onLoad);
+    frame?.remove();
   };
 }
 
