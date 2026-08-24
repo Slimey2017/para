@@ -1241,6 +1241,7 @@ html.is-idle #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:.
 /* Unify older/utility pages so they read as one console OS instead of separate web pages. */
 .os-page{padding-inline:clamp(34px,5vw,86px)}.os-page .screen-head,.os-page .content-scroll{width:min(1180px,100%);margin-inline:auto}.os-page .screen-head{padding-top:clamp(22px,4vh,52px)}.os-page .screen-head h1{font-size:clamp(2rem,3.5vw,3.8rem);letter-spacing:-.045em}.os-page .lede{max-width:720px;color:rgba(232,224,241,.62)}.os-page .panel{border:1px solid rgba(210,176,255,.13);border-radius:22px;background:linear-gradient(145deg,rgba(20,13,29,.82),rgba(9,7,13,.72));box-shadow:0 24px 70px rgba(0,0,0,.22)}.list-row,.os-row{min-height:72px;border-radius:14px}.topbar{width:min(1320px,100%);margin-inline:auto}.topbar__center{position:absolute;left:50%;transform:translateX(-50%);color:rgba(239,232,247,.6);font-weight:760}.bottom-nav,.control-legend{position:fixed;right:max(28px,var(--para-safe-area));bottom:max(22px,var(--para-safe-area));z-index:40;padding:9px 13px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(6,4,10,.58);backdrop-filter:blur(14px)}
 
+
 /* Product page media + overlay cleanup pass */
 .store-product-hero{min-height:430px;margin-bottom:20px}
 .store-product-hero__content{bottom:30px;grid-template-columns:160px minmax(0,700px)}
