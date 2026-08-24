@@ -94,12 +94,27 @@ export function demosScreen() {
 }
 
 export function paraStoreScreen() {
+  const genres = ["All", "Horror", "Action", "Adventure", "RPG", "Fighting", "Racing", "Sports", "Platformer", "Puzzle", "Simulation", "Strategy", "Survival", "Shooter", "Party", "Family", "Casual"];
   return page({
     title: "ParaStore",
     description: "Games and apps published for PARA.",
     eyebrow: "Store",
     className: "parastore-page",
-    body: `<section class="store-feature"><div><span class="eyebrow">ParaStore</span><h2>Find your next game.</h2><p>Published developer releases appear here automatically.</p></div><span class="store-feature__orb" aria-hidden="true"></span></section><nav class="store-categories" aria-label="Store categories"><button class="is-active" data-autofocus="true">Featured</button><button>Games</button><button>Apps</button></nav><div class="store-live-grid" data-live-store><div class="library-empty"><span>◌</span><h2>Loading ParaStore…</h2><p>Checking the published catalog.</p></div></div>`,
+    body: `<div class="parastore-environment" aria-hidden="true"></div>
+      <section class="store-discovery-bar" aria-label="ParaStore tools">
+        <label class="store-search"><span>⌕</span><input type="search" placeholder="Search games, apps, developers, genres…" data-store-search autocomplete="off" /></label>
+        <button type="button" data-store-tool="wishlist">♡ <span>Wishlist</span></button>
+        <button type="button" data-route="downloads">↓ <span>Downloads</span></button>
+      </section>
+      <section class="store-feature store-feature--live" data-store-feature>
+        <div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>Discover something new.</h2><p>Games and apps from PARA developers, all in one place.</p></div>
+        <div class="store-feature__mark">P</div>
+      </section>
+      <nav class="store-categories store-categories--primary" aria-label="Store categories">
+        <button class="is-active" data-store-type="ALL" data-autofocus="true">Featured</button><button data-store-type="GAME">Games</button><button data-store-type="APP">Apps</button><button data-store-sort="new">New Releases</button>
+      </nav>
+      <section class="store-filter-shell"><div class="store-filter-heading"><span>Browse by genre</span><button type="button" data-store-runtime="ALL">Runtime: All</button></div><div class="store-genre-track">${genres.map((genre, index) => `<button type="button" class="${index === 0 ? "is-active" : ""}" data-store-genre="${genre}">${genre}</button>`).join("")}</div><div class="store-runtime-track" data-store-runtime-menu hidden><button data-runtime-value="ALL">All runtimes</button><button data-runtime-value="WEB">Web</button><button data-runtime-value="NATIVE">Native PARA/Linux</button><button data-runtime-value="WINDOWS">Windows / Compatibility</button><button data-runtime-value="LEGACY">Legacy / Emulator</button></div></section>
+      <section class="store-shelf"><div class="store-shelf__heading"><div><span>PARASTORE</span><h2 data-store-shelf-title>Featured</h2></div><small data-store-result-count>Loading catalog…</small></div><div class="store-live-grid" data-live-store><div class="library-empty"><span>◌</span><h2>Loading ParaStore…</h2><p>Checking the published catalog.</p></div></div></section>`,
   });
 }
 
@@ -110,24 +125,57 @@ function liveStoreCard(item) {
   const type = item.project_type || "GAME";
   const genre = meta.genre || type;
   const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
-  const art = assetUrl(assets.icon || assets.cover || assets.hero);
+  const art = assetUrl(assets.hero || assets.cover || assets.icon);
   const fallback = escapeHtml((item.title || "P").slice(0,1).toUpperCase());
-  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} icon">` : `<span>${fallback}</span>`}<small>${escapeHtml(item.runtime || "PARA")}</small></div><div class="store-live-card__copy"><span>${escapeHtml(genre)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>View product</small></div></div></article>`;
+  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork">` : `<span>${fallback}</span>`}<div class="store-live-card__badges"><small>${escapeHtml(genre)}</small><small>${escapeHtml(item.runtime || "PARA")}</small></div></div><div class="store-live-card__copy"><span>${escapeHtml(type)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>A View game</small></div></div></article>`;
 }
 
 export function activateParaStore() {
   const host = document.querySelector("[data-live-store]");
   if (!host) return () => {};
-  let alive = true;
-  paraApi.storeCatalog().then((payload) => {
-    if (!alive) return;
-    const items = payload.items || [];
-    host.innerHTML = items.length ? items.map(liveStoreCard).join("") : `<div class="library-empty"><span>▱</span><h2>No published titles yet</h2><p>Approved releases will appear here.</p></div>`;
-  }).catch((error) => {
-    if (!alive) return;
-    host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`;
-  });
-  return () => { alive = false; };
+  const search = document.querySelector("[data-store-search]");
+  const feature = document.querySelector("[data-store-feature]");
+  const resultCount = document.querySelector("[data-store-result-count]");
+  const shelfTitle = document.querySelector("[data-store-shelf-title]");
+  const runtimeButton = document.querySelector("[data-store-runtime]");
+  const runtimeMenu = document.querySelector("[data-store-runtime-menu]");
+  let alive = true, catalog = [], type = "ALL", genre = "All", runtime = "ALL", newest = false;
+  const runtimeMatch = (value) => {
+    if (runtime === "ALL") return true;
+    const r = String(value || "PARA").toUpperCase();
+    if (runtime === "NATIVE") return r.includes("NATIVE") || r.includes("LINUX") || r === "PARA";
+    if (runtime === "WINDOWS") return r.includes("WINDOWS") || r.includes("WINE") || r.includes("PROTON") || r.includes("COMPAT");
+    if (runtime === "LEGACY") return r.includes("EMU") || r.includes("LEGACY");
+    return r.includes(runtime);
+  };
+  const render = () => {
+    const q = (search?.value || "").trim().toLowerCase();
+    let items = catalog.filter((item) => {
+      const meta = item.store_metadata || {};
+      const hay = [item.title, item.developer_name, meta.developer, meta.genre, meta.short_description, item.runtime, item.project_type].filter(Boolean).join(" ").toLowerCase();
+      return (type === "ALL" || (item.project_type || "GAME") === type) && (genre === "All" || String(meta.genre || "").toLowerCase().includes(genre.toLowerCase())) && runtimeMatch(item.runtime) && (!q || hay.includes(q));
+    });
+    if (newest) items = [...items].sort((a,b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+    host.innerHTML = items.length ? items.map(liveStoreCard).join("") : `<div class="library-empty store-empty"><span>⌕</span><h2>No matches</h2><p>Try another genre, runtime, or search.</p></div>`;
+    if (resultCount) resultCount.textContent = `${items.length} ${items.length === 1 ? "title" : "titles"}`;
+    if (shelfTitle) shelfTitle.textContent = q ? `Results for “${search.value.trim()}”` : newest ? "New Releases" : genre !== "All" ? genre : type === "GAME" ? "Games" : type === "APP" ? "Apps" : "Featured";
+    const featured = items[0] || catalog[0];
+    if (feature && featured) {
+      const meta = featured.store_metadata || {}, assets = featured.asset_references || {}, hero = assetUrl(assets.hero || assets.cover || assets.icon);
+      feature.style.setProperty("--store-feature-art", hero ? `url('${hero}')` : "none");
+      feature.innerHTML = `<div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>${escapeHtml(featured.title || "Untitled")}</h2><p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p><div class="store-feature__meta"><span>${escapeHtml(meta.genre || featured.project_type || "Game")}</span><span>${escapeHtml(featured.runtime || "PARA")}</span><button type="button" data-action="open-store-product" data-store-id="${escapeHtml(featured.id)}">View game</button></div></div>`;
+    }
+  };
+  const listeners = [];
+  const on = (el, event, fn) => { if (el) { el.addEventListener(event, fn); listeners.push(() => el.removeEventListener(event, fn)); } };
+  on(search, "input", render);
+  document.querySelectorAll("[data-store-type]").forEach((button) => on(button, "click", () => { type = button.dataset.storeType; newest = false; document.querySelectorAll("[data-store-type]").forEach(b=>b.classList.toggle("is-active", b===button)); render(); }));
+  document.querySelectorAll("[data-store-sort]").forEach((button) => on(button, "click", () => { newest = true; type = "ALL"; document.querySelectorAll("[data-store-type]").forEach(b=>b.classList.remove("is-active")); render(); }));
+  document.querySelectorAll("[data-store-genre]").forEach((button) => on(button, "click", () => { genre = button.dataset.storeGenre; document.querySelectorAll("[data-store-genre]").forEach(b=>b.classList.toggle("is-active", b===button)); render(); }));
+  on(runtimeButton, "click", () => { runtimeMenu.hidden = !runtimeMenu.hidden; });
+  document.querySelectorAll("[data-runtime-value]").forEach((button) => on(button, "click", () => { runtime = button.dataset.runtimeValue; runtimeButton.textContent = `Runtime: ${button.textContent}`; runtimeMenu.hidden = true; render(); }));
+  paraApi.storeCatalog().then((payload) => { if (!alive) return; catalog = payload.items || []; render(); }).catch((error) => { if (!alive) return; host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`; });
+  return () => { alive = false; listeners.forEach(fn=>fn()); };
 }
 
 
