@@ -40,6 +40,7 @@ import {
 } from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
 import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
+import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic } from "./services/menu-music.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
   activeDownloads, recordExperience, refreshDemoDownloads, removeDemo, startDemoInstall,
@@ -170,6 +171,7 @@ async function updateDisplayInfo() {
 }
 
 function render(route) {
+  syncMenuMusic({ gameRunning: route === "store-game" || ["demo-pong", "demo-racer", "demo-platformer"].includes(route) });
   cleanupScreen?.();
   cleanupScreen = null;
   cleanupClock?.();
@@ -585,6 +587,11 @@ async function handleAction(action, target) {
       await populateControlCenter({ overlay, controller: controllerStatus, focus });
       showControlCenterContext("microphone", true, focus);
       break;
+    case "toggle-menu-music":
+      toast("Menu music", toggleMenuMusic() ? "On" : "Off");
+      schedulePreferenceSave();
+      rerender();
+      break;
     case "toggle-interface-sounds":
       toast("Interface sounds", toggleInterfaceSounds() ? "On" : "Off");
       schedulePreferenceSave();
@@ -755,6 +762,10 @@ document.addEventListener("change", async (event) => {
       if (output && audio.output) output.textContent = `${audio.output.volume}%`;
     } catch { /* the current level remains visible */ }
   }
+  if (event.target.matches("[data-menu-music-volume]")) {
+    setMenuMusicVolume(event.target.value);
+    schedulePreferenceSave();
+  }
   if (event.target.matches("[data-interface-volume]")) {
     setInterfaceSoundVolume(event.target.value);
     schedulePreferenceSave();
@@ -779,6 +790,14 @@ document.addEventListener("input", (event) => {
     const output = overlay.querySelector("[data-audio-output]");
     if (output) output.textContent = `${event.target.value}%`;
   }
+  if (event.target.matches("[data-menu-music-volume]")) {
+    setMenuMusicVolume(event.target.value);
+    schedulePreferenceSave();
+  }
+  if (event.target.matches("[data-menu-music-volume]")) {
+    setMenuMusicVolume(event.target.value);
+    document.querySelectorAll("[data-menu-music-volume-output]").forEach((output) => { output.textContent = `${event.target.value}%`; });
+  }
   if (event.target.matches("[data-interface-volume]")) {
     setInterfaceSoundVolume(event.target.value);
     document.querySelectorAll("[data-interface-volume-output], [data-audio-output]").forEach((output) => { output.textContent = `${event.target.value}%`; });
@@ -798,8 +817,8 @@ function resetIdleSleep() {
   idleSleepTimer = setTimeout(() => beginSleep({ returnFocus: focus.current }), minutes * 60_000);
 }
 
-document.addEventListener("pointerdown", resetIdleSleep, { passive: true });
-document.addEventListener("keydown", resetIdleSleep, { passive: true });
+document.addEventListener("pointerdown", () => { unlockMenuMusic(); resetIdleSleep(); }, { passive: true });
+document.addEventListener("keydown", () => { unlockMenuMusic(); resetIdleSleep(); }, { passive: true });
 
 function updateOnlineState() {
   document.documentElement.dataset.online = String(navigator.onLine);
@@ -842,6 +861,7 @@ if (new URLSearchParams(location.search).get("reset") === "1") {
 
 async function start() {
   applyPreferences();
+  syncMenuMusic();
   const state = getState();
   if (state.loggedIn && state.activeProfile) await hydrateProfile(state.activeProfile);
   gamepad.start();
