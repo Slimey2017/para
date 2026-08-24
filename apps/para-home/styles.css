@@ -988,3 +988,30 @@ html[data-reduced-motion=true] .home-continue-item,html[data-reduced-motion=true
   .os-page .content-scroll { width: min(100% - 34px, 900px); }
   .settings-comfort-shell { grid-template-columns: 1fr; gap: 20px; }
 }
+
+
+/* 0.7.3 Continue comfort pass: one clear focus surface, no uncanny duplicate hero card. */
+.home-continue-layout--single {
+  width: min(900px, 82vw);
+  height: 100%;
+  display: block;
+  margin: 0;
+}
+.home-continue-layout--single .home-continue-carousel {
+  width: min(760px, 100%);
+}
+.home-continue-layout--single .home-continue-carousel::before,
+.home-continue-layout--single .home-continue-carousel::after {
+  height: min(var(--continue-center-space, 58px), 78px);
+}
+.home-context.is-carousel-active .home-continue-item[data-focus-distance="0"] {
+  min-height: 92px;
+  margin-block: 5px;
+  transform: translateX(8px) scale(1.005);
+}
+.home-context.is-carousel-active .home-continue-item[data-focus-distance="0"] .home-continue-item__art {
+  transform: scale(1.08);
+}
+.home-context.is-carousel-active .home-continue-item[data-focus-distance="1"] { opacity: .72; transform: scale(.98); }
+.home-context.is-carousel-active .home-continue-item[data-focus-distance="2"] { opacity: .48; transform: scale(.96); }
+.home-context.is-carousel-active .home-continue-item[data-focus-distance="3"] { opacity: .3; transform: scale(.94); }

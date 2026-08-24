@@ -90,7 +90,7 @@ function continueHero(experience) {
 function continueMarkup(experiences) {
   const queue = experiences.slice(0, 10);
   if (!queue.length) return `<div class="home-continue-empty-layout">${continueEmptyState()}<aside class="home-home-actions" aria-label="Quick actions"><span>Get started</span><h2>Build your PARA library.</h2><p>Install games and apps, then your latest activity will appear here automatically.</p><div><button type="button" data-route="parastore" data-focus-id="continue:store">Open ParaStore</button><button type="button" data-route="games" data-focus-id="continue:library">Game Library</button></div></aside></div>`;
-  return `<div class="home-continue-layout"><div class="home-continue-carousel" aria-label="Continue">${queue.map((experience, index) => continueItem(experience, index, queue)).join("")}</div>${continueHero(queue[0])}</div>`;
+  return `<div class="home-continue-layout home-continue-layout--single"><div class="home-continue-carousel" aria-label="Continue">${queue.map((experience, index) => continueItem(experience, index, queue)).join("")}</div></div>`;
 }
 
 function contextMarkup(section, model) {
@@ -176,8 +176,6 @@ export function activateHome({ focus }) {
     const selectedIndex = rows.indexOf(item);
     context.classList.add("is-carousel-active");
     const selectedExperience = model.recent.find((experience) => experience.id === item.dataset.continueId);
-    const hero = context.querySelector("[data-continue-hero]");
-    if (hero && selectedExperience) hero.outerHTML = continueHero(selectedExperience);
     rows.forEach((row, index) => {
       row.dataset.focusDistance = String(Math.min(3, Math.abs(index - selectedIndex)));
       row.dataset.focusSide = index < selectedIndex ? "previous" : index > selectedIndex ? "next" : "current";

@@ -188,6 +188,25 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
                 '})();\n'
                 '</script>'
             )
+            # Rewrite the most common inline root navigations used by small
+            # single-file web games. Without this, `location.href = "/"`
+            # loads PARA Home inside the game frame. The runtime base keeps
+            # restart/menu actions inside the published title.
+            replacements = {
+                'location.href = "/"': f'location.href = {runtime_base_json}',
+                "location.href = '/'": f'location.href = {runtime_base_json}',
+                'window.location.href = "/"': f'window.location.href = {runtime_base_json}',
+                "window.location.href = '/'": f'window.location.href = {runtime_base_json}',
+                'document.location.href = "/"': f'document.location.href = {runtime_base_json}',
+                "document.location.href = '/'": f'document.location.href = {runtime_base_json}',
+                'location.assign("/")': f'location.assign({runtime_base_json})',
+                "location.assign('/')": f'location.assign({runtime_base_json})',
+                'location.replace("/")': f'location.replace({runtime_base_json})',
+                "location.replace('/')": f'location.replace({runtime_base_json})',
+            }
+            for old_nav, new_nav in replacements.items():
+                text = text.replace(old_nav, new_nav)
+
             lower = text.lower()
             head_at = lower.find('<head')
             if head_at >= 0:
@@ -250,7 +269,7 @@ class ParaHandler(SimpleHTTPRequestHandler):
         if not self.path.startswith("/api/"):
             self.send_header("Cache-Control", "no-cache")
         if is_store_game:
-            self.send_header("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
+            self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-downloads; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
             self.send_header("X-Frame-Options", "SAMEORIGIN")
         else:
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
