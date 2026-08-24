@@ -45,72 +45,25 @@ export async function activateStorage() {
 }
 
 export function settingsScreen() {
-  const groups = [
-    {
-      label: "Console",
-      zone: "settings-console",
-      nav: { right: "settings-connections" },
-      items: [
-        ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
-        ["Display", "Screen information and interface size", "display", "▭"],
-        ["Audio", "PARA sounds and output controls", "audio-settings", "◖"],
-        ["Controllers", "Connected gamepads and controller help", "controller", "◇"],
-      ],
-    },
-    {
-      label: "Connections & storage",
-      zone: "settings-connections",
-      nav: { left: "settings-console" },
-      items: [
-        ["Network", "Wi-Fi, Ethernet, and connection status", "network", "⌁"],
-        ["Storage", "Disk usage and mounted drives", "storage", "▯"],
-        ["Files", "Browse files and connected storage", "files", "▱"],
-        ["Notifications", "Recent PARA events", "notifications", "◌"],
-      ],
-    },
-    {
-      label: "Profile & access",
-      zone: "settings-profile",
-      nav: { right: "settings-system" },
-      items: [
-        ["Account", "Local PARA profile", "account", "●"],
-        ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
-        ["Power", "Sleep, restart, and shutdown", "power", "○"],
-      ],
-    },
-    {
-      label: "System",
-      zone: "settings-system",
-      nav: { left: "settings-profile" },
-      items: [
-        ["Repair & health", "PARA and system status", "health", "+"],
-        ["About", "Build information and PARA Lab", "about", "i"],
-        ["Reset", "Replay setup with a clean profile", "reset-para", "↺"],
-      ],
-    },
+  const cards = [
+    ["Appearance", "Background, Home & display", "personalization", "◩", "Violet Horizon"],
+    ["Controllers", "PulseWave, mapping & profiles", "controller", "◇", "Player 1"],
+    ["Sound", "Audio, menu music & microphone", "audio-settings", "◖", "Menu music 35%"],
+    ["Network", "Wi-Fi, Ethernet & connection test", "network", "⌁", navigator.onLine ? "Online" : "Offline"],
+    ["Account", "Profile, sign-in & family", "account", "●", "Local profile"],
+    ["Storage", "Games, apps, captures & drives", "storage", "▯", "Manage storage"],
+    ["Accessibility", "Vision, hearing, controls & motion", "accessibility", "◎", "Quick access"],
+    ["Notifications", "Friends, downloads & system alerts", "notifications", "◌", "Recent activity"],
+    ["Games & Apps", "Library, files & game preferences", "games", "▦", "Your library"],
+    ["System", "Power, health, updates & about", "health", "+", "PARA status"],
   ];
-
-  let autofocus = true;
-  const body = groups.map((group) => {
-    const rows = group.items.map((item, index) => {
-      const row = listRow({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus });
-      autofocus = false;
-      // Stable focus IDs make remembered controller focus reliable after opening
-      // a submenu and returning to Settings.
-      return row.replace('<button type="button"', `<button type="button" data-focus-id="${group.zone}-${index}"`);
-    }).join("");
-    const navAttrs = Object.entries(group.nav)
-      .map(([direction, zone]) => `data-nav-${direction}-zone="${zone}"`)
-      .join(" ");
-    return `<section class="settings-group" data-focus-zone="${group.zone}" data-nav-contain-y="true" ${navAttrs}><h2>${group.label}</h2><div class="settings-list">${rows}</div></section>`;
-  }).join("");
-
+  const body = cards.map((item, index) => `<button type="button" class="settings-home-card ${index < 3 ? "settings-home-card--primary" : ""}" data-route="${item[2]}" data-focus-id="settings-card-${index}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="settings-home-card__icon">${item[3]}</span><span class="settings-home-card__copy"><strong>${item[0]}</strong><small>${item[1]}</small></span><em>${item[4]}</em></button>`).join("");
   return page({
     title: "Settings",
-    description: "Everything for your console, organized for controller-first navigation.",
+    description: "Set up PARA your way.",
     eyebrow: "PARA",
-    className: "settings-page settings-page--comfortable",
-    body: `<div class="settings-controller-tip" aria-hidden="true"><span>↑↓</span><b>Move in group</b><span>←→</span><b>Other column</b><span><i data-prompt="shoulderPrevious">LB</i>/<i data-prompt="shoulderNext">RB</i></span><b>Change group</b><span data-prompt="confirm">A</span><b>Open</b></div><div class="settings-comfort-shell" data-focus-scope="settings">${body}</div>`,
+    className: "settings-page settings-page--lounge",
+    body: `<div class="settings-lounge-grid" data-focus-scope="settings">${body}</div>`,
   });
 }
 
@@ -140,7 +93,7 @@ export async function activateNetwork() {
 
 export function audioSettingsScreen() {
   const sound = getProfilePreferences().sound;
-  return page({ title: "Audio", description: "Sound controls for PARA.", eyebrow: "System", body: `<div class="panel"><div class="list">${toggleRow({ title: "Interface sounds", meta: "Focus, confirm, and notification sounds", action: "toggle-interface-sounds", value: sound.interfaceSounds, icon: "◖", autofocus: true })}</div><label class="settings-slider"><span><strong>Interface volume</strong><small>Applies to PARA navigation sounds</small></span><input type="range" min="0" max="100" step="1" value="${sound.volume}" data-interface-volume /><output data-interface-volume-output>${sound.volume}%</output></label></div>` });
+  return page({ title: "Audio", description: "Sound controls for PARA.", eyebrow: "System", body: `<div class="panel"><div class="list">${toggleRow({ title: "Menu music", meta: "Play A Slow Dream while browsing PARA", action: "toggle-menu-music", value: sound.menuMusic !== false, icon: "♫", autofocus: true })}${toggleRow({ title: "Interface sounds", meta: "Focus, confirm, and notification sounds", action: "toggle-interface-sounds", value: sound.interfaceSounds, icon: "◖" })}</div><label class="settings-slider"><span><strong>Menu music volume</strong><small>Quiet by default for comfortable couch listening</small></span><input type="range" min="0" max="100" step="1" value="${sound.menuMusicVolume ?? 35}" data-menu-music-volume /><output data-menu-music-volume-output>${sound.menuMusicVolume ?? 35}%</output></label><label class="settings-slider"><span><strong>Interface volume</strong><small>Applies to PARA navigation sounds</small></span><input type="range" min="0" max="100" step="1" value="${sound.volume}" data-interface-volume /><output data-interface-volume-output>${sound.volume}%</output></label></div>` });
 }
 
 export function notificationsScreen() {

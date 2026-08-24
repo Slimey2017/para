@@ -162,6 +162,7 @@ export function activateStoreProduct() {
     const hero = assetUrl(assets.hero || assets.cover || assets.icon);
     const cover = assetUrl(assets.cover || assets.icon || assets.hero);
     const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+    sessionStorage.setItem("para.store.screenshots", JSON.stringify(shots));
     const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
     host.innerHTML = `
       <section class="store-product-hero" ${hero ? `style="--product-hero:url('${hero}')"` : ""}>
@@ -175,17 +176,17 @@ export function activateStoreProduct() {
             <p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p>
             <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small></div>
             <div class="store-product-actions">
-              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}">Install</button>`}
+              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Install</button>`}
               <button class="action-button action-button--ghost" data-action="store-more-info">•••</button>
             </div>
           </div>
         </div>
       </section>
+      ${shots.length ? `<section class="store-product-gallery store-product-gallery--prominent"><div class="store-product-gallery__heading"><div><span>MEDIA</span><h2>Screenshots</h2></div><small>${shots.length} image${shots.length === 1 ? "" : "s"} • A to enlarge</small></div><div class="store-product-gallery__track">${shots.map((shot, index) => `<button type="button" class="store-product-shot" data-action="open-store-screenshot" data-shot-index="${index}" aria-label="Open screenshot ${index + 1}"><img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot ${index + 1}"><span>${index + 1} / ${shots.length}</span></button>`).join("")}</div></section>` : ""}
       <section class="store-product-details">
         <div><h2>About</h2><p>${escapeHtml(meta.full_description || meta.short_description || "No description provided.")}</p></div>
         <aside><span>Developer</span><strong>${escapeHtml(meta.developer_name || "Independent developer")}</strong><span>Runtime</span><strong>${escapeHtml(item.runtime || "PARA")}</strong><span>Release notes</span><strong>${escapeHtml(item.release_notes || "Initial release")}</strong></aside>
       </section>
-      ${shots.length ? `<section class="store-product-gallery"><h2>Screenshots</h2><div>${shots.map((shot) => `<img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot">`).join("")}</div></section>` : ""}
     `;
   }).catch((error) => {
     if (!alive) return;
