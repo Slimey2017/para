@@ -1179,3 +1179,47 @@ html[data-reduced-motion=true] .home-continue-item,html[data-reduced-motion=true
 .home-explore-shelves{gap:18px}
 .home-store-shelf__track{grid-auto-columns:minmax(180px,230px)}
 .home-store-shelf-card{border-radius:13px}
+
+/* Settings controller navigation — zero-mouse console pass */
+.settings-controller-tip {
+  width: min(1180px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -4px 0 16px;
+  color: rgba(232,219,246,.58);
+  font-size: .68rem;
+  font-weight: 650;
+}
+.settings-controller-tip span {
+  min-width: 30px;
+  height: 25px;
+  padding: 0 8px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  color: rgba(255,255,255,.86);
+  font: 700 .65rem/1 var(--font-mono, monospace);
+}
+.settings-controller-tip b { margin-right: 8px; font-weight: 650; }
+
+[data-input-device="controller"] .settings-list .list-row[data-focused="true"] {
+  transform: none !important;
+  outline: 3px solid rgba(255,255,255,.94) !important;
+  outline-offset: -3px;
+  background: linear-gradient(90deg,rgba(151,73,244,.30),rgba(151,73,244,.09));
+  box-shadow: inset 5px 0 0 #a76aff, 0 0 0 6px rgba(151,73,244,.12) !important;
+}
+[data-input-device="controller"] .settings-list .list-row[data-focused="true"] .list-row__icon {
+  background: rgba(161,94,255,.28);
+  box-shadow: 0 0 22px rgba(151,73,244,.22);
+}
+
+/* Keep focused settings visible on televisions with overscan / smaller viewports. */
+.settings-page .content-scroll { scroll-padding-block: 90px 110px; }
+
+@media (max-width: 900px) {
+  .settings-controller-tip { display: none; }
+}

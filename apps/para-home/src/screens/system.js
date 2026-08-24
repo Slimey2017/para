@@ -46,39 +46,72 @@ export async function activateStorage() {
 
 export function settingsScreen() {
   const groups = [
-    ["Console", [
-      ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
-      ["Display", "Screen information and interface size", "display", "▭"],
-      ["Audio", "PARA sounds and output controls", "audio-settings", "◖"],
-      ["Controllers", "Connected gamepads and controller help", "controller", "◇"],
-    ]],
-    ["Connections & storage", [
-      ["Network", "Wi-Fi, Ethernet, and connection status", "network", "⌁"],
-      ["Storage", "Disk usage and mounted drives", "storage", "▯"],
-      ["Files", "Browse files and connected storage", "files", "▱"],
-      ["Notifications", "Recent PARA events", "notifications", "◌"],
-    ]],
-    ["Profile & access", [
-      ["Account", "Local PARA profile", "account", "●"],
-      ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
-      ["Power", "Sleep, restart, and shutdown", "power", "○"],
-    ]],
-    ["System", [
-      ["Repair & health", "PARA and system status", "health", "+"],
-      ["About", "Build information and PARA Lab", "about", "i"],
-      ["Reset", "Replay setup with a clean profile", "reset-para", "↺"],
-    ]],
+    {
+      label: "Console",
+      zone: "settings-console",
+      nav: { right: "settings-connections", down: "settings-profile" },
+      items: [
+        ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
+        ["Display", "Screen information and interface size", "display", "▭"],
+        ["Audio", "PARA sounds and output controls", "audio-settings", "◖"],
+        ["Controllers", "Connected gamepads and controller help", "controller", "◇"],
+      ],
+    },
+    {
+      label: "Connections & storage",
+      zone: "settings-connections",
+      nav: { left: "settings-console", down: "settings-system" },
+      items: [
+        ["Network", "Wi-Fi, Ethernet, and connection status", "network", "⌁"],
+        ["Storage", "Disk usage and mounted drives", "storage", "▯"],
+        ["Files", "Browse files and connected storage", "files", "▱"],
+        ["Notifications", "Recent PARA events", "notifications", "◌"],
+      ],
+    },
+    {
+      label: "Profile & access",
+      zone: "settings-profile",
+      nav: { right: "settings-system", up: "settings-console" },
+      items: [
+        ["Account", "Local PARA profile", "account", "●"],
+        ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
+        ["Power", "Sleep, restart, and shutdown", "power", "○"],
+      ],
+    },
+    {
+      label: "System",
+      zone: "settings-system",
+      nav: { left: "settings-profile", up: "settings-connections" },
+      items: [
+        ["Repair & health", "PARA and system status", "health", "+"],
+        ["About", "Build information and PARA Lab", "about", "i"],
+        ["Reset", "Replay setup with a clean profile", "reset-para", "↺"],
+      ],
+    },
   ];
+
   let autofocus = true;
-  const body = groups.map(([label, items]) => {
-    const rows = items.map((item) => {
+  const body = groups.map((group) => {
+    const rows = group.items.map((item, index) => {
       const row = listRow({ title: item[0], meta: item[1], route: item[2], icon: item[3], autofocus });
       autofocus = false;
-      return row;
+      // Stable focus IDs make remembered controller focus reliable after opening
+      // a submenu and returning to Settings.
+      return row.replace('<button type="button"', `<button type="button" data-focus-id="${group.zone}-${index}"`);
     }).join("");
-    return `<section class="settings-group" data-focus-zone="settings-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}"><h2>${label}</h2><div class="settings-list">${rows}</div></section>`;
+    const navAttrs = Object.entries(group.nav)
+      .map(([direction, zone]) => `data-nav-${direction}-zone="${zone}"`)
+      .join(" ");
+    return `<section class="settings-group" data-focus-zone="${group.zone}" ${navAttrs}><h2>${group.label}</h2><div class="settings-list">${rows}</div></section>`;
   }).join("");
-  return page({ title: "Settings", description: "Everything for your console, grouped so it is easy to reach from the couch.", eyebrow: "PARA", className: "settings-page settings-page--comfortable", body: `<div class="settings-comfort-shell">${body}</div>` });
+
+  return page({
+    title: "Settings",
+    description: "Everything for your console, organized for controller-first navigation.",
+    eyebrow: "PARA",
+    className: "settings-page settings-page--comfortable",
+    body: `<div class="settings-controller-tip" aria-hidden="true"><span>↑↓</span><b>Move</b><span>←→</span><b>Switch group</b><span data-prompt="confirm">A</span><b>Open</b></div><div class="settings-comfort-shell" data-focus-scope="settings">${body}</div>`,
+  });
 }
 
 export function displayScreen() {
@@ -116,7 +149,7 @@ export function notificationsScreen() {
 }
 
 export function aboutScreen() {
-  return page({ title: "About PARA", description: "System and build information.", eyebrow: "PARA OS Web", body: `<section class="about-build panel"><span class="eyebrow">Current build</span><h2>PARA OS Web · Build 0.7.2</h2><p>Linux console shell interface</p></section><div class="settings-grid">${tile({ title: "PARA Lab", meta: "Browser, display, and controller diagnostics", route: "para-lab", icon: "⌬", autofocus: true })}</div>` });
+  return page({ title: "About PARA", description: "System and build information.", eyebrow: "PARA OS Web", body: `<section class="about-build panel"><span class="eyebrow">Current build</span><h2>PARA OS Web · Build 0.7.3</h2><p>Linux console shell interface</p></section><div class="settings-grid">${tile({ title: "PARA Lab", meta: "Browser, display, and controller diagnostics", route: "para-lab", icon: "⌬", autofocus: true })}</div>` });
 }
 
 export function paraLabScreen() {

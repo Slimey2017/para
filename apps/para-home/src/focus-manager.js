@@ -180,7 +180,19 @@ export class FocusManager {
       const zoneItems = zone ? items.filter((item) => this.zoneOf(item) === zone && item !== this.current) : [];
       target = this.rank(this.current, zoneItems, direction)[0]?.item || null;
     }
-    if (!target && !zone) target = this.rank(this.current, items.filter((item) => item !== this.current), direction)[0]?.item || null;
+
+    // A focus zone is a preference, not a trap. If there is no sensible item in
+    // the current zone, continue spatial navigation across the rest of the screen.
+    // This is especially important for couch UI layouts such as Settings where
+    // each card group is its own zone. The old behavior stopped here whenever a
+    // zone existed, which could leave controller users stranded in one group.
+    if (!target) {
+      target = this.rank(
+        this.current,
+        items.filter((item) => item !== this.current),
+        direction,
+      )[0]?.item || null;
+    }
     if (!target) return false;
     this.setCurrent(target, true);
     return true;
