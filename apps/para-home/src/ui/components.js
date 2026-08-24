@@ -13,10 +13,23 @@ export function livingBackground() {
   return `<div class="os-backdrop" aria-hidden="true"><span class="os-aurora os-aurora--one"></span><span class="os-aurora os-aurora--two"></span><span class="os-orbit"></span><span class="os-stars"></span><span class="os-vignette"></span></div>`;
 }
 
+
+export function accountQuickMenu(profile, { home = false } = {}) {
+  const initials = profile.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P";
+  return `<div class="account-quick ${home ? "account-quick--home" : ""}" data-account-quick>
+    <button type="button" class="${home ? "home-profile" : "avatar avatar--small"}" data-action="toggle-account-menu" aria-expanded="false" aria-haspopup="menu" aria-label="Open ${escapeHtml(profile)} profile menu"><span>${escapeHtml(initials)}</span></button>
+    <div class="account-popover" data-account-popover role="menu" hidden>
+      <div class="account-popover__identity"><span class="account-popover__avatar">${escapeHtml(initials)}</span><span><strong>${escapeHtml(profile)}</strong><small><i></i> Online</small></span></div>
+      <button type="button" data-route="account" role="menuitem"><span>●</span><span><strong>Profile</strong><small>Account and activity</small></span></button>
+      <button type="button" data-route="profiles" role="menuitem"><span>↻</span><span><strong>Switch user</strong><small>Choose another profile</small></span></button>
+      <button type="button" data-action="sign-out" role="menuitem"><span>↗</span><span><strong>Sign out</strong><small>Return to profile selection</small></span></button>
+    </div>
+  </div>`;
+}
+
 export function topbar({ section = "PARA" } = {}) {
   const profile = getState().activeProfile || "P1";
-  const initials = profile.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P";
-  return `<header class="topbar">${brand()}<div class="topbar__center">${section}</div><div class="topbar__right"><button class="topbar-icon" data-route="network" aria-label="Network settings">⌁</button><time class="clock" data-clock>--:--</time><button class="avatar avatar--small" data-route="account" aria-label="Open ${escapeHtml(profile)} account settings">${escapeHtml(initials)}</button></div></header>`;
+  return `<header class="topbar">${brand()}<div class="topbar__center">${section}</div><div class="topbar__right"><button class="topbar-icon" data-route="network" aria-label="Network settings">⌁</button><time class="clock" data-clock>--:--</time>${accountQuickMenu(profile)}</div></header>`;
 }
 
 export function head(title, description, eyebrow = "") {
