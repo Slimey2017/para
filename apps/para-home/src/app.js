@@ -314,6 +314,14 @@ function shoulder(direction) {
   if (consumePowerInput()) return;
   if (router.current() === "home") {
     document.dispatchEvent(new CustomEvent("para-home-section-shift", { detail: { direction } }));
+    return;
+  }
+  if (router.current() === "settings") {
+    const zones = ["settings-console", "settings-connections", "settings-profile", "settings-system"];
+    const currentZone = focus.zoneOf(focus.current)?.dataset.focusZone || zones[0];
+    const currentIndex = Math.max(0, zones.indexOf(currentZone));
+    const nextIndex = (currentIndex + (direction < 0 ? -1 : 1) + zones.length) % zones.length;
+    focus.focusFirst({ zone: zones[nextIndex] });
   }
 }
 

@@ -181,11 +181,18 @@ export class FocusManager {
       target = this.rank(this.current, zoneItems, direction)[0]?.item || null;
     }
 
-    // A focus zone is a preference, not a trap. If there is no sensible item in
-    // the current zone, continue spatial navigation across the rest of the screen.
-    // This is especially important for couch UI layouts such as Settings where
-    // each card group is its own zone. The old behavior stopped here whenever a
-    // zone existed, which could leave controller users stranded in one group.
+    // Some console screens intentionally contain vertical movement inside a
+    // focus group. Settings uses this so Up/Down never guesses that the player
+    // meant to jump into a different category. Horizontal movement can still use
+    // explicit zone links, while LB/RB handles deliberate category changes.
+    const containVertical = zone?.dataset.navContainY === "true";
+    if (!target && containVertical && (direction === "up" || direction === "down")) {
+      return false;
+    }
+
+    // For normal screens a focus zone is a preference, not a trap. If there is
+    // no sensible item in the current zone, continue spatial navigation across
+    // the rest of the screen.
     if (!target) {
       target = this.rank(
         this.current,

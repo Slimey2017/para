@@ -49,7 +49,7 @@ export function settingsScreen() {
     {
       label: "Console",
       zone: "settings-console",
-      nav: { right: "settings-connections", down: "settings-profile" },
+      nav: { right: "settings-connections" },
       items: [
         ["Personalization", "Background, Home, and Control Center", "personalization", "◩"],
         ["Display", "Screen information and interface size", "display", "▭"],
@@ -60,7 +60,7 @@ export function settingsScreen() {
     {
       label: "Connections & storage",
       zone: "settings-connections",
-      nav: { left: "settings-console", down: "settings-system" },
+      nav: { left: "settings-console" },
       items: [
         ["Network", "Wi-Fi, Ethernet, and connection status", "network", "⌁"],
         ["Storage", "Disk usage and mounted drives", "storage", "▯"],
@@ -71,7 +71,7 @@ export function settingsScreen() {
     {
       label: "Profile & access",
       zone: "settings-profile",
-      nav: { right: "settings-system", up: "settings-console" },
+      nav: { right: "settings-system" },
       items: [
         ["Account", "Local PARA profile", "account", "●"],
         ["Accessibility", "Text, contrast, and motion", "accessibility", "◎"],
@@ -81,7 +81,7 @@ export function settingsScreen() {
     {
       label: "System",
       zone: "settings-system",
-      nav: { left: "settings-profile", up: "settings-connections" },
+      nav: { left: "settings-profile" },
       items: [
         ["Repair & health", "PARA and system status", "health", "+"],
         ["About", "Build information and PARA Lab", "about", "i"],
@@ -102,7 +102,7 @@ export function settingsScreen() {
     const navAttrs = Object.entries(group.nav)
       .map(([direction, zone]) => `data-nav-${direction}-zone="${zone}"`)
       .join(" ");
-    return `<section class="settings-group" data-focus-zone="${group.zone}" ${navAttrs}><h2>${group.label}</h2><div class="settings-list">${rows}</div></section>`;
+    return `<section class="settings-group" data-focus-zone="${group.zone}" data-nav-contain-y="true" ${navAttrs}><h2>${group.label}</h2><div class="settings-list">${rows}</div></section>`;
   }).join("");
 
   return page({
@@ -110,7 +110,7 @@ export function settingsScreen() {
     description: "Everything for your console, organized for controller-first navigation.",
     eyebrow: "PARA",
     className: "settings-page settings-page--comfortable",
-    body: `<div class="settings-controller-tip" aria-hidden="true"><span>↑↓</span><b>Move</b><span>←→</span><b>Switch group</b><span data-prompt="confirm">A</span><b>Open</b></div><div class="settings-comfort-shell" data-focus-scope="settings">${body}</div>`,
+    body: `<div class="settings-controller-tip" aria-hidden="true"><span>↑↓</span><b>Move in group</b><span>←→</span><b>Other column</b><span><i data-prompt="shoulderPrevious">LB</i>/<i data-prompt="shoulderNext">RB</i></span><b>Change group</b><span data-prompt="confirm">A</span><b>Open</b></div><div class="settings-comfort-shell" data-focus-scope="settings">${body}</div>`,
   });
 }
 
