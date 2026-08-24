@@ -98,8 +98,11 @@ function storeAssetUrl(path) {
   return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
 }
 
-function exploreHubTile({ title, subtitle, route, mark, focusId }) {
-  return `<button class="home-explore-hub__tile" type="button" data-route="${escapeHtml(route)}" data-focus-id="${escapeHtml(focusId)}"><span class="home-explore-hub__mark" aria-hidden="true">${escapeHtml(mark)}</span><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></span><i aria-hidden="true">›</i></button>`;
+function exploreHubTile({ title, subtitle, route, mark, focusId, icon = "" }) {
+  const visual = icon
+    ? `<span class="home-explore-hub__mark home-explore-hub__mark--image" aria-hidden="true"><img src="${escapeHtml(icon)}" alt="" /></span>`
+    : `<span class="home-explore-hub__mark" aria-hidden="true">${escapeHtml(mark)}</span>`;
+  return `<button class="home-explore-hub__tile" type="button" data-route="${escapeHtml(route)}" data-focus-id="${escapeHtml(focusId)}">${visual}<span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></span><i aria-hidden="true">›</i></button>`;
 }
 
 function storeShelfCard(item, focusId) {
@@ -127,8 +130,13 @@ function contextMarkup(section, model) {
     const sponsored = catalog.filter((item) => item.store_metadata?.sponsored === true);
     const featured = catalog.filter((item) => item.store_metadata?.featured === true);
     const featuredItems = featured.length ? featured : catalog.slice(0, 6);
-    const recommended = catalog.filter((item) => !sponsored.includes(item)).slice(0, 6);
-    return `<div class="home-explore-dashboard"><div class="home-explore-hub">${exploreHubTile({ title: "Games", subtitle: "My games & apps", route: "games", mark: "◉", focusId: "home-route:games" })}${exploreHubTile({ title: "Apps", subtitle: model.applications.length ? `${model.applications.length} available` : "Your app library", route: "apps", mark: "▦", focusId: "home-route:apps" })}${exploreHubTile({ title: "ParaStore", subtitle: "Discover and install", route: "parastore", mark: "▱", focusId: "home-route:parastore" })}</div><div class="home-explore-shelves">${storeShelf("Sponsored", sponsored, "sponsored")}${storeShelf("Featured", featuredItems, "featured")}${storeShelf("Recommended for you", recommended, "recommended")}</div></div>`;
+    const recommended = catalog.filter((item) => !sponsored.includes(item) && !featuredItems.includes(item)).slice(0, 6);
+    const shelves = [
+      storeShelf("Featured", featuredItems, "featured"),
+      ...(recommended.length ? [storeShelf("Recommended for you", recommended, "recommended")] : []),
+      ...(sponsored.length ? [storeShelf("Sponsored", sponsored, "sponsored")] : []),
+    ].join("");
+    return `<div class="home-explore-dashboard"><div class="home-explore-hub">${exploreHubTile({ title: "Games", subtitle: "My games & apps", route: "games", mark: "◉", focusId: "home-route:games" })}${exploreHubTile({ title: "Apps", subtitle: model.applications.length ? `${model.applications.length} available` : "Your app library", route: "apps", mark: "▦", focusId: "home-route:apps" })}${exploreHubTile({ title: "ParaStore", subtitle: "Discover and install", route: "parastore", mark: "", icon: "/assets/parastore-icon.png", focusId: "home-route:parastore" })}</div><div class="home-explore-shelves">${shelves}</div></div>`;
   }
   if (section === "create") {
     const creatorApps = model.applications.filter((application) => application.roles?.includes("creator"));

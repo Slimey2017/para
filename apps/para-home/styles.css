@@ -1168,3 +1168,14 @@ html[data-reduced-motion=true] .home-continue-item,html[data-reduced-motion=true
   .home-explore-hub { grid-template-columns: 1fr 1fr; }
   .home-community-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* Explore console shelf pass + official ParaStore icon */
+.home-explore-dashboard{gap:22px}
+.home-explore-hub{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.home-explore-hub__tile{min-height:94px;padding:13px 15px;border-radius:15px;grid-template-columns:58px minmax(0,1fr) auto}
+.home-explore-hub__mark{width:58px;border-radius:13px}
+.home-explore-hub__mark--image{overflow:hidden;padding:0;background:#10071f;border-color:rgba(197,138,255,.38)}
+.home-explore-hub__mark--image img{width:100%;height:100%;object-fit:cover;display:block}
+.home-explore-shelves{gap:18px}
+.home-store-shelf__track{grid-auto-columns:minmax(180px,230px)}
+.home-store-shelf-card{border-radius:13px}
