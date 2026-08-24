@@ -1271,8 +1271,6 @@ html.is-idle #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:.
 .bottom-nav.control-legend>span{width:auto!important;min-width:0!important;min-height:0!important;padding:0!important;background:transparent!important;border:0!important;border-radius:0!important;transform:none!important;box-shadow:none!important}
 
 @media(max-width:850px){.store-product-hero{min-height:390px}.store-product-gallery__track{grid-auto-columns:minmax(240px,72vw)}.store-product-gallery__heading small{display:none}.store-media-viewer{inset:3vh 3vw}}
-
-
 /* ================================================================
    PARA Lounge Settings + ParaStore product stability pass
    ================================================================ */
