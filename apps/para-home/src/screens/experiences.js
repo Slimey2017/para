@@ -212,8 +212,32 @@ export function activateStoreGame() {
   }
   recordExperience({ id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game", kind: "Game", accent: "#8d43ff", mark: (item.title || "P")[0], storeId: item.id });
   const source = `/api/v1/store/content/${encodeURIComponent(item.id)}/index.html`;
-  host.innerHTML = `<div class="store-game-toolbar"><button class="action-button action-button--ghost" data-route="games">← Library</button><strong>${escapeHtml(item.title || "Game")}</strong></div><iframe class="store-game-frame" src="${source}" sandbox="allow-scripts allow-pointer-lock allow-forms" allow="gamepad; autoplay; fullscreen" referrerpolicy="no-referrer" title="${escapeHtml(item.title || "PARA game")}"></iframe>`;
-  return () => {};
+  host.innerHTML = `<div class="store-game-toolbar"><button class="action-button action-button--ghost" data-route="games">← Library</button><strong>${escapeHtml(item.title || "Game")}</strong><span class="store-game-toolbar__state">PARA Web Runtime</span></div><iframe class="store-game-frame" data-store-game-frame src="${source}" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-downloads" allow="gamepad; autoplay; fullscreen" referrerpolicy="same-origin" title="${escapeHtml(item.title || "PARA game")}"></iframe>`;
+
+  const frame = host.querySelector("[data-store-game-frame]");
+  let runtimeReady = false;
+  const onMessage = (event) => {
+    if (event.source !== frame?.contentWindow) return;
+    if (event.data?.type === "para-game-runtime-ready" && event.data?.id === item.id) runtimeReady = true;
+  };
+  window.addEventListener("message", onMessage);
+
+  const onLoad = () => {
+    if (!frame) return;
+    try {
+      const path = frame.contentWindow?.location?.pathname || "";
+      if ((path === "/" || path === "/index.html") && runtimeReady) {
+        runtimeReady = false;
+        frame.src = source;
+      }
+    } catch (_) {}
+  };
+  frame?.addEventListener("load", onLoad);
+
+  return () => {
+    window.removeEventListener("message", onMessage);
+    frame?.removeEventListener("load", onLoad);
+  };
 }
 
 export function messagesScreen() {

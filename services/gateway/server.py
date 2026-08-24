@@ -142,6 +142,67 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if file_status != 200:
         return file_status, body or b'{"error":"file_unavailable"}', storage_type or "application/octet-stream"
     guessed = mimetypes.guess_type(relative)[0] or storage_type or "application/octet-stream"
+
+    # Keep WEB titles inside their PARA virtual game root instead of letting
+    # ordinary root-relative links/network requests fall through to PARA Home.
+    if guessed.startswith("text/html"):
+        try:
+            text = body.decode("utf-8")
+            runtime_base = f"/api/v1/store/content/{urllib.parse.quote(item_id, safe='')}/"
+            runtime_id = json.dumps(item_id)
+            runtime_base_json = json.dumps(runtime_base)
+            injection = (
+                f'<base href="{runtime_base}">\n'
+                '<script data-para-runtime>\n'
+                '(() => {\n'
+                f'  const BASE = {runtime_base_json};\n'
+                '  const map = (value) => {\n'
+                "    if (typeof value !== 'string') return value;\n"
+                "    if (value === '/') return BASE;\n"
+                "    if (value.startsWith('/') && !value.startsWith('/api/')) return BASE + value.replace(/^\\/+/, '');\n"
+                '    return value;\n'
+                '  };\n'
+                '  const nativeFetch = window.fetch?.bind(window);\n'
+                "  if (nativeFetch) window.fetch = (input, init) => nativeFetch(typeof input === 'string' ? map(input) : input, init);\n"
+                '  const nativeOpen = XMLHttpRequest.prototype.open;\n'
+                '  XMLHttpRequest.prototype.open = function(method, url, ...rest) { return nativeOpen.call(this, method, map(url), ...rest); };\n'
+                "  for (const method of ['pushState', 'replaceState']) {\n"
+                '    const native = history[method].bind(history);\n'
+                '    history[method] = (state, unused, url) => native(state, unused, map(url));\n'
+                '  }\n'
+                '  const nativeWindowOpen = window.open?.bind(window);\n'
+                '  if (nativeWindowOpen) window.open = (url, ...rest) => nativeWindowOpen(map(url), ...rest);\n'
+                "  document.addEventListener('click', (event) => {\n"
+                "    const anchor = event.target.closest?.('a[href]');\n"
+                "    if (!anchor) return;\n"
+                "    const raw = anchor.getAttribute('href');\n"
+                "    if (raw && raw.startsWith('/') && !raw.startsWith('/api/')) anchor.setAttribute('href', map(raw));\n"
+                '  }, true);\n'
+                "  document.addEventListener('submit', (event) => {\n"
+                '    const form = event.target;\n'
+                '    if (!(form instanceof HTMLFormElement)) return;\n'
+                "    const raw = form.getAttribute('action');\n"
+                "    if (raw && raw.startsWith('/') && !raw.startsWith('/api/')) form.setAttribute('action', map(raw));\n"
+                '  }, true);\n'
+                f"  try {{ parent.postMessage({{ type: 'para-game-runtime-ready', id: {runtime_id} }}, location.origin); }} catch (_) {{}}\n"
+                '})();\n'
+                '</script>'
+            )
+            lower = text.lower()
+            head_at = lower.find('<head')
+            if head_at >= 0:
+                close = text.find('>', head_at)
+                if close >= 0:
+                    text = text[:close + 1] + injection + text[close + 1:]
+                else:
+                    text = injection + text
+            else:
+                text = injection + text
+            body = text.encode("utf-8")
+            guessed = "text/html; charset=utf-8"
+        except UnicodeDecodeError:
+            pass
+
     return 200, body, guessed
 
 
