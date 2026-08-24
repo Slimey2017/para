@@ -1,4 +1,5 @@
 import { getProfilePreferences, setProfilePreferences } from "../state.js";
+import { duckMenuMusic } from "./menu-music.js";
 
 let context = null;
 
@@ -30,17 +31,18 @@ function tone({ frequency, duration, gain, type = "sine", slide = 0 }) {
   oscillator.stop(started + duration + 0.02);
 }
 
-export const playNavigationSound = () => tone({ frequency: 520, duration: 0.045, gain: 0.045, type: "triangle", slide: 35 });
-export const playConfirmSound = () => tone({ frequency: 190, duration: 0.13, gain: 0.075, type: "sine", slide: 180 });
+export const playNavigationSound = () => tone({ frequency: 620, duration: 0.055, gain: 0.16, type: "triangle", slide: 55 });
+export const playConfirmSound = () => { duckMenuMusic({ amount: .38, duration: 220 }); tone({ frequency: 210, duration: 0.14, gain: 0.28, type: "triangle", slide: 220 }); };
 export const playNotificationSound = () => {
-  tone({ frequency: 620, duration: 0.09, gain: 0.05, type: "sine", slide: 120 });
-  window.setTimeout(() => tone({ frequency: 880, duration: 0.11, gain: 0.04, type: "sine", slide: 60 }), 85);
+  duckMenuMusic({ amount: .48, duration: 360 });
+  tone({ frequency: 680, duration: 0.10, gain: 0.24, type: "triangle", slide: 150 });
+  window.setTimeout(() => tone({ frequency: 980, duration: 0.13, gain: 0.20, type: "sine", slide: 80 }), 85);
 };
 
 export function playSystemCue(name) {
-  if (name === "shutdown" || name === "sleep") return tone({ frequency: 180, duration: .55, gain: .06, type: "sine", slide: -90 });
-  if (name === "startup" || name === "formed") return tone({ frequency: 120, duration: .42, gain: .075, type: "sine", slide: 170 });
-  return tone({ frequency: 260, duration: .16, gain: .045, type: "triangle", slide: 80 });
+  if (name === "shutdown" || name === "sleep") return tone({ frequency: 180, duration: .55, gain: .22, type: "sine", slide: -90 });
+  if (name === "startup" || name === "formed") return tone({ frequency: 120, duration: .42, gain: .24, type: "sine", slide: 170 });
+  return tone({ frequency: 260, duration: .16, gain: .18, type: "triangle", slide: 80 });
 }
 
 export function setInterfaceSoundVolume(volume) {

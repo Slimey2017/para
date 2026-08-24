@@ -56,3 +56,13 @@ export function setMenuMusicVolume(value) {
   if (prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
   return volume;
 }
+
+let duckTimer = null;
+export function duckMenuMusic({ amount = 0.32, duration = 240 } = {}) {
+  if (!unlocked || prefs().menuMusic === false) return;
+  const normal = targetVolume();
+  const ducked = Math.max(0, normal * (1 - Math.max(0, Math.min(.8, amount))));
+  clearTimeout(duckTimer);
+  fadeTo(ducked, 45);
+  duckTimer = setTimeout(() => fadeTo(targetVolume(), 120), Math.max(80, duration));
+}
