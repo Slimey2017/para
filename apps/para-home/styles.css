@@ -1273,6 +1273,7 @@ html.is-idle #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:.
 @media(max-width:850px){.store-product-hero{min-height:390px}.store-product-gallery__track{grid-auto-columns:minmax(240px,72vw)}.store-product-gallery__heading small{display:none}.store-media-viewer{inset:3vh 3vw}}
 
 
+
 /* ================================================================
    PARA Lounge Settings + ParaStore product stability pass
    ================================================================ */
@@ -1410,3 +1411,4 @@ html.is-idle #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:.
   .topbar__right{gap:12px!important}
   .clock{flex-basis:82px!important;width:82px!important;min-width:82px!important;max-width:82px!important;font-size:.82rem!important}
 }
+
