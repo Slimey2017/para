@@ -230,11 +230,11 @@ export function activateStoreProduct() {
           </div>
         </div>
       </section>
-      ${shots.length ? `<section class="store-product-gallery store-product-gallery--prominent"><div class="store-product-gallery__heading"><div><span>MEDIA</span><h2>Screenshots</h2></div><small>${shots.length} image${shots.length === 1 ? "" : "s"} • A to enlarge</small></div><div class="store-product-gallery__track">${shots.map((shot, index) => `<button type="button" class="store-product-shot" data-action="open-store-screenshot" data-shot-index="${index}" aria-label="Open screenshot ${index + 1}"><img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot ${index + 1}"><span>${index + 1} / ${shots.length}</span></button>`).join("")}</div></section>` : ""}
-      <section class="store-product-details">
-        <div><h2>About</h2><p>${escapeHtml(meta.full_description || meta.short_description || "No description provided.")}</p></div>
+      <section class="store-product-details store-product-details--compact">
+        <div><span class="store-product-section-label">ABOUT</span><h2>About</h2><p>${escapeHtml(meta.full_description || meta.short_description || "No description provided.")}</p></div>
         <aside><span>Developer</span><strong>${escapeHtml(meta.developer_name || "Independent developer")}</strong><span>Runtime</span><strong>${escapeHtml(item.runtime || "PARA")}</strong><span>Release notes</span><strong>${escapeHtml(item.release_notes || "Initial release")}</strong></aside>
       </section>
+      ${shots.length ? `<section class="store-product-gallery store-product-gallery--prominent"><div class="store-product-gallery__heading"><div><span>MEDIA</span><h2>Screenshots</h2></div><small>${shots.length} image${shots.length === 1 ? "" : "s"} • A to enlarge</small></div><div class="store-product-gallery__track">${shots.map((shot, index) => `<button type="button" class="store-product-shot" data-action="open-store-screenshot" data-shot-index="${index}" aria-label="Open screenshot ${index + 1}"><img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot ${index + 1}"><span>${index + 1} / ${shots.length}</span></button>`).join("")}</div></section>` : ""}
     `;
   }).catch((error) => {
     if (!alive) return;
