@@ -120,9 +120,10 @@ export function showControlCenterContext(id, focusContext = false, focus = null)
   context.hidden = !content;
   context.dataset.contextFor = id;
   if (content) {
-    context.classList.remove("is-visible");
-    context.getBoundingClientRect();
-    context.classList.add("is-visible");
+    // Keep the center tray physically stable while moving between controls.
+    // Re-triggering an entrance transform on every focus move made the whole
+    // Control Center appear to twitch. Only the first reveal animates.
+    if (!context.classList.contains("is-visible")) context.classList.add("is-visible");
   }
   if (focusContext && content && focus) {
     const target = context.querySelector("[data-context-autofocus='true'],button,input");

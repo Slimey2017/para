@@ -538,9 +538,15 @@ async function handleAction(action, target) {
       closeControlCenter(false);
       beginSleep({ returnFocus: target });
       break;
-    case "confirm-turn-off":
-      openTurnOffConfirmation(focus, target);
+    case "confirm-turn-off": {
+      // A system confirmation owns the screen by itself. Close Control Center
+      // completely before mounting the shutdown dialog so the two modal layers
+      // can never stack on top of each other.
+      const returnFocus = overlayReturnFocus || target;
+      closeControlCenter(false);
+      window.setTimeout(() => openTurnOffConfirmation(focus, returnFocus), getState().reducedMotion ? 8 : 230);
       break;
+    }
     case "cancel-turn-off":
       cancelTurnOffConfirmation(focus);
       break;
