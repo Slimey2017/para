@@ -12,6 +12,8 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import io
+import zipfile
 from pathlib import Path
 import sys
 from urllib.parse import parse_qs, urlparse
@@ -29,7 +31,7 @@ def store_catalog() -> tuple[int, dict]:
     key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
     if not base or not key:
         return 503, {"error": "catalog_not_configured", "items": []}
-    url = f"{base}/rest/v1/catalog_entries?select=id,project_id,package_id,title,project_type,runtime,architectures,store_metadata,asset_references,release_notes,published_at,status&status=eq.PUBLISHED&order=published_at.desc"
+    url = f"{base}/rest/v1/catalog_entries?select=id,project_id,current_release_id,package_id,title,project_type,runtime,architectures,store_metadata,asset_references,download_reference,release_notes,published_at,status&status=eq.PUBLISHED&order=published_at.desc"
     request = urllib.request.Request(url, headers={"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=6) as response:
@@ -37,6 +39,79 @@ def store_catalog() -> tuple[int, dict]:
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
         return 502, {"error": "catalog_unavailable", "detail": str(error), "items": []}
     return 200, {"source": "parastore", "items": items if isinstance(items, list) else []}
+
+
+
+def _supabase_get_json(path: str) -> tuple[int, object]:
+    base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
+    if not base or not key:
+        return 503, {"error": "catalog_not_configured"}
+    request = urllib.request.Request(f"{base}{path}", headers={"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        return error.code, {"error": "supabase_error", "detail": error.read().decode("utf-8", "replace")}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return 502, {"error": "catalog_unavailable", "detail": str(error)}
+
+
+def store_product(item_id: str) -> tuple[int, dict]:
+    quoted = urllib.parse.quote(item_id, safe="")
+    status, payload = _supabase_get_json(f"/rest/v1/catalog_entries?select=id,project_id,current_release_id,package_id,title,project_type,runtime,architectures,store_metadata,asset_references,download_reference,release_notes,published_at,status&id=eq.{quoted}&status=eq.PUBLISHED&limit=1")
+    if status >= 400:
+        return status, payload if isinstance(payload, dict) else {"error": "product_unavailable"}
+    if not isinstance(payload, list) or not payload:
+        return 404, {"error": "product_not_found"}
+    return 200, payload[0]
+
+
+def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:
+    base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
+    if not base or not key:
+        return 503, b"", "application/octet-stream"
+    safe_path = "/".join(urllib.parse.quote(part, safe="") for part in path.split("/") if part)
+    request = urllib.request.Request(f"{base}/storage/v1/object/{bucket}/{safe_path}", headers={"apikey": key, "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.status, response.read(), response.headers.get_content_type()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read(), error.headers.get_content_type()
+    except (urllib.error.URLError, TimeoutError):
+        return 502, b"", "application/octet-stream"
+
+
+def store_download(item_id: str) -> tuple[int, bytes, str, str]:
+    status, item = store_product(item_id)
+    if status != 200:
+        return status, json.dumps(item).encode(), "application/json", "parastore-error.json"
+    release_id = str(item.get("current_release_id") or "")
+    if not release_id:
+        return 409, b'{"error":"release_missing"}', "application/json", "parastore-error.json"
+    status, releases = _supabase_get_json(f"/rest/v1/releases?select=id,build_id,status&id=eq.{urllib.parse.quote(release_id, safe='')}&status=eq.PUBLISHED&limit=1")
+    if status >= 400 or not isinstance(releases, list) or not releases:
+        return 409, b'{"error":"release_unavailable"}', "application/json", "parastore-error.json"
+    build_id = str(releases[0].get("build_id") or "")
+    status, files = _supabase_get_json(f"/rest/v1/build_files?select=path,byte_size,checksum_sha256&build_id=eq.{urllib.parse.quote(build_id, safe='')}&order=path.asc")
+    if status >= 400 or not isinstance(files, list) or not files:
+        return 409, b'{"error":"build_files_missing"}', "application/json", "parastore-error.json"
+    prefix = str(item.get("download_reference") or "")
+    if prefix.endswith("/index.html"):
+        prefix = prefix[:-len("/index.html")]
+    memory = io.BytesIO()
+    with zipfile.ZipFile(memory, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry in files:
+            relative = str(entry.get("path") or "").lstrip("/")
+            if not relative or ".." in Path(relative).parts:
+                continue
+            file_status, body, _ = _storage_fetch("developer-builds", f"{prefix}/{relative}")
+            if file_status != 200:
+                return 502, json.dumps({"error": "file_download_failed", "path": relative}).encode(), "application/json", "parastore-error.json"
+            archive.writestr(relative, body)
+    filename = f"{str(item.get('package_id') or item.get('title') or 'para-game').replace('/', '-')}.zip"
+    return 200, memory.getvalue(), "application/zip", filename
 
 
 def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, dict]:
@@ -59,6 +134,8 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
         return system_layer.search_files(location, term)
     if path == "/api/v1/store/catalog":
         return store_catalog()
+    if path == "/api/v1/store/product":
+        return store_product((query or {}).get("id", [""])[0])
     if path == "/api/v1/personalization":
         profile = (query or {}).get("profile", [""])[0]
         return system_layer.personalization(profile)
@@ -136,6 +213,30 @@ class ParaHandler(SimpleHTTPRequestHandler):
                 self._send_json(404, {"error": "not_found"})
             else:
                 self._send_file(path, content_type)
+            return
+        if request.path == "/api/v1/store/asset":
+            path = parse_qs(request.query).get("path", [""])[0]
+            status, body, content_type = _storage_fetch("developer-assets", path)
+            if status != 200:
+                self._send_json(status, {"error": "asset_unavailable"})
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "public, max-age=300")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            return
+        if request.path == "/api/v1/store/download":
+            item_id = parse_qs(request.query).get("id", [""])[0]
+            status, body, content_type, filename = store_download(item_id)
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if request.path.startswith("/api/"):
             status, payload = resolve(request.path.rstrip("/"), parse_qs(request.query))

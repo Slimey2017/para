@@ -61,7 +61,7 @@ function liveStoreCard(item) {
   const type = item.project_type || "GAME";
   const genre = meta.genre || type;
   const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
-  return `<article class="store-live-card" tabindex="0"><div class="store-live-card__art"><span>${escapeHtml((item.title || "P").slice(0,1).toUpperCase())}</span><small>${escapeHtml(item.runtime || "PARA")}</small></div><div class="store-live-card__copy"><span>${escapeHtml(genre)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.release_notes || "Ready to play")}</small></div></div></article>`;
+  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art"><span>${escapeHtml((item.title || "P").slice(0,1).toUpperCase())}</span><small>${escapeHtml(item.runtime || "PARA")}</small></div><div class="store-live-card__copy"><span>${escapeHtml(genre)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>View product</small></div></div></article>`;
 }
 
 export function activateParaStore() {
@@ -75,6 +75,70 @@ export function activateParaStore() {
   }).catch((error) => {
     if (!alive) return;
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`;
+  });
+  return () => { alive = false; };
+}
+
+
+
+export function storeProductScreen() {
+  return page({
+    title: "ParaStore",
+    description: "Product details",
+    eyebrow: "Store",
+    className: "store-product-page",
+    body: `<div data-store-product><div class="library-empty"><span>◌</span><h2>Loading product…</h2></div></div>`,
+  });
+}
+
+function assetUrl(path) {
+  return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
+}
+
+export function activateStoreProduct() {
+  const host = document.querySelector("[data-store-product]");
+  if (!host) return () => {};
+  const id = sessionStorage.getItem("para.store.product") || "";
+  let alive = true;
+  if (!id) {
+    host.innerHTML = `<div class="library-empty"><span>!</span><h2>No product selected</h2><button class="action-button" data-route="parastore">Back to ParaStore</button></div>`;
+    return () => {};
+  }
+  paraApi.storeProduct(id).then((item) => {
+    if (!alive) return;
+    const meta = item.store_metadata || {};
+    const assets = item.asset_references || {};
+    const hero = assetUrl(assets.hero || assets.cover || assets.icon);
+    const cover = assetUrl(assets.cover || assets.icon || assets.hero);
+    const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+    const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
+    host.innerHTML = `
+      <section class="store-product-hero" ${hero ? `style="--product-hero:url('${hero}')"` : ""}>
+        <div class="store-product-hero__shade"></div>
+        <button class="store-product-back" data-route="parastore">← Back</button>
+        <div class="store-product-hero__content">
+          <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span>${escapeHtml((item.title || "P")[0])}</span>`}</div>
+          <div class="store-product-copy">
+            <span>${escapeHtml(meta.genre || item.project_type || "GAME")}</span>
+            <h1>${escapeHtml(item.title || "Untitled")}</h1>
+            <p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p>
+            <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small></div>
+            <div class="store-product-actions">
+              <a class="action-button" href="/api/v1/store/download?id=${encodeURIComponent(item.id)}" download>Download</a>
+              <button class="action-button action-button--ghost" data-action="store-more-info">•••</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="store-product-details">
+        <div><h2>About</h2><p>${escapeHtml(meta.full_description || meta.short_description || "No description provided.")}</p></div>
+        <aside><span>Developer</span><strong>${escapeHtml(meta.developer_name || "Independent developer")}</strong><span>Runtime</span><strong>${escapeHtml(item.runtime || "PARA")}</strong><span>Release notes</span><strong>${escapeHtml(item.release_notes || "Initial release")}</strong></aside>
+      </section>
+      ${shots.length ? `<section class="store-product-gallery"><h2>Screenshots</h2><div>${shots.map((shot) => `<img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot">`).join("")}</div></section>` : ""}
+    `;
+  }).catch((error) => {
+    if (!alive) return;
+    host.innerHTML = `<div class="library-empty"><span>!</span><h2>Product unavailable</h2><p>${escapeHtml(error.message || "Could not load product")}</p></div>`;
   });
   return () => { alive = false; };
 }

@@ -23,8 +23,8 @@ import {
   notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen,
 } from "./screens/system.js";
 import {
-  gamesScreen, demosScreen, paraStoreScreen, gameScreen, activateDemoGame,
-  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore,
+  gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, gameScreen, activateDemoGame,
+  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct,
   playCreatorTone, clearCreatorDrawing,
 } from "./screens/experiences.js";
 import {
@@ -69,6 +69,7 @@ const renderers = {
   games: gamesScreen,
   demos: demosScreen,
   parastore: paraStoreScreen,
+  "store-product": storeProductScreen,
   creator: creatorScreen,
   community: communityScreen,
   messages: messagesScreen,
@@ -201,6 +202,8 @@ function render(route) {
     cleanupScreen = activateCommunity();
   } else if (route === "parastore") {
     cleanupScreen = activateParaStore();
+  } else if (route === "store-product") {
+    cleanupScreen = activateStoreProduct();
   } else if (route === "files" || route === "downloads") {
     cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
     if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
@@ -642,6 +645,15 @@ async function handleAction(action, target) {
       schedulePreferenceSave();
       toast("Control Center restored");
       rerender();
+      break;
+    case "open-store-product":
+      if (target.dataset.storeId) {
+        sessionStorage.setItem("para.store.product", target.dataset.storeId);
+        navigate("store-product", {}, target);
+      }
+      break;
+    case "store-more-info":
+      toast("More options", "Wishlist and sharing can plug in here next.");
       break;
     case "refresh-network":
       activateNetwork();
