@@ -105,11 +105,14 @@ export function paraStoreScreen() {
 
 function liveStoreCard(item) {
   const meta = item.store_metadata || {};
+  const assets = item.asset_references || {};
   const description = meta.short_description || "Published on ParaStore";
   const type = item.project_type || "GAME";
   const genre = meta.genre || type;
   const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
-  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art"><span>${escapeHtml((item.title || "P").slice(0,1).toUpperCase())}</span><small>${escapeHtml(item.runtime || "PARA")}</small></div><div class="store-live-card__copy"><span>${escapeHtml(genre)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>View product</small></div></div></article>`;
+  const art = assetUrl(assets.icon || assets.cover || assets.hero);
+  const fallback = escapeHtml((item.title || "P").slice(0,1).toUpperCase());
+  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} icon">` : `<span>${fallback}</span>`}<small>${escapeHtml(item.runtime || "PARA")}</small></div><div class="store-live-card__copy"><span>${escapeHtml(genre)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>View product</small></div></div></article>`;
 }
 
 export function activateParaStore() {
