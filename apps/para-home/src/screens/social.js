@@ -1,4 +1,4 @@
-import { content } from "../mock-data.js";
+import { content } from "../content-data.js";
 import { page, tile, listRow } from "../ui/components.js";
 
 export function socialScreen() {
