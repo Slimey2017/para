@@ -168,21 +168,3 @@ export function clearNotification(id) {
 export function currentProfileName() {
   return getState().activeProfile || "P1";
 }
-
-export function closeExperience(id) {
-  if (!id) return false;
-  const runtime = getProfileRuntime();
-  const running = runtime.running.filter((item) => item.id !== id);
-  if (running.length === runtime.running.length) return false;
-  setProfileRuntime({ running });
-  emit();
-  return true;
-}
-
-export function favoriteExperience(id, favorite = true) {
-  const runtime = getProfileRuntime();
-  const patch = (item) => item.id === id ? { ...item, favorite } : item;
-  setProfileRuntime({ recent: runtime.recent.map(patch), running: runtime.running.map(patch) });
-  emit();
-  return favorite;
-}

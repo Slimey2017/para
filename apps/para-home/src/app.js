@@ -40,10 +40,9 @@ import {
 } from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
 import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
-import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic } from "./services/menu-music.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
-  activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, startDemoInstall,
+  activeDownloads, recordExperience, refreshDemoDownloads, removeDemo, startDemoInstall,
 } from "./services/experience-runtime.js";
 import { toggleMicrophone } from "./services/microphone.js";
 import {
@@ -171,7 +170,6 @@ async function updateDisplayInfo() {
 }
 
 function render(route) {
-  syncMenuMusic({ gameRunning: route === "store-game" || ["demo-pong", "demo-racer", "demo-platformer"].includes(route) });
   cleanupScreen?.();
   cleanupScreen = null;
   cleanupClock?.();
@@ -307,31 +305,9 @@ function paraTap() {
 
 function paraHold() {
   if (consumePowerInput()) return;
-  openSwitcher();
-}
-
-function openSwitcher() {
-  clearTimeout(overlayCloseTimer);
-  overlayReturnFocus = focus.current;
-  const running = runningExperiences().slice(0, 5);
-  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Jump back in" : "Nothing suspended"}</h2><small>Hold PARA from anywhere to open Switcher</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>`<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button type="button" data-action="resume-experience" data-experience-id="${item.id}" data-experience-route="${item.route}" data-store-id="${item.storeId || ''}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${item.mark || '◉'}</span><small>${item.kind || 'App'}</small><strong>${item.title}</strong><em>${item.queueStatus || 'Suspended'}</em></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${item.id}" aria-label="Close ${item.title}">×</button></article>`).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close app</span></footer></section>`;
-  overlay.hidden = false;
-  overlay.classList.remove("is-closing");
-  updateControllerPrompts();
-  requestAnimationFrame(()=>focus.focusFirst());
-}
-
-function openGameOptions(target) {
-  const button = target?.closest?.('[data-continue-item], [data-store-id], .demo-card');
-  if (!button) return false;
-  const card = button.closest?.('[data-continue-item], .demo-card, .store-live-card, .home-store-shelf-card') || button;
-  const title = card.querySelector?.('strong,h2')?.textContent?.trim() || 'Game';
-  const route = button.dataset.route || card.dataset.route || '';
-  const storeId = button.dataset.storeId || card.dataset.storeId || '';
-  const expId = button.dataset.continueId || '';
-  overlayReturnFocus = focus.current;
-  overlay.innerHTML = `<div class="options-scrim" data-action="close-control-center"></div><aside class="game-options" role="dialog" aria-modal="true"><span>OPTIONS</span><h2>${title}</h2><div><button data-action="game-option-play" data-option-route="${route}" data-store-id="${storeId}" data-autofocus="true">Play / Resume</button><button data-action="game-option-info" data-store-id="${storeId}">Game Info</button><button data-action="game-option-update">Check for Update</button><button data-action="game-option-manage">Manage Game</button><button data-action="game-option-favorite" data-experience-id="${expId}">Add to Favorites</button>${storeId?`<button class="danger" data-action="uninstall-store-game" data-store-id="${storeId}">Uninstall</button>`:''}</div></aside>`;
-  overlay.hidden=false; overlay.classList.remove('is-closing'); updateControllerPrompts(); requestAnimationFrame(()=>focus.focusFirst()); return true;
+  closeControlCenter(false);
+  if (router.current() === "home") focus.focusFirst();
+  else navigate("home", { replace: true });
 }
 
 function shoulder(direction) {
@@ -361,7 +337,6 @@ function options() {
 
 const focus = new FocusManager({ confirm, back, paraTap, paraHold, shoulder, secondary, options });
 document.addEventListener("para-focuschange", playNavigationSound);
-document.addEventListener("para-options", (event) => { if (openGameOptions(event.detail?.target)) playConfirmSound(); });
 document.addEventListener("para-inputdevicechange", (event) => {
   activeInputDevice = event.detail?.device || "keyboard";
   updateControllerPrompts();
@@ -395,9 +370,7 @@ const gamepad = new GamepadNavigation({
     updateControllerPrompts();
     updateSetupControllerStatus(controller);
     document.dispatchEvent(new CustomEvent("para-controllerchange", { detail: controller }));
-    if (controller.connected && !hadController) { playNotificationSound(); toast("PulseWave Controller connected", `${controller.typeLabel} • Player 1`); }
-    if (!controller.connected && hadController) { playNotificationSound(); toast("Controller disconnected", router.current() === "store-game" ? "Game paused • reconnect a controller" : "Keyboard controls active"); document.documentElement.classList.toggle("controller-disconnected-in-game", router.current() === "store-game"); }
-    if (controller.connected) document.documentElement.classList.remove("controller-disconnected-in-game");
+    if (controller.connected && !hadController) toast("Controller connected", `${controller.typeLabel} controls active`);
   },
   inputDevice: setActiveInputDevice,
 });
@@ -591,22 +564,6 @@ async function handleAction(action, target) {
     case "launch-linux-app":
       openLinuxApplication(target);
       break;
-    case "toggle-account-menu": {
-      const wrap = target.closest("[data-account-quick]");
-      const popover = wrap?.querySelector("[data-account-popover]");
-      if (!wrap || !popover) break;
-      document.querySelectorAll("[data-account-popover]:not([hidden])").forEach((node) => {
-        if (node !== popover) { node.hidden = true; node.closest("[data-account-quick]")?.querySelector("[data-action='toggle-account-menu']")?.setAttribute("aria-expanded", "false"); }
-      });
-      const opening = popover.hidden;
-      popover.hidden = !opening;
-      target.setAttribute("aria-expanded", String(opening));
-      if (opening) requestAnimationFrame(() => {
-        const first = popover.querySelector("button:not([disabled])");
-        if (first) focus.setCurrent(first, true);
-      });
-      break;
-    }
     case "open-control-center":
       openControlCenter();
       break;
@@ -616,30 +573,6 @@ async function handleAction(action, target) {
     case "control-center-open-context":
       showControlCenterContext(target.dataset.controlCenterId, true, focus);
       break;
-    case "resume-experience": {
-      const storeId = target.dataset.storeId || "";
-      if (storeId) sessionStorage.setItem("para.store.launch", storeId);
-      closeControlCenter(false);
-      navigate(target.dataset.experienceRoute || "home", {}, target);
-      break;
-    }
-    case "close-experience":
-      closeExperience(target.dataset.experienceId);
-      toast("Experience closed");
-      openSwitcher();
-      break;
-    case "game-option-play": {
-      const storeId = target.dataset.storeId || "";
-      if (storeId) { sessionStorage.setItem("para.store.launch", storeId); closeControlCenter(false); navigate("store-game", {}, target); }
-      else if (target.dataset.optionRoute) { closeControlCenter(false); navigate(target.dataset.optionRoute, {}, target); }
-      break;
-    }
-    case "game-option-info":
-      if (target.dataset.storeId) { sessionStorage.setItem("para.store.product", target.dataset.storeId); closeControlCenter(false); navigate("store-product", {}, target); } else toast("Game Info", "Activity, captures and achievements will appear in this hub.");
-      break;
-    case "game-option-update": toast("You’re up to date", "No update is required."); break;
-    case "game-option-manage": toast("Manage Game", "Storage, saves and add-ons are ready for host integration."); break;
-    case "game-option-favorite": favoriteExperience(target.dataset.experienceId, true); toast("Added to Favorites"); closeControlCenter(); break;
     case "toggle-microphone": {
       try {
         await paraApi.setAudio("microphone", { muted: target.dataset.microphoneMuted !== "true" });
@@ -651,11 +584,6 @@ async function handleAction(action, target) {
       await toggleMicrophone();
       await populateControlCenter({ overlay, controller: controllerStatus, focus });
       showControlCenterContext("microphone", true, focus);
-      break;
-    case "toggle-menu-music":
-      toast("Menu music", toggleMenuMusic() ? "On" : "Off");
-      schedulePreferenceSave();
-      rerender();
       break;
     case "toggle-interface-sounds":
       toast("Interface sounds", toggleInterfaceSounds() ? "On" : "Off");
@@ -766,27 +694,6 @@ async function handleAction(action, target) {
         rerender();
       }
       break;
-    case "open-store-screenshot": {
-      const shots = JSON.parse(sessionStorage.getItem("para.store.screenshots") || "[]");
-      if (!shots.length) break;
-      const index = Math.max(0, Math.min(Number(target.dataset.shotIndex || 0), shots.length - 1));
-      const src = `/api/v1/store/asset?path=${encodeURIComponent(shots[index])}`;
-      overlayReturnFocus = focus.current;
-      overlay.innerHTML = `<div class="media-viewer-scrim" data-action="close-control-center"></div><section class="store-media-viewer" role="dialog" aria-modal="true" aria-label="Screenshot viewer"><header><strong>Screenshot ${index + 1} of ${shots.length}</strong><button type="button" data-action="close-control-center" aria-label="Close screenshot viewer">×</button></header><div class="store-media-viewer__stage"><img src="${src}" alt="Game screenshot"></div><footer>${shots.length > 1 ? `<button type="button" data-action="step-store-screenshot" data-shot-index="${(index - 1 + shots.length) % shots.length}">← Previous</button><button type="button" data-action="step-store-screenshot" data-shot-index="${(index + 1) % shots.length}" data-autofocus="true">Next →</button>` : `<button type="button" data-action="close-control-center" data-autofocus="true">Close</button>`}</footer></section>`;
-      overlay.hidden = false;
-      overlay.classList.remove("is-closing");
-      requestAnimationFrame(() => focus.focusFirst());
-      break;
-    }
-    case "step-store-screenshot": {
-      const shots = JSON.parse(sessionStorage.getItem("para.store.screenshots") || "[]");
-      if (!shots.length) break;
-      const index = Math.max(0, Math.min(Number(target.dataset.shotIndex || 0), shots.length - 1));
-      const src = `/api/v1/store/asset?path=${encodeURIComponent(shots[index])}`;
-      overlay.innerHTML = `<div class="media-viewer-scrim" data-action="close-control-center"></div><section class="store-media-viewer" role="dialog" aria-modal="true" aria-label="Screenshot viewer"><header><strong>Screenshot ${index + 1} of ${shots.length}</strong><button type="button" data-action="close-control-center" aria-label="Close screenshot viewer">×</button></header><div class="store-media-viewer__stage"><img src="${src}" alt="Game screenshot"></div><footer><button type="button" data-action="step-store-screenshot" data-shot-index="${(index - 1 + shots.length) % shots.length}">← Previous</button><button type="button" data-action="step-store-screenshot" data-shot-index="${(index + 1) % shots.length}" data-autofocus="true">Next →</button></footer></section>`;
-      requestAnimationFrame(() => focus.focusFirst());
-      break;
-    }
     case "store-more-info":
       toast("More options", "Wishlist and sharing can plug in here next.");
       break;
@@ -825,12 +732,6 @@ function togglePreferenceItem(section, id) {
 }
 
 document.addEventListener("click", (event) => {
-  if (!event.target.closest("[data-account-quick]")) {
-    document.querySelectorAll("[data-account-popover]:not([hidden])").forEach((node) => {
-      node.hidden = true;
-      node.closest("[data-account-quick]")?.querySelector("[data-action='toggle-account-menu']")?.setAttribute("aria-expanded", "false");
-    });
-  }
   const target = event.target.closest("[data-route], [data-action]");
   if (!target || target.disabled || target.getAttribute("aria-disabled") === "true") return;
   if (target.dataset.route) navigate(target.dataset.route, {}, target);
@@ -853,10 +754,6 @@ document.addEventListener("change", async (event) => {
       const output = overlay.querySelector("[data-audio-output]");
       if (output && audio.output) output.textContent = `${audio.output.volume}%`;
     } catch { /* the current level remains visible */ }
-  }
-  if (event.target.matches("[data-menu-music-volume]")) {
-    setMenuMusicVolume(event.target.value);
-    schedulePreferenceSave();
   }
   if (event.target.matches("[data-interface-volume]")) {
     setInterfaceSoundVolume(event.target.value);
@@ -882,14 +779,6 @@ document.addEventListener("input", (event) => {
     const output = overlay.querySelector("[data-audio-output]");
     if (output) output.textContent = `${event.target.value}%`;
   }
-  if (event.target.matches("[data-menu-music-volume]")) {
-    setMenuMusicVolume(event.target.value);
-    schedulePreferenceSave();
-  }
-  if (event.target.matches("[data-menu-music-volume]")) {
-    setMenuMusicVolume(event.target.value);
-    document.querySelectorAll("[data-menu-music-volume-output]").forEach((output) => { output.textContent = `${event.target.value}%`; });
-  }
   if (event.target.matches("[data-interface-volume]")) {
     setInterfaceSoundVolume(event.target.value);
     document.querySelectorAll("[data-interface-volume-output], [data-audio-output]").forEach((output) => { output.textContent = `${event.target.value}%`; });
@@ -909,8 +798,8 @@ function resetIdleSleep() {
   idleSleepTimer = setTimeout(() => beginSleep({ returnFocus: focus.current }), minutes * 60_000);
 }
 
-document.addEventListener("pointerdown", () => { unlockMenuMusic(); resetIdleSleep(); }, { passive: true });
-document.addEventListener("keydown", () => { unlockMenuMusic(); resetIdleSleep(); }, { passive: true });
+document.addEventListener("pointerdown", resetIdleSleep, { passive: true });
+document.addEventListener("keydown", resetIdleSleep, { passive: true });
 
 function updateOnlineState() {
   document.documentElement.dataset.online = String(navigator.onLine);
@@ -953,7 +842,6 @@ if (new URLSearchParams(location.search).get("reset") === "1") {
 
 async function start() {
   applyPreferences();
-  syncMenuMusic();
   const state = getState();
   if (state.loggedIn && state.activeProfile) await hydrateProfile(state.activeProfile);
   gamepad.start();

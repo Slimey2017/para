@@ -1327,3 +1327,50 @@ html.is-idle #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:.
 @keyframes account-pop-in{from{opacity:0;transform:translateY(-7px) scale(.97)}to{opacity:1;transform:none}}
 @media (max-width:900px){.clock,.home-status__clock{min-width:82px;width:82px}.topbar__right,.home-status{gap:12px}.account-popover{width:270px}}
 
+/* 2026-08-24 definitive topbar slot fix: never allow the section label to overlap clock/profile. */
+.topbar{
+  position:relative!important;
+  display:grid!important;
+  grid-template-columns:minmax(180px,1fr) minmax(0,360px) minmax(250px,1fr)!important;
+  align-items:center!important;
+  column-gap:24px!important;
+}
+.topbar__center{
+  position:static!important;
+  left:auto!important;
+  transform:none!important;
+  justify-self:center!important;
+  min-width:0!important;
+  max-width:100%!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+  white-space:nowrap!important;
+  pointer-events:none!important;
+}
+.topbar__right{
+  grid-column:3!important;
+  justify-self:end!important;
+  min-width:max-content!important;
+  display:flex!important;
+  align-items:center!important;
+  flex-wrap:nowrap!important;
+  gap:18px!important;
+  white-space:nowrap!important;
+}
+.topbar__right>*{flex:0 0 auto!important}
+.clock{
+  flex:0 0 92px!important;
+  width:92px!important;
+  min-width:92px!important;
+  max-width:92px!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:clip!important;
+  font-variant-numeric:tabular-nums!important;
+}
+@media(max-width:900px){
+  .topbar{grid-template-columns:minmax(150px,1fr) minmax(220px,max-content)!important}
+  .topbar__center{display:none!important}
+  .topbar__right{grid-column:2!important}
+}
+

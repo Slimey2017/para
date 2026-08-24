@@ -57,7 +57,7 @@ export function defaultProfilePreferences() {
     background: { selection: DEFAULT_BACKGROUND_ID, fit: "fill", dim: 42, blur: 18, revision: 0 },
     home: { order: [...DEFAULT_HOME_WIDGET_ORDER], hidden: [] },
     controlCenter: { order: [...DEFAULT_CONTROL_CENTER_ORDER], hidden: [] },
-    sound: { interfaceSounds: true, volume: 62, menuMusic: true, menuMusicVolume: 35 },
+    sound: { interfaceSounds: true, volume: 62 },
   };
 }
 
