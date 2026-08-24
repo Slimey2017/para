@@ -93,16 +93,42 @@ function continueMarkup(experiences) {
   return `<div class="home-continue-layout home-continue-layout--single"><div class="home-continue-carousel" aria-label="Continue">${queue.map((experience, index) => continueItem(experience, index, queue)).join("")}</div></div>`;
 }
 
+
+function storeAssetUrl(path) {
+  return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
+}
+
+function exploreHubTile({ title, subtitle, route, mark, focusId }) {
+  return `<button class="home-explore-hub__tile" type="button" data-route="${escapeHtml(route)}" data-focus-id="${escapeHtml(focusId)}"><span class="home-explore-hub__mark" aria-hidden="true">${escapeHtml(mark)}</span><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></span><i aria-hidden="true">›</i></button>`;
+}
+
+function storeShelfCard(item, focusId) {
+  const meta = item.store_metadata || {};
+  const assets = item.asset_references || {};
+  const art = storeAssetUrl(assets.cover || assets.icon || assets.hero);
+  const genre = meta.genre || item.project_type || "GAME";
+  return `<button class="home-store-shelf-card" type="button" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" data-focus-id="${escapeHtml(focusId)}">${art ? `<img src="${art}" alt="" />` : `<span class="home-store-shelf-card__fallback">${escapeHtml((item.title || "P").slice(0,1).toUpperCase())}</span>`}<span class="home-store-shelf-card__shade"></span><span class="home-store-shelf-card__copy"><small>${escapeHtml(genre)}</small><strong>${escapeHtml(item.title || "Untitled")}</strong></span></button>`;
+}
+
+function storeShelf(title, items, shelfId) {
+  if (!items.length) return `<section class="home-store-shelf home-store-shelf--empty"><div class="home-store-shelf__head"><h3>${escapeHtml(title)}</h3></div><p>No titles here yet.</p></section>`;
+  return `<section class="home-store-shelf"><div class="home-store-shelf__head"><h3>${escapeHtml(title)}</h3><button type="button" data-route="parastore">See all</button></div><div class="home-store-shelf__track">${items.slice(0,6).map((item,index)=>storeShelfCard(item, `explore:${shelfId}:${index}`)).join("")}</div></section>`;
+}
+
+function communityTile(title, subtitle, route, mark, focusId) {
+  return `<button class="home-community-tile" type="button" data-route="${escapeHtml(route)}" data-focus-id="${escapeHtml(focusId)}"><span aria-hidden="true">${escapeHtml(mark)}</span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></button>`;
+}
+
 function contextMarkup(section, model) {
   if (section === "continue") return continueMarkup(model.recent);
-  if (section === "community") return `<div class="home-flow"><section class="home-flow-section"><h3>Connect</h3><div class="home-flow-list">${flowAction("Messages", "Chat with friends on PARA", "messages", "✉", "home-route:messages", "home-nav:community", "home-route:community")}${flowAction("PARA Updates", "News, patches, and Lab notes", "community", "◎", "home-route:community", "home-route:messages")}</div></section></div>`;
+  if (section === "community") return `<div class="home-community"><div class="home-community__head"><span>Community</span><h2>Stay connected.</h2></div><div class="home-community-grid">${communityTile("Messages", "Chat with friends", "messages", "✉", "home-route:messages")}${communityTile("Notifications", "Invites and activity", "notifications", "●", "home-route:notifications")}${communityTile("Profile", "Presence and account", "account", "◉", "home-route:account")}${communityTile("PARA Updates", "News, patches, and Lab notes", "community", "◎", "home-route:community")}</div></div>`;
   if (section === "explore") {
-    const actions = [
-      ["Games", "Installed for this profile", "games", "◉"],
-      ["Apps", model.applications.length ? `${model.applications.length} available` : "Open the app library", "apps", "▦"],
-      ["ParaStore", "Discover games and apps", "parastore", "▱"],
-    ];
-    return `<div class="home-flow">${actions.map(([title, subtitle, route, mark], index) => `<section class="home-flow-section"><h3>${title}</h3><div class="home-flow-list">${flowAction(title, subtitle, route, mark, `home-route:${route}`, index === 0 ? "home-nav:explore" : `home-route:${actions[index - 1][2]}`, index < actions.length - 1 ? `home-route:${actions[index + 1][2]}` : "")}</div></section>`).join("")}</div>`;
+    const catalog = model.catalog || [];
+    const sponsored = catalog.filter((item) => item.store_metadata?.sponsored === true);
+    const featured = catalog.filter((item) => item.store_metadata?.featured === true);
+    const featuredItems = featured.length ? featured : catalog.slice(0, 6);
+    const recommended = catalog.filter((item) => !sponsored.includes(item)).slice(0, 6);
+    return `<div class="home-explore-dashboard"><div class="home-explore-hub">${exploreHubTile({ title: "Games", subtitle: "My games & apps", route: "games", mark: "◉", focusId: "home-route:games" })}${exploreHubTile({ title: "Apps", subtitle: model.applications.length ? `${model.applications.length} available` : "Your app library", route: "apps", mark: "▦", focusId: "home-route:apps" })}${exploreHubTile({ title: "ParaStore", subtitle: "Discover and install", route: "parastore", mark: "▱", focusId: "home-route:parastore" })}</div><div class="home-explore-shelves">${storeShelf("Sponsored", sponsored, "sponsored")}${storeShelf("Featured", featuredItems, "featured")}${storeShelf("Recommended for you", recommended, "recommended")}</div></div>`;
   }
   if (section === "create") {
     const creatorApps = model.applications.filter((application) => application.roles?.includes("creator"));
@@ -131,7 +157,7 @@ function contextMarkup(section, model) {
 function primaryFocusId(section, model) {
   if (section === "continue") return model.recent.length ? `continue:item:${model.recent[0].id}` : "continue:explore";
   if (section === "explore") return "home-route:games";
-  if (section === "community") return "home-route:community";
+  if (section === "community") return "home-route:messages";
   if (section === "create") return model.runtime.creator.note || model.runtime.creator.drawing ? "create:recent-project" : "create:playground";
   return "";
 }
@@ -151,7 +177,7 @@ export function activateHome({ focus }) {
   const context = root?.querySelector(".home-context");
   if (!root || !context) return () => {};
 
-  const model = { applications: [], recent: recentExperiences(), runtime: profileRuntime() };
+  const model = { applications: [], recent: recentExperiences(), runtime: profileRuntime(), catalog: [] };
   let selected = sections.some(({ id }) => id === root.dataset.homeSection) ? root.dataset.homeSection : "continue";
   let transitionTimer = null;
   let enterFrame = null;
@@ -305,6 +331,12 @@ export function activateHome({ focus }) {
     model.runtime = profileRuntime();
     if (["continue", "explore", "create"].includes(selected)) renderContext(selected, false);
   }).catch(() => {});
+
+  paraApi.storeCatalog().then((payload) => {
+    if (!alive) return;
+    model.catalog = payload.items || [];
+    if (selected === "explore") renderContext("explore", false);
+  }).catch(() => { model.catalog = []; });
 
   return () => {
     alive = false;
