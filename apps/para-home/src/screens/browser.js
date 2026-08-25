@@ -21,25 +21,34 @@ function browserStartMarkup() {
 export function browserScreen() {
   return page({
     title: "Browser",
-    description: "Browse with ParaPoint and type with ParaBoard.",
-    eyebrow: "PARA Browser",
-    className: "browser-page",
-    body: `<section class="para-browser" data-para-browser>
-      <div class="para-browser-toolbar">
-        <div class="browser-nav-actions">
-          <button type="button" data-action="browser-back" aria-label="Back">←</button>
-          <button type="button" data-action="browser-forward" aria-label="Forward">→</button>
-          <button type="button" data-action="browser-reload" aria-label="Reload">↻</button>
+    description: "",
+    eyebrow: "",
+    className: "browser-page browser-app-page",
+    body: `<section class="para-browser para-browser--app" data-para-browser>
+      <header class="browser-app-chrome">
+        <div class="browser-app-tabstrip" aria-label="Browser tabs">
+          <div class="browser-app-brand"><span class="browser-app-mark">P</span><strong>Para Browser</strong></div>
+          <button type="button" class="browser-tab is-current" aria-current="page"><span class="browser-tab-dot"></span><b>New tab</b><span class="browser-tab-close">×</span></button>
+          <button type="button" class="browser-new-tab" aria-label="New tab" disabled>+</button>
+          <div class="browser-window-actions" aria-hidden="true"><span>—</span><span>□</span><span>×</span></div>
         </div>
-        <label class="browser-address"><span>⌕</span><input type="text" data-browser-address aria-label="Website or search" placeholder="Search or enter a website" autocomplete="off" spellcheck="false"></label>
-        <button type="button" class="browser-go" data-action="browser-go">Go</button>
-        <button type="button" class="browser-point-toggle" data-action="toggle-parapoint"><span>↗</span><b>ParaPoint</b><small data-parapoint-state>Off</small></button>
-      </div>
+        <div class="para-browser-toolbar">
+          <div class="browser-nav-actions">
+            <button type="button" data-action="browser-back" aria-label="Back">←</button>
+            <button type="button" data-action="browser-forward" aria-label="Forward">→</button>
+            <button type="button" data-action="browser-reload" aria-label="Reload">↻</button>
+          </div>
+          <label class="browser-address"><span>⌕</span><input type="text" data-browser-address aria-label="Website or search" placeholder="Search or enter a website" autocomplete="off" spellcheck="false"></label>
+          <button type="button" class="browser-go" data-action="browser-go">Go</button>
+          <button type="button" class="browser-point-toggle" data-action="toggle-parapoint"><span>↗</span><b>ParaPoint</b><small data-parapoint-state>Off</small></button>
+          <button type="button" class="browser-menu-button" aria-label="Browser menu" disabled>•••</button>
+        </div>
+      </header>
       <div class="para-browser-stage">
         <iframe data-browser-frame title="PARA Browser page" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads" referrerpolicy="no-referrer"></iframe>
-        <div class="browser-site-note" data-browser-note hidden>Some websites block embedded browsing in this web edition. The native PARA Browser will not have this iframe restriction.</div>
+        <div class="browser-site-note" data-browser-note hidden>That site blocks embedded browsing in the PARA web prototype. The native PARA Browser will open it normally.</div>
       </div>
-      <footer class="browser-controller-help"><span><b>Right stick</b> ParaPoint</span><span><b>A</b> Click</span><span><b>X</b> Right click</span><span><b>Y</b> Scroll</span><span><b>L3</b> Pointer on/off</span><span><b>PARA</b> Control Center</span></footer>
+      <footer class="browser-controller-help"><span><b>A</b> Select</span><span><b>B</b> Back</span><span><b>Y</b> ParaBoard</span><span><b>Right stick</b> ParaPoint</span><span><b>L3</b> Pointer</span><span><b>PARA</b> Control Center</span></footer>
     </section>`,
   });
 }

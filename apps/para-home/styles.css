@@ -1513,3 +1513,129 @@ html:not([data-parapoint="active"]) .parapoint-cursor { display:none; }
   .paraboard { width:96vw; padding:18px 12px; }.paraboard-key { min-width:0; flex:1; height:50px; }.paraboard-header small { display:none; }
   .para-browser { width:calc(100vw - 28px); }.para-browser-toolbar { grid-template-columns:auto 1fr auto; }.browser-point-toggle { grid-column:1/-1; width:100%; }.para-browser-stage { height:58vh; }
 }
+
+/* Para Browser app-shell redesign */
+.browser-app-page {
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  padding-bottom: 18px;
+  gap: 12px;
+}
+.browser-app-page .screen-head { display:none!important; }
+.browser-app-page .content-scroll {
+  width: min(1540px, 100%)!important;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden!important;
+  margin: 0 auto!important;
+  padding: 0!important;
+  display:flex;
+}
+.browser-app-page>.bottom-nav { display:none!important; }
+.browser-app-page .topbar { flex: 0 0 auto; }
+.para-browser--app {
+  width:100%;
+  height:100%;
+  min-height:0;
+  margin:0;
+  border-radius:22px;
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  overflow:hidden;
+  border:1px solid rgba(172,132,255,.24);
+  background:#08070d;
+  box-shadow:0 28px 90px rgba(0,0,0,.44), inset 0 1px rgba(255,255,255,.04);
+}
+.browser-app-chrome {
+  background:linear-gradient(180deg,rgba(18,14,28,.99),rgba(10,8,16,.985));
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.browser-app-tabstrip {
+  height:46px;
+  display:flex;
+  align-items:flex-end;
+  gap:6px;
+  padding:7px 10px 0;
+  background:rgba(7,6,12,.92);
+}
+.browser-app-brand {
+  height:36px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:0 13px 0 6px;
+  color:#cfc8d8;
+  font-size:12px;
+  letter-spacing:.02em;
+}
+.browser-app-mark {
+  width:25px;height:25px;border-radius:8px;display:grid;place-items:center;
+  background:linear-gradient(145deg,#7b35ff,#4c36d7);color:white;font-weight:900;
+  box-shadow:0 0 18px rgba(109,58,255,.25);
+}
+.browser-tab {
+  height:39px;
+  min-width:220px;
+  max-width:320px;
+  padding:0 13px;
+  border:1px solid rgba(255,255,255,.08);
+  border-bottom:0;
+  border-radius:12px 12px 0 0;
+  background:#15111e;
+  color:#e9e4ef;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  text-align:left;
+}
+.browser-tab.is-current { background:#20172e; border-color:rgba(170,118,255,.28); }
+.browser-tab-dot { width:8px;height:8px;border-radius:50%;background:#8d58ff;box-shadow:0 0 10px rgba(141,88,255,.8); }
+.browser-tab b { flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.browser-tab-close { opacity:.5;font-size:16px; }
+.browser-new-tab {
+  width:34px;height:34px;margin-bottom:2px;border:0;border-radius:10px;background:transparent;color:#aaa2b5;font-size:20px;
+}
+.browser-new-tab:disabled,.browser-menu-button:disabled { opacity:.5; }
+.browser-window-actions { margin-left:auto;height:36px;display:flex;align-items:center;gap:20px;padding:0 10px;color:#6e6877;font-size:12px; }
+.para-browser--app .para-browser-toolbar {
+  min-height:62px;
+  padding:8px 11px 10px;
+  grid-template-columns:auto minmax(260px,1fr) auto auto auto;
+  gap:8px;
+  background:transparent;
+  border:0;
+}
+.para-browser--app .browser-nav-actions button,
+.para-browser--app .browser-go,
+.para-browser--app .browser-point-toggle,
+.para-browser--app .browser-menu-button { height:43px; border-radius:12px; }
+.para-browser--app .browser-nav-actions button { width:44px; }
+.para-browser--app .browser-address { height:44px;border-radius:13px;background:#050409; }
+.para-browser--app .browser-address input { font-size:14px; }
+.para-browser--app .browser-point-toggle { min-width:118px; }
+.browser-menu-button { width:48px;border:1px solid rgba(255,255,255,.1);background:#15121e;color:#eee;font-weight:900;letter-spacing:.12em; }
+.para-browser--app .para-browser-stage {
+  height:auto!important;
+  min-height:0;
+  background:#f4f4f5;
+  border-top:1px solid rgba(255,255,255,.04);
+}
+.para-browser--app .para-browser-stage iframe { display:block;width:100%;height:100%;min-height:0; }
+.para-browser--app .browser-controller-help {
+  min-height:42px;
+  padding:7px 16px;
+  justify-content:flex-end;
+  gap:18px;
+  border-top:1px solid rgba(255,255,255,.06);
+  background:rgba(8,7,13,.98);
+}
+@media (max-width:900px) {
+  .browser-app-page { padding-inline:14px!important; }
+  .browser-app-brand strong,.browser-window-actions { display:none; }
+  .browser-tab { min-width:150px;max-width:210px; }
+  .para-browser--app .para-browser-toolbar { grid-template-columns:auto 1fr auto; }
+  .para-browser--app .browser-point-toggle { grid-column:auto;width:auto; }
+  .browser-menu-button { display:none; }
+  .para-browser--app .browser-controller-help { justify-content:center; gap:10px 14px; }
+}
