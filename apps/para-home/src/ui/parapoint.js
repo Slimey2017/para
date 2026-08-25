@@ -1,6 +1,6 @@
-const DEADZONE = 0.18;
-const MAX_SPEED = 22;
-const BASE_SPEED = 5;
+const DEADZONE = 0.22;
+const MAX_SPEED = 13;
+const BASE_SPEED = 2.2;
 
 let active = false;
 let cursor = null;
@@ -55,7 +55,11 @@ function clickAtPoint() {
     }
   }
   const clickable = target.closest?.("button,a,input,textarea,select,[role='button'],[data-action],[data-route]") || target;
-  if (clickable.matches?.("input,textarea")) clickable.focus();
+  if (clickable.matches?.("input,textarea")) {
+    clickable.focus({ preventScroll: true });
+    document.dispatchEvent(new CustomEvent("para-request-paraboard", { detail: { target: clickable } }));
+    return;
+  }
   clickable.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: x, clientY: y }));
   clickable.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: x, clientY: y }));
   clickable.click?.();
@@ -85,7 +89,8 @@ function onController(event) {
   if (Math.abs(dx) < DEADZONE) dx = 0;
   if (Math.abs(dy) < DEADZONE) dy = 0;
   if (dx || dy) {
-    const speed = BASE_SPEED + Math.max(Math.abs(dx), Math.abs(dy)) * MAX_SPEED;
+    const magnitude = Math.max(Math.abs(dx), Math.abs(dy));
+    const speed = BASE_SPEED + (magnitude * magnitude) * MAX_SPEED;
     x = clamp(x + dx * speed, 8, window.innerWidth - 12);
     y = clamp(y + dy * speed, 8, window.innerHeight - 12);
     renderCursor();

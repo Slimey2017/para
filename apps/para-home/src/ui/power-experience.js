@@ -1,4 +1,5 @@
 import { completePowerAction, preparePowerAction, requestPowerAction } from "../services/power-adapter.js";
+import { resumeMenuMusic, suspendMenuMusic } from "../services/menu-music.js";
 
 export const POWER_SEQUENCE_DURATION_MS = 8000;
 export const POWER_TIMELINE_MS = Object.freeze({
@@ -57,6 +58,7 @@ function finishWake() {
 export function wakeFromSleep() {
   if (!activeSequence || activeSequence.kind !== "sleep" || activeSequence.phase !== "asleep") return false;
   activeSequence.phase = "waking";
+  resumeMenuMusic({ duration: 520 });
   activeSequence.node.classList.add("is-waking");
   const timer = setTimeout(finishWake, 520);
   activeSequence.timers.push(timer);
@@ -67,6 +69,7 @@ export function beginSleep({ returnFocus = null } = {}) {
   if (activeSequence) return;
   const startedAt = performance.now();
   preparePowerAction();
+  suspendMenuMusic({ duration: 850 });
   document.dispatchEvent(new CustomEvent("para-systemcue", { detail: { name: "sleep" } }));
   const node = startOverlay("sleep", "Entering Sleep", returnFocus);
   scheduleAt(startedAt, SLEEP_LOGO_MS, () => node.classList.add("has-logo", "is-pulsing"));
@@ -85,6 +88,7 @@ export function beginPowerSequence(action, { returnFocus = null } = {}) {
   const message = action === "poweroff" ? "Turning off PARA" : "Restarting PARA";
   const startedAt = performance.now();
   preparePowerAction();
+  suspendMenuMusic({ duration: action === "poweroff" ? 950 : 650 });
   document.dispatchEvent(new CustomEvent("para-systemcue", { detail: { name: action === "poweroff" ? "shutdown" : "startup" } }));
   const node = startOverlay(action, message, returnFocus);
 

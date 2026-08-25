@@ -892,11 +892,10 @@ function togglePreferenceItem(section, id) {
   rerender();
 }
 
-document.addEventListener("focusin", (event) => {
-  const target = event.target;
-  if (activeInputDevice !== "controller" || isParaBoardOpen()) return;
+document.addEventListener("para-request-paraboard", (event) => {
+  const target = event.detail?.target;
   if (!target?.matches?.("input:not([type='range']):not([type='checkbox']):not([type='radio']), textarea")) return;
-  // ParaPoint clicks and controller focus both get the same system keyboard.
+  if (isParaBoardOpen()) return;
   overlayReturnFocus = target;
   openParaBoard(target, { overlay, focus, controllerLabel: controllerStatus.typeLabel || "Controller" });
 });

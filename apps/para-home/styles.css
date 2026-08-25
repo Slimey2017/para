@@ -1641,3 +1641,17 @@ html:not([data-parapoint="active"]) .parapoint-cursor { display:none; }
 }
 /* Console foundations: Immersive Home, Saved Data, recovery, verified hardware */
 html.para-immersive #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:0!important;pointer-events:none!important;transition:opacity .45s ease!important}html.para-immersive .home-backdrop__veil{opacity:.08!important}.storage-shortcuts{display:flex;justify-content:flex-end;margin-bottom:14px}.pulsewave-firmware{margin-top:20px}.saved-data-list{display:grid;gap:10px;margin-top:18px}.saved-data-list .notification-row b{margin-left:auto;color:#bda6ff}.recovery-status{display:flex;align-items:center;gap:18px;margin-bottom:18px}
+
+/* Aug 25 input/browser stability pass */
+html[data-paraboard="open"] #para-app,html[data-paraboard="open"] .topbar{filter:brightness(.56);}
+.paraboard-scrim{backdrop-filter:blur(8px);}
+.paraboard{transition:none!important;animation:none!important;contain:layout paint;}
+.paraboard-key{will-change:auto!important;}
+.paraboard-key.is-focused,.paraboard-key:focus-visible{transform:translateY(-2px) scale(1.018);}
+.browser-app-page{position:fixed!important;inset:0!important;z-index:20!important;width:100vw!important;height:100dvh!important;min-height:0!important;padding:0!important;margin:0!important;gap:0!important;background:#07060b!important;}
+.browser-app-page>.os-backdrop,.browser-app-page>.living-background,.browser-app-page>.topbar,.browser-app-page>.screen-head,.browser-app-page>.bottom-nav{display:none!important;}
+.browser-app-page .content-scroll{width:100%!important;height:100%!important;max-width:none!important;margin:0!important;padding:0!important;overflow:hidden!important;}
+.para-browser--app{width:100vw!important;height:100dvh!important;max-width:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;}
+.browser-app-tabstrip{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));}
+.para-browser--app .para-browser-stage{min-height:0!important;}
+.parapoint-cursor{filter:drop-shadow(0 2px 5px rgba(0,0,0,.7));}

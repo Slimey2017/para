@@ -101,7 +101,8 @@ export function paraBoardInsert(value, overlay, focus) {
   try { activeTarget.setSelectionRange(position, position); } catch { /* not every input type supports selection */ }
   emitInput();
   if (shifted && !symbols && text.trim()) shifted = false;
-  refresh(overlay, focus);
+  const preview = overlay?.querySelector("[data-paraboard-preview]");
+  if (preview) preview.innerHTML = `${escapeHtml(previewValue())}<span class="paraboard-caret" aria-hidden="true"></span>`;
 }
 
 export function paraBoardBackspace(overlay, focus) {
@@ -113,7 +114,8 @@ export function paraBoardBackspace(overlay, focus) {
   const position = start === end ? Math.max(0, start - 1) : start;
   try { activeTarget.setSelectionRange(position, position); } catch { }
   emitInput();
-  refresh(overlay, focus, "paraboard-backspace");
+  const preview = overlay?.querySelector("[data-paraboard-preview]");
+  if (preview) preview.innerHTML = `${escapeHtml(previewValue())}<span class="paraboard-caret" aria-hidden="true"></span>`;
 }
 
 export function paraBoardToggleShift(overlay, focus) {

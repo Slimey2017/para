@@ -57,6 +57,17 @@ export function setMenuMusicVolume(value) {
   return volume;
 }
 
+export function suspendMenuMusic({ duration = 700 } = {}) {
+  clearTimeout(duckTimer);
+  fadeTo(0, duration, true);
+}
+
+export function resumeMenuMusic({ duration = 650 } = {}) {
+  if (!unlocked || prefs().menuMusic === false) return;
+  const audio = ensurePlayer();
+  audio.play().then(() => fadeTo(targetVolume(), duration)).catch(() => {});
+}
+
 let duckTimer = null;
 export function duckMenuMusic({ amount = 0.32, duration = 240 } = {}) {
   if (!unlocked || prefs().menuMusic === false) return;
