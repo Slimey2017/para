@@ -23,9 +23,9 @@ import {
   notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen,
 } from "./screens/system.js";
 import {
-  gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, gameScreen, activateDemoGame,
-  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct,
-  storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem,
+  gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
+  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct, activateStoreCart,
+  storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem, addStoreCartItem, removeStoreCartItem,
   playCreatorTone, clearCreatorDrawing,
 } from "./screens/experiences.js";
 import {
@@ -80,6 +80,7 @@ const renderers = {
   demos: demosScreen,
   parastore: paraStoreScreen,
   "store-product": storeProductScreen,
+  "store-cart": storeCartScreen,
   "store-game": storeGameScreen,
   creator: creatorScreen,
   community: communityScreen,
@@ -220,6 +221,8 @@ function render(route) {
     cleanupScreen = activateParaStore();
   } else if (route === "store-product") {
     cleanupScreen = activateStoreProduct();
+  } else if (route === "store-cart") {
+    cleanupScreen = activateStoreCart();
   } else if (route === "store-game") {
     cleanupScreen = activateStoreGame();
   } else if (route === "files" || route === "downloads") {
@@ -767,6 +770,29 @@ async function handleAction(action, target) {
         sessionStorage.setItem("para.store.product", target.dataset.storeId);
         navigate("store-product", {}, target);
       }
+      break;
+    case "add-store-cart": {
+      const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
+      if (addStoreCartItem(id)) toast("Added to cart", "Ready when you are");
+      else toast("Already in cart");
+      rerender();
+      break;
+    }
+    case "buy-store-game-now": {
+      const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
+      addStoreCartItem(id);
+      navigate("store-cart", {}, target);
+      break;
+    }
+    case "remove-store-cart":
+      if (target.dataset.storeId) {
+        removeStoreCartItem(target.dataset.storeId);
+        toast("Removed from cart");
+        rerender();
+      }
+      break;
+    case "checkout-store-cart":
+      toast("Secure checkout is next", "Your cart is ready. PARA Commerce still needs the buyer payment endpoint before real money can move.");
       break;
     case "install-store-game": {
       const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";

@@ -11,6 +11,38 @@ function demoArt(demo) {
 }
 
 const STORE_INSTALL_KEY = "para.store.installed.v1";
+const STORE_CART_KEY = "para.store.cart.v1";
+
+function storeCartIds() {
+  const profile = getState().activeProfile || "P1";
+  try {
+    const all = JSON.parse(localStorage.getItem(STORE_CART_KEY) || "{}");
+    return Array.isArray(all[profile]) ? all[profile] : [];
+  } catch { return []; }
+}
+
+function saveStoreCartIds(ids) {
+  const profile = getState().activeProfile || "P1";
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(STORE_CART_KEY) || "{}"); } catch { all = {}; }
+  all[profile] = [...new Set(ids.filter(Boolean))];
+  localStorage.setItem(STORE_CART_KEY, JSON.stringify(all));
+  window.dispatchEvent(new CustomEvent("para-store-cart-change"));
+}
+
+export function addStoreCartItem(id) {
+  if (!id) return false;
+  const current = storeCartIds();
+  if (current.includes(id)) return false;
+  saveStoreCartIds([...current, id]);
+  return true;
+}
+
+export function removeStoreCartItem(id) {
+  saveStoreCartIds(storeCartIds().filter((value) => value !== id));
+}
+
+export function storeCartCount() { return storeCartIds().length; }
 
 function installedStoreItems() {
   const profile = getState().activeProfile || "P1";
@@ -104,6 +136,7 @@ export function paraStoreScreen() {
       <section class="store-discovery-bar" aria-label="ParaStore tools">
         <label class="store-search"><span>⌕</span><input type="search" placeholder="Search games, apps, developers, genres…" data-store-search autocomplete="off" /></label>
         <button type="button" data-store-tool="wishlist">♡ <span>Wishlist</span></button>
+        <button type="button" class="store-cart-button" data-route="store-cart">🛒 <span>Cart</span><b data-store-cart-count>${storeCartCount()}</b></button>
         <button type="button" data-route="downloads">↓ <span>Downloads</span></button>
       </section>
       <section class="store-feature store-feature--live" data-store-feature>
@@ -124,7 +157,7 @@ function liveStoreCard(item) {
   const description = meta.short_description || "Published on ParaStore";
   const type = item.project_type || "GAME";
   const genre = meta.genre || type;
-  const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
+  const price = priceLabel(commerceFor(item, meta));
   const art = assetUrl(assets.hero || assets.cover || assets.icon);
   const fallback = escapeHtml((item.title || "P").slice(0,1).toUpperCase());
   return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork">` : `<span>${fallback}</span>`}<div class="store-live-card__badges"><small>${escapeHtml(genre)}</small><small>${escapeHtml(item.runtime || "PARA")}</small></div></div><div class="store-live-card__copy"><span>${escapeHtml(type)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>A View game</small></div></div></article>`;
@@ -256,7 +289,7 @@ export function activateStoreProduct() {
             <p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p>
             <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small>${commerce.hasIap || interactive.some(x => x.startsWith("In-Game Purchases")) ? `<small>In-Game Purchases</small>` : ""}</div>
             <div class="store-product-actions">
-              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : commerce.model === "FREE" ? `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Install</button>` : `<button class="action-button" type="button" disabled title="PARA Commerce checkout is not connected yet">Buy ${escapeHtml(price)}</button>`}
+              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : commerce.model === "FREE" ? `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Get</button>` : `<button class="action-button" data-action="buy-store-game-now" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Buy ${escapeHtml(price)}</button><button class="action-button action-button--ghost" data-action="add-store-cart" data-store-id="${escapeHtml(item.id)}">Add to Cart</button>`}
               <button class="action-button action-button--ghost" data-action="store-more-info">•••</button>
             </div>
           </div>
@@ -272,6 +305,42 @@ export function activateStoreProduct() {
   }).catch((error) => {
     if (!alive) return;
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>Product unavailable</h2><p>${escapeHtml(error.message || "Could not load product")}</p></div>`;
+  });
+  return () => { alive = false; };
+}
+
+export function storeCartScreen() {
+  return page({
+    title: "Cart",
+    description: "Review your ParaStore purchases.",
+    eyebrow: "ParaStore",
+    className: "store-cart-page",
+    body: `<section class="store-cart-shell" data-store-cart><div class="library-empty"><span>◌</span><h2>Loading cart…</h2></div></section>`,
+  });
+}
+
+export function activateStoreCart() {
+  const host = document.querySelector("[data-store-cart]");
+  if (!host) return () => {};
+  let alive = true;
+  const ids = storeCartIds();
+  if (!ids.length) {
+    host.innerHTML = `<div class="store-cart-empty"><span>🛒</span><h2>Your cart is empty</h2><p>Paid games and apps you add will appear here.</p><button class="action-button" data-route="parastore" data-autofocus="true">Browse ParaStore</button></div>`;
+    return () => { alive = false; };
+  }
+  Promise.all(ids.map((id) => paraApi.storeProduct(id).catch(() => null))).then((results) => {
+    if (!alive) return;
+    const items = results.filter(Boolean).filter((item) => commerceFor(item, item.store_metadata || {}).model !== "FREE");
+    const validIds = items.map((item) => item.id);
+    if (validIds.length !== ids.length) saveStoreCartIds(validIds);
+    if (!items.length) {
+      host.innerHTML = `<div class="store-cart-empty"><span>🛒</span><h2>Your cart is empty</h2><button class="action-button" data-route="parastore">Browse ParaStore</button></div>`;
+      return;
+    }
+    const total = items.reduce((sum, item) => sum + commerceFor(item, item.store_metadata || {}).amount, 0);
+    const currency = commerceFor(items[0], items[0].store_metadata || {}).currency || "USD";
+    const totalLabel = priceLabel({ model: "PAID", amount: total, currency });
+    host.innerHTML = `<div class="store-cart-head"><div><span>PARASTORE CART</span><h1>${items.length} ${items.length === 1 ? "item" : "items"}</h1><p>Prices are refreshed from PARA before checkout.</p></div><button type="button" data-route="parastore">Continue shopping</button></div><div class="store-cart-layout"><div class="store-cart-items">${items.map((item, index) => { const meta=item.store_metadata||{}; const assets=item.asset_references||{}; const commerce=commerceFor(item,meta); const art=assetUrl(assets.cover||assets.icon||assets.hero); return `<article class="store-cart-item"><button class="store-cart-item__art" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" ${index===0?'data-autofocus="true"':''}>${art?`<img src="${art}" alt="">`:`<span>${escapeHtml((item.title||"P")[0])}</span>`}</button><div class="store-cart-item__copy"><span>${escapeHtml(meta.genre||item.project_type||"GAME")}</span><h2>${escapeHtml(item.title||"Untitled")}</h2><small>${escapeHtml(item.runtime||"PARA")}</small><button type="button" data-action="remove-store-cart" data-store-id="${escapeHtml(item.id)}">Remove</button></div><strong>${escapeHtml(priceLabel(commerce))}</strong></article>`; }).join("")}</div><aside class="store-cart-summary"><span>ORDER SUMMARY</span><div><b>Subtotal</b><strong>${escapeHtml(totalLabel)}</strong></div><div><b>Tax</b><small>Calculated at checkout</small></div><hr><div class="store-cart-total"><b>Total before tax</b><strong>${escapeHtml(totalLabel)}</strong></div><button class="action-button" data-action="checkout-store-cart">Continue to secure checkout</button><p>Final prices and eligibility are verified by PARA Commerce on the server.</p></aside></div>`;
   });
   return () => { alive = false; };
 }

@@ -25,6 +25,34 @@ import system_layer  # noqa: E402
 
 
 
+def _attach_store_pricing(items: list[dict]) -> list[dict]:
+    """Attach public pricing to published catalog entries.
+
+    Pricing is read server-side from project_pricing so ParaStore never relies
+    on a hardcoded/storefront copy of the developer's price.
+    """
+    project_ids = [str(item.get("project_id") or "") for item in items if item.get("project_id")]
+    if not project_ids:
+        return items
+    encoded_ids = ",".join(urllib.parse.quote(value, safe="-") for value in project_ids)
+    status, pricing = _supabase_get_json(
+        f"/rest/v1/project_pricing?select=project_id,model,price,currency,updated_at&project_id=in.({encoded_ids})"
+    )
+    if status >= 400 or not isinstance(pricing, list):
+        return items
+    by_project = {str(row.get("project_id")): row for row in pricing if row.get("project_id")}
+    for item in items:
+        row = by_project.get(str(item.get("project_id") or ""))
+        if row:
+            item["pricing"] = {
+                "model": row.get("model") or "FREE",
+                "price": row.get("price") or 0,
+                "currency": (row.get("currency") or "USD").upper(),
+                "updated_at": row.get("updated_at"),
+            }
+    return items
+
+
 def store_catalog() -> tuple[int, dict]:
     """Read the public ParaStore catalog from Supabase without exposing keys to the browser."""
     base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
@@ -38,7 +66,8 @@ def store_catalog() -> tuple[int, dict]:
             items = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
         return 502, {"error": "catalog_unavailable", "detail": str(error), "items": []}
-    return 200, {"source": "parastore", "items": items if isinstance(items, list) else []}
+    items = items if isinstance(items, list) else []
+    return 200, {"source": "parastore", "items": _attach_store_pricing(items)}
 
 
 
@@ -64,7 +93,8 @@ def store_product(item_id: str) -> tuple[int, dict]:
         return status, payload if isinstance(payload, dict) else {"error": "product_unavailable"}
     if not isinstance(payload, list) or not payload:
         return 404, {"error": "product_not_found"}
-    return 200, payload[0]
+    item = payload[0]
+    return 200, _attach_store_pricing([item])[0]
 
 
 def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:

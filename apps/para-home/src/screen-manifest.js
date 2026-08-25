@@ -12,6 +12,7 @@ export const screens = [
   { id: "games", label: "Games library", group: "library" },
   { id: "parastore", label: "ParaStore", group: "library" },
   { id: "store-product", label: "ParaStore product", group: "library" },
+  { id: "store-cart", label: "ParaStore cart", group: "library" },
   { id: "creator", label: "Creator Playground", group: "apps" },
   { id: "community", label: "PARA Community", group: "apps" },
   { id: "messages", label: "PARA Messages", group: "apps" },
