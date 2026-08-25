@@ -1,12 +1,12 @@
 import { getProfilePreferences, setProfilePreferences } from "../state.js";
 
-const TRACK = "./assets/audio/a-slow-dream.mp3";
+const TRACK = "./assets/audio/sleep-music-no-1.mp3";
 let player = null;
 let fadeTimer = null;
 let unlocked = false;
 
 function prefs() { return getProfilePreferences().sound; }
-function targetVolume() { return Math.max(0, Math.min(1, Number(prefs().menuMusicVolume ?? 35) / 100)); }
+function targetVolume() { return Math.max(0, Math.min(1, Number(prefs().menuMusicVolume ?? 22) / 100)); }
 function ensurePlayer() {
   if (player) return player;
   player = new Audio(TRACK);
