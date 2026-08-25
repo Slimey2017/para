@@ -43,6 +43,7 @@ export function removeStoreCartItem(id) {
 }
 
 export function storeCartCount() { return storeCartIds().length; }
+export function currentStoreCartIds() { return [...storeCartIds()]; }
 
 function installedStoreItems() {
   const profile = getState().activeProfile || "P1";

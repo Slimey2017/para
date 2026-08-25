@@ -1,5 +1,5 @@
 [Unit]
-Description=PARA local mock API and Home frontend
+Description=PARA local gateway and Home frontend
 PartOf=para-home.target
 After=graphical-session.target
 
@@ -7,7 +7,7 @@ After=graphical-session.target
 Type=simple
 # Template path only. Copying/enabling this unit is a future manual developer step.
 WorkingDirectory=%h/PARA
-ExecStart=/usr/bin/python3 %h/PARA/services/mock-api/server.py --host 127.0.0.1 --port 4173
+ExecStart=/usr/bin/python3 %h/PARA/services/gateway/server.py --host 127.0.0.1 --port 4173
 Restart=on-failure
 NoNewPrivileges=yes
 PrivateTmp=yes

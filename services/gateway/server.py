@@ -97,6 +97,46 @@ def store_product(item_id: str) -> tuple[int, dict]:
     return 200, _attach_store_pricing([item])[0]
 
 
+
+def store_checkout_quote(ids: list[str]) -> tuple[int, dict]:
+    """Build an authoritative cart quote from published server-side prices.
+
+    This intentionally does not create a charge. It is the safety boundary used
+    before Stripe test-mode checkout is enabled.
+    """
+    clean = []
+    for value in ids[:50]:
+        value = str(value or "").strip()
+        if value and value not in clean:
+            clean.append(value)
+    if not clean:
+        return 400, {"error": "cart_empty"}
+    items = []
+    currency = None
+    total = 0.0
+    for item_id in clean:
+        status, item = store_product(item_id)
+        if status != 200:
+            return 409, {"error": "product_unavailable", "id": item_id}
+        pricing = item.get("pricing") or {}
+        if str(pricing.get("model") or "FREE").upper() == "FREE":
+            continue
+        item_currency = str(pricing.get("currency") or "USD").upper()
+        if currency and item_currency != currency:
+            return 409, {"error": "mixed_currency_cart"}
+        currency = item_currency
+        try:
+            amount = round(float(pricing.get("price") or 0), 2)
+        except (TypeError, ValueError):
+            return 409, {"error": "invalid_server_price", "id": item_id}
+        if amount <= 0:
+            return 409, {"error": "invalid_server_price", "id": item_id}
+        total += amount
+        items.append({"id": item.get("id"), "project_id": item.get("project_id"), "title": item.get("title"), "price": amount, "currency": item_currency})
+    if not items:
+        return 400, {"error": "no_paid_items"}
+    return 200, {"mode": "quote_only", "currency": currency or "USD", "total": round(total, 2), "items": items}
+
 def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:
     base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
@@ -422,6 +462,9 @@ class ParaHandler(SimpleHTTPRequestHandler):
             return
         if request.path == "/api/v1/apps/launch":
             status, result = system_layer.launch_application(str(payload.get("id", "")))
+        elif request.path == "/api/v1/store/checkout/quote":
+            ids = payload.get("ids") if isinstance(payload.get("ids"), list) else []
+            status, result = store_checkout_quote(ids)
         elif request.path == "/api/v1/audio":
             status, result = system_layer.set_audio(str(payload.get("kind", "")), volume=payload.get("volume"), muted=payload.get("muted"))
         elif request.path == "/api/v1/personalization":

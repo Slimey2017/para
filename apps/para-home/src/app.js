@@ -26,7 +26,7 @@ import {
   gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
   creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct, activateStoreCart,
   storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem, addStoreCartItem, removeStoreCartItem,
-  playCreatorTone, clearCreatorDrawing,
+  playCreatorTone, clearCreatorDrawing, currentStoreCartIds,
 } from "./screens/experiences.js";
 import {
   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
@@ -40,7 +40,7 @@ import {
 } from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
 import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
-import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic } from "./services/menu-music.js";
+import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, suspendMenuMusic } from "./services/menu-music.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
   activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall,
@@ -550,6 +550,7 @@ async function handleAction(action, target) {
       loginToHome("Guest", target);
       break;
     case "sign-out":
+      suspendMenuMusic({ duration: 420 });
       setState({ loggedIn: false, activeProfile: null });
       navigate("profiles", { replace: true }, target);
       break;
@@ -791,9 +792,14 @@ async function handleAction(action, target) {
         rerender();
       }
       break;
-    case "checkout-store-cart":
-      toast("Secure checkout is next", "Your cart is ready. PARA Commerce still needs the buyer payment endpoint before real money can move.");
+    case "checkout-store-cart": {
+      try {
+        const quote = await paraApi.storeCheckoutQuote(currentStoreCartIds());
+        const total = new Intl.NumberFormat("en-US", { style: "currency", currency: quote.currency || "USD" }).format(Number(quote.total || 0));
+        toast("Server price verified", `${total} · ${quote.items?.length || 0} item(s). Live charging remains locked until Stripe test-mode checkout passes.`);
+      } catch (error) { toast("Checkout verification failed", error.message || "Could not verify cart"); }
       break;
+    }
     case "install-store-game": {
       const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
       try {
@@ -1066,3 +1072,20 @@ async function start() {
 }
 
 start();
+
+// Stabilization: right stick scrolls the active app unless ParaPoint owns it.
+let lastRightStickScroll = 0;
+document.addEventListener("para-controllerinput", (event) => {
+  if (document.documentElement.dataset.parapoint === "active") return;
+  if (document.querySelector(".store-game-frame")) return;
+  const y = Number(event.detail?.axes?.[3] || 0);
+  if (Math.abs(y) < 0.28) return;
+  const now = performance.now();
+  if (now - lastRightStickScroll < 34) return;
+  lastRightStickScroll = now;
+  const current = focus.current;
+  const scroller = current?.closest?.(".content-scroll,.page-body,[data-scroll-container]")
+    || document.querySelector(".screen .content-scroll,.screen .page-body");
+  if (!scroller) return;
+  scroller.scrollBy({ top: y * 34, behavior: "auto" });
+});

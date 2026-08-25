@@ -1,3 +1,4 @@
+import { acquireOverlay, releaseOverlay } from "./overlay-manager.js";
 import { escapeHtml } from "../services/para-api.js";
 
 const LETTER_ROWS = [
@@ -48,7 +49,8 @@ export function paraBoardTarget() {
 }
 
 export function openParaBoard(target, { overlay, focus, controllerLabel = "Controller" } = {}) {
-  if (!target || !overlay) return false;
+  if (!target || !overlay || activeTarget) return false;
+  if (!acquireOverlay("paraboard", target)) return false;
   activeTarget = target;
   originalValue = target.value || "";
   shifted = false;
@@ -148,6 +150,6 @@ export function closeParaBoard({ overlay, focus, commit = true } = {}) {
     overlay.innerHTML = "";
     overlay.classList.remove("is-closing");
   }
-  requestAnimationFrame(() => { if (target?.isConnected) focus?.setCurrent(target, true); });
+  releaseOverlay("paraboard", focus);
   return true;
 }

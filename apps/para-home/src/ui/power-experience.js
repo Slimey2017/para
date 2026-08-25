@@ -1,5 +1,6 @@
 import { completePowerAction, preparePowerAction, requestPowerAction } from "../services/power-adapter.js";
 import { resumeMenuMusic, suspendMenuMusic } from "../services/menu-music.js";
+import { acquireOverlay, releaseOverlay } from "./overlay-manager.js";
 
 export const POWER_SEQUENCE_DURATION_MS = 8000;
 export const POWER_TIMELINE_MS = Object.freeze({
@@ -120,6 +121,7 @@ function powerConfirmationNode() {
 export function openTurnOffConfirmation(focus, returnFocus) {
   const modal = powerConfirmationNode();
   if (!modal || activeSequence) return;
+  if (!acquireOverlay("power-confirm", returnFocus || focus.current)) return;
   confirmationReturnFocus = returnFocus || focus.current;
   modal.hidden = false;
   requestAnimationFrame(() => focus.setCurrent(modal.querySelector("[data-autofocus='true']"), true));
@@ -129,7 +131,7 @@ export function cancelTurnOffConfirmation(focus) {
   const modal = document.querySelector("[data-power-confirm]:not([hidden])");
   if (!modal) return false;
   modal.hidden = true;
-  if (confirmationReturnFocus?.isConnected) focus.setCurrent(confirmationReturnFocus, true);
+  releaseOverlay("power-confirm", focus);
   confirmationReturnFocus = null;
   if (modal.hasAttribute("data-transient-power-confirm")) modal.remove();
   return true;
@@ -139,6 +141,7 @@ export function confirmTurnOff() {
   const modal = document.querySelector("[data-power-confirm]:not([hidden])");
   if (modal?.hasAttribute("data-transient-power-confirm")) modal.remove();
   else if (modal) modal.hidden = true;
+  releaseOverlay("power-confirm");
   confirmationReturnFocus = null;
 }
 
