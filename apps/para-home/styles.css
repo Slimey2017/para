@@ -1458,3 +1458,58 @@ html[data-reduced-motion="true"] .parastore-page::before{animation:none!importan
 @media (max-width:700px) {
   .control-center-power { width:100%; min-width:0; grid-template-columns:1fr; }
 }
+
+/* PARA system input: ParaBoard + ParaPoint */
+html[data-paraboard="open"] #para-app,
+html[data-paraboard="open"] .top-bar { filter: brightness(.48) blur(1px); }
+.paraboard-scrim { position: fixed; inset: 0; background: rgba(2,2,8,.72); backdrop-filter: blur(14px); }
+.paraboard { position: fixed; z-index: 3; left: 50%; bottom: clamp(24px,4vh,58px); transform: translateX(-50%); width: min(1080px,92vw); padding: 24px 28px 20px; border-radius: 28px; background: linear-gradient(180deg,rgba(20,15,34,.98),rgba(8,7,15,.98)); border: 1px solid rgba(168,112,255,.36); box-shadow: 0 30px 100px rgba(0,0,0,.58),0 0 60px rgba(111,51,255,.12); }
+.paraboard-header { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:16px; }
+.paraboard-header span { color:#c993ff; font-size:11px; font-weight:900; letter-spacing:.16em; }
+.paraboard-header h2 { margin:4px 0 0; font-size:24px; }
+.paraboard-header small { color:#8f899d; }
+.paraboard-entry { min-height:58px; display:flex; align-items:center; overflow:hidden; padding:0 18px; margin-bottom:16px; border-radius:15px; border:1px solid rgba(255,255,255,.13); background:#07060d; color:white; font-size:22px; white-space:pre-wrap; }
+.paraboard-caret { width:2px; height:26px; margin-left:2px; background:#b86aff; animation:paraboardBlink .9s steps(1) infinite; }
+@keyframes paraboardBlink { 50% { opacity:0; } }
+.paraboard-layout { display:grid; gap:9px; }
+.paraboard-row { display:flex; justify-content:center; gap:8px; }
+.paraboard-key { min-width:74px; height:58px; border-radius:13px; border:1px solid rgba(255,255,255,.11); background:#181421; color:#f7f4ff; font-weight:800; font-size:17px; transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease,background .14s ease; }
+.paraboard-key--wide { min-width:118px; }
+.paraboard-key--space { flex:1; max-width:360px; }
+.paraboard-key--done { min-width:132px; background:linear-gradient(135deg,#7b37ff,#b15bff); }
+.paraboard-key.is-active { background:#2a1744; border-color:#ad68ff; }
+.paraboard-key.is-focused,.paraboard-key:focus-visible { outline:none; transform:translateY(-3px) scale(1.035); border-color:#fff; box-shadow:0 0 0 2px rgba(158,82,255,.88),0 10px 28px rgba(85,35,190,.42); background:#302247; }
+.paraboard footer { display:flex; justify-content:flex-end; gap:22px; margin-top:14px; color:#918b9c; font-size:12px; }
+.paraboard footer b { color:#fff; }
+
+.parapoint-cursor { position:fixed; z-index:99999; left:0; top:0; width:30px; height:38px; pointer-events:none; filter:drop-shadow(0 3px 8px rgba(0,0,0,.75)); }
+.parapoint-cursor.is-probing { visibility:hidden; }
+.parapoint-cursor::before { content:""; position:absolute; width:0; height:0; border-top:24px solid #fff; border-right:16px solid transparent; transform:rotate(-18deg); transform-origin:top left; }
+.parapoint-cursor::after { content:""; position:absolute; left:4px; top:5px; width:0; height:0; border-top:17px solid #7541ff; border-right:10px solid transparent; transform:rotate(-18deg); transform-origin:top left; }
+html:not([data-parapoint="active"]) .parapoint-cursor { display:none; }
+
+/* PARA Browser */
+.browser-page .page-copy { margin-bottom:18px; }
+.para-browser { width:min(1500px,calc(100vw - 110px)); margin:0 auto; border-radius:24px; overflow:hidden; border:1px solid rgba(131,94,211,.28); background:#08070d; box-shadow:0 22px 80px rgba(0,0,0,.32); }
+.para-browser-toolbar { min-height:76px; padding:12px 14px; display:grid; grid-template-columns:auto minmax(300px,1fr) auto auto; align-items:center; gap:10px; background:rgba(12,10,19,.96); border-bottom:1px solid rgba(255,255,255,.08); }
+.browser-nav-actions { display:flex; gap:7px; }
+.browser-nav-actions button,.browser-go,.browser-point-toggle { height:48px; border-radius:13px; border:1px solid rgba(255,255,255,.11); background:#15121e; color:#eee9f8; font-weight:800; }
+.browser-nav-actions button { width:50px; font-size:19px; }
+.browser-go { padding:0 22px; }
+.browser-address { height:50px; display:flex; align-items:center; gap:10px; padding:0 15px; border-radius:15px; background:#05050a; border:1px solid rgba(255,255,255,.12); }
+.browser-address span { color:#8b61ff; }
+.browser-address input { width:100%; border:0; outline:0; background:transparent; color:#fff; font-size:16px; }
+.browser-point-toggle { min-width:132px; display:grid; grid-template-columns:auto auto; grid-template-rows:1fr 1fr; column-gap:8px; align-items:center; padding:6px 14px; text-align:left; }
+.browser-point-toggle>span { grid-row:1/3; font-size:21px; color:#9e70ff; }.browser-point-toggle b { font-size:13px; }.browser-point-toggle small { color:#817b8c; }
+.browser-point-toggle.is-active { border-color:#9f69ff; background:#23153a; box-shadow:0 0 26px rgba(125,65,255,.2); }.browser-point-toggle.is-active small { color:#c9a7ff; }
+.para-browser-toolbar button.is-focused,.para-browser-toolbar button:focus-visible,.browser-address:focus-within { outline:none; border-color:#fff; box-shadow:0 0 0 2px #7240ff,0 8px 26px rgba(89,43,200,.3); transform:translateY(-1px); }
+.para-browser-stage { position:relative; height:clamp(430px,62vh,760px); background:#fff; }
+.para-browser-stage iframe { width:100%; height:100%; border:0; background:#fff; }
+.browser-site-note { position:absolute; left:50%; bottom:22px; transform:translateX(-50%); max-width:680px; padding:12px 18px; border-radius:999px; background:rgba(8,7,14,.93); border:1px solid rgba(169,117,255,.32); color:#d7cfdf; font-size:12px; text-align:center; box-shadow:0 12px 34px rgba(0,0,0,.42); }
+.browser-controller-help { min-height:48px; display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:20px; padding:9px 16px; background:#0b0911; color:#77717f; font-size:11px; }.browser-controller-help b { color:#dcd6e7; }
+.app-icon--browser { display:grid; place-items:center; width:100%; height:100%; border-radius:22%; background:radial-gradient(circle at 40% 35%,#4c9dff,#342b9c 45%,#100a2e 78%); color:#fff; font-size:32px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
+
+@media (max-width:900px) {
+  .paraboard { width:96vw; padding:18px 12px; }.paraboard-key { min-width:0; flex:1; height:50px; }.paraboard-header small { display:none; }
+  .para-browser { width:calc(100vw - 28px); }.para-browser-toolbar { grid-template-columns:auto 1fr auto; }.browser-point-toggle { grid-column:1/-1; width:100%; }.para-browser-stage { height:58vh; }
+}

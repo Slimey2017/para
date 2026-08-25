@@ -125,3 +125,8 @@ PARA does not modify the bootloader, partitions, firmware, kernel modules,
 graphics drivers, desktop environment, or systemd configuration. Read
 [PROJECT_GUIDE.md](PROJECT_GUIDE.md) for the architecture, status, safety
 policy, file inventory, and next milestones.
+
+### PARA system input prototypes
+
+- **ParaBoard** is PARA's controller-first on-screen keyboard. Selecting a text field with a controller opens it automatically; it supports letters, symbols, shift, space, backspace, Done, and Cancel.
+- **ParaPoint** is PARA's browser pointer mode. In PARA Browser the right stick moves a system cursor, A clicks, X opens the page context action where supported, and L3 toggles pointer mode. Browser security prevents a web-hosted shell from injecting clicks into unrelated cross-origin frames; the native PARA browser runtime will remove that web-edition limitation.

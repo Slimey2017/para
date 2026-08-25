@@ -8,7 +8,9 @@ function applicationCard(application, index) {
     ? `<img src="${application.icon}" alt="" />`
     : application.id === "para:files"
       ? `<span class="app-icon app-icon--files" aria-hidden="true"><i></i></span>`
-      : `<span class="app-icon app-icon--letter" aria-hidden="true">${name.slice(0, 1)}</span>`;
+      : application.id === "para:browser"
+        ? `<span class="app-icon app-icon--browser" aria-hidden="true">◎</span>`
+        : `<span class="app-icon app-icon--letter" aria-hidden="true">${name.slice(0, 1)}</span>`;
   return `<button class="installed-app" ${route} data-app-category="${escapeHtml(application.category)}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="installed-app__icon">${icon}</span><span class="installed-app__name">${name}</span></button>`;
 }
 
@@ -28,7 +30,9 @@ export async function activateApps({ focus }) {
   if (!container || !categories) return;
   try {
     const payload = await paraApi.applications();
-    const applications = payload.applications || [];
+    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", launch: { kind: "route", route: "browser" } };
+    const applications = [browser, ...(payload.applications || []).filter((item) => item.id !== browser.id)];
+    payload.categories = ["All Apps", ...new Set([...(payload.categories || []).filter((item) => item !== "All Apps"), "Tools"])];
     if (!applications.length) {
       container.innerHTML = `<div class="library-empty"><span>▦</span><h2>No applications available</h2></div>`;
       return;

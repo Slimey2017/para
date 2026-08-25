@@ -8,6 +8,7 @@ export const screens = [
   { id: "create-profile", label: "Create profile", group: "identity" },
   { id: "home", label: "PARA Home", group: "home" },
   { id: "apps", label: "Apps library", group: "library" },
+  { id: "browser", label: "PARA Browser", group: "apps" },
   { id: "games", label: "Games library", group: "library" },
   { id: "parastore", label: "ParaStore", group: "library" },
   { id: "store-product", label: "ParaStore product", group: "library" },

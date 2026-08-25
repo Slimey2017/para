@@ -107,11 +107,12 @@ export class GamepadNavigation {
     const now = performance.now();
     const [axisX = 0, axisY = 0] = gamepad.axes;
     const axisActive = Math.abs(axisX) >= DEADZONE || Math.abs(axisY) >= DEADZONE;
+    const anyAxisActive = gamepad.axes.some((value) => Math.abs(value) >= DEADZONE);
     const buttonsChanged = pressed.some((value, index) => value !== this.previous[index]);
 
-    if (buttonsChanged || axisActive) {
+    if (buttonsChanged || anyAxisActive) {
       this.handlers.inputDevice?.("controller");
-      document.dispatchEvent(new CustomEvent("para-controllerinput", { detail: { buttons: pressed, axes: [...gamepad.axes], index: gamepad.index } }));
+      document.dispatchEvent(new CustomEvent("para-controllerinput", { detail: { buttons: pressed, rawButtons: gamepad.buttons, axes: [...gamepad.axes], index: gamepad.index } }));
     }
 
     // When a published game is running, PARA must stop treating ordinary
@@ -120,8 +121,9 @@ export class GamepadNavigation {
     // system button so gameplay cannot accidentally move Home focus or leave
     // the runtime.
     const gameRuntimeActive = Boolean(document.querySelector(".store-game-frame"));
+    const paraPointActive = document.documentElement.dataset.parapoint === "active";
 
-    if (!gameRuntimeActive) {
+    if (!gameRuntimeActive && !paraPointActive) {
       if (edge(0)) this.handlers.confirm();
       if (edge(1)) this.handlers.back();
       if (edge(2)) this.handlers.secondary();
@@ -146,7 +148,7 @@ export class GamepadNavigation {
     const right = Boolean(pressed[15] || (preferHorizontal && axisX >= DEADZONE));
     const up = Boolean(pressed[12] || (!preferHorizontal && axisY <= -DEADZONE));
     const down = Boolean(pressed[13] || (!preferHorizontal && axisY >= DEADZONE));
-    if (!gameRuntimeActive) {
+    if (!gameRuntimeActive && !paraPointActive) {
       this.repeatDirection("left", left, now);
       this.repeatDirection("right", right, now);
       this.repeatDirection("up", up, now);

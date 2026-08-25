@@ -52,6 +52,13 @@ import {
 } from "./services/sound-effects.js";
 import { takeRestartSequence } from "./services/power-adapter.js";
 import {
+  browserScreen, activateBrowser, browserNavigate, browserBack, browserForward, browserReload, updateParaPointState,
+} from "./screens/browser.js";
+import {
+  closeParaBoard, isParaBoardOpen, openParaBoard, paraBoardBackspace, paraBoardInsert, paraBoardToggleShift, paraBoardToggleSymbols,
+} from "./ui/paraboard.js";
+import { toggleParaPoint } from "./ui/parapoint.js";
+import {
   beginPowerSequence, beginSleep, cancelTurnOffConfirmation, confirmTurnOff,
   consumePowerInput, openTurnOffConfirmation,
 } from "./ui/power-experience.js";
@@ -68,6 +75,7 @@ const renderers = {
   "create-profile": createProfileScreen,
   home: homeScreen,
   apps: appsScreen,
+  browser: browserScreen,
   games: gamesScreen,
   demos: demosScreen,
   parastore: paraStoreScreen,
@@ -198,6 +206,9 @@ function render(route) {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
     activateApps({ focus });
+  } else if (route === "browser") {
+    cleanupScreen = activateBrowser();
+    recordExperience({ id: "para:browser", title: "PARA Browser", route: "browser", kind: "App", accent: "#4285ff", mark: "◎" });
   } else if (["demo-pong", "demo-racer", "demo-platformer"].includes(route)) {
     cleanupScreen = activateDemoGame({ route });
   } else if (route === "creator") {
@@ -248,6 +259,12 @@ function navigate(route, options = {}, target = null) {
 function confirm(target = focus.current) {
   if (consumePowerInput()) return;
   if (target && !target.disabled && target.getAttribute("aria-disabled") !== "true") {
+    if (activeInputDevice === "controller" && target.matches?.("input:not([type='range']):not([type='checkbox']):not([type='radio']), textarea")) {
+      playConfirmSound();
+      overlayReturnFocus = target;
+      openParaBoard(target, { overlay, focus, controllerLabel: controllerStatus.typeLabel || "Controller" });
+      return;
+    }
     playConfirmSound();
     target.click();
   }
@@ -255,6 +272,7 @@ function confirm(target = focus.current) {
 
 function back() {
   if (consumePowerInput()) return;
+  if (isParaBoardOpen()) { closeParaBoard({ overlay, focus, commit: false }); return; }
   if (cancelTurnOffConfirmation(focus)) return;
   if (filesBack()) return;
   if (!overlay.hidden) {
@@ -796,6 +814,42 @@ async function handleAction(action, target) {
     case "store-more-info":
       toast("More options", "Wishlist and sharing can plug in here next.");
       break;
+    case "paraboard-key":
+      paraBoardInsert(target.dataset.key || "", overlay, focus);
+      break;
+    case "paraboard-backspace":
+      paraBoardBackspace(overlay, focus);
+      break;
+    case "paraboard-shift":
+      paraBoardToggleShift(overlay, focus);
+      break;
+    case "paraboard-symbols":
+      paraBoardToggleSymbols(overlay, focus);
+      break;
+    case "paraboard-done":
+      closeParaBoard({ overlay, focus, commit: true });
+      break;
+    case "paraboard-cancel":
+      closeParaBoard({ overlay, focus, commit: false });
+      break;
+    case "toggle-parapoint":
+      toggleParaPoint();
+      updateParaPointState();
+      break;
+    case "browser-go": {
+      const address = document.querySelector("[data-browser-address]");
+      browserNavigate(address?.value || "");
+      break;
+    }
+    case "browser-back":
+      if (!browserBack()) toast("No previous page");
+      break;
+    case "browser-forward":
+      if (!browserForward()) toast("No next page");
+      break;
+    case "browser-reload":
+      browserReload();
+      break;
     case "refresh-network":
       activateNetwork();
       break;
@@ -829,6 +883,15 @@ function togglePreferenceItem(section, id) {
   schedulePreferenceSave();
   rerender();
 }
+
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (activeInputDevice !== "controller" || isParaBoardOpen()) return;
+  if (!target?.matches?.("input:not([type='range']):not([type='checkbox']):not([type='radio']), textarea")) return;
+  // ParaPoint clicks and controller focus both get the same system keyboard.
+  overlayReturnFocus = target;
+  openParaBoard(target, { overlay, focus, controllerLabel: controllerStatus.typeLabel || "Controller" });
+});
 
 document.addEventListener("click", (event) => {
   if (!event.target.closest("[data-account-quick]")) {
