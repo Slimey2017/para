@@ -46,7 +46,7 @@ export function browserScreen() {
       </header>
       <div class="para-browser-stage">
         <iframe data-browser-frame title="PARA Browser page" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads" referrerpolicy="no-referrer"></iframe>
-        <div class="browser-site-note" data-browser-note hidden>That site blocks embedded browsing in the PARA web prototype. The native PARA Browser will open it normally.</div>
+        <div class="browser-site-note" data-browser-note hidden>That site blocks embedded browsing in the PARA web edition. The native PARA Browser will open it normally.</div>
       </div>
       <footer class="browser-controller-help"><span><b>A</b> Select</span><span><b>B</b> Back</span><span><b>Y</b> ParaBoard</span><span><b>Right stick</b> ParaPoint</span><span><b>L3</b> Pointer</span><span><b>PARA</b> Control Center</span></footer>
     </section>`,

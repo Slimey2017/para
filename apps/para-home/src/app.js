@@ -20,7 +20,7 @@ import {
   controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
   accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen, audioSettingsScreen,
-  notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen,
+  notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen,
 } from "./screens/system.js";
 import {
   gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, gameScreen, activateDemoGame,
@@ -92,6 +92,7 @@ const renderers = {
   downloads: downloadsScreen,
   controller: controllerScreen,
   storage: storageScreen,
+  "saved-data": savedDataScreen,
   settings: settingsScreen,
   display: displayScreen,
   accessibility: accessibilityScreen,
@@ -384,6 +385,7 @@ document.addEventListener("para-inputdevicechange", (event) => {
   activeInputDevice = event.detail?.device || "keyboard";
   updateControllerPrompts();
 });
+document.addEventListener("para-immersive-toggle", () => { if (router.current() !== "home") return; document.documentElement.classList.toggle("para-immersive"); toast(document.documentElement.classList.contains("para-immersive") ? "Immersive Home" : "Home controls", document.documentElement.classList.contains("para-immersive") ? "Press R3 again to restore the interface" : "Interface restored"); });
 document.addEventListener("para-systemcue", (event) => playSystemCue(event.detail?.name));
 document.addEventListener("para-startup-sound", (event) => playSystemCue(event.detail?.cue || "startup"));
 document.addEventListener("para-downloadcomplete", (event) => {
@@ -413,7 +415,7 @@ const gamepad = new GamepadNavigation({
     updateControllerPrompts();
     updateSetupControllerStatus(controller);
     document.dispatchEvent(new CustomEvent("para-controllerchange", { detail: controller }));
-    if (controller.connected && !hadController) { playNotificationSound(); toast("PulseWave Controller connected", `${controller.typeLabel} • Player 1`); }
+    if (controller.connected && !hadController) { playNotificationSound(); toast(`${controller.typeLabel} connected`, `Player 1`); }
     if (!controller.connected && hadController) { playNotificationSound(); toast("Controller disconnected", router.current() === "store-game" ? "Game paused • reconnect a controller" : "Keyboard controls active"); document.documentElement.classList.toggle("controller-disconnected-in-game", router.current() === "store-game"); }
     if (controller.connected) document.documentElement.classList.remove("controller-disconnected-in-game");
   },
@@ -584,6 +586,12 @@ async function handleAction(action, target) {
     case "return-home-after-crash":
       router.go("home", { replace: true });
       break;
+    case "check-controller-firmware": toast("PulseWave firmware", controllerStatus.type === "para" ? "Controller is ready for firmware service integration." : "Firmware updates are available only for PulseWave hardware."); break;
+    case "repair-storage": toast("Repair Storage", "Storage check queued. Native repair service connects in the Linux build."); break;
+    case "network-recovery": toast("Network Recovery", "PARA Network recovery check started."); break;
+    case "rollback-update": toast("Roll Back Update", "Rollback requires a previous verified system image."); break;
+    case "safe-mode": toast("Safe Mode", "Safe Mode will load core PARA services only in the native build."); break;
+    case "open-save-history": toast("Save History", "Versioned cloud restore is ready for cloud service integration."); break;
     case "toggle-reduced":
       toggle("reducedMotion", "Reduce motion");
       break;

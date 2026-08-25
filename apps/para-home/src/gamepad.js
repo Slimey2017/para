@@ -16,15 +16,16 @@ const KEYBOARD_CONTROLLER = Object.freeze({
 function identifyController(name = "Controller") {
   const value = String(name);
   if (/xbox|xinput|microsoft|045e/i.test(value)) {
-    return { type: "xbox", typeLabel: "Xbox", prompts: { confirm: "A", back: "B", secondary: "X", options: "Y", para: "PARA", shoulderPrevious: "LB", shoulderNext: "RB" } };
+    return { type: "xbox", typeLabel: "Xbox Wireless Controller", prompts: { confirm: "A", back: "B", secondary: "X", options: "Y", para: "PARA", shoulderPrevious: "LB", shoulderNext: "RB" } };
   }
   if (/playstation|dualshock|dualsense|sony|054c/i.test(value)) {
-    return { type: "playstation", typeLabel: "PlayStation Mode", prompts: { confirm: "✕", back: "○", secondary: "□", options: "△", para: "PARA", shoulderPrevious: "L1", shoulderNext: "R1" } };
+    return { type: "playstation", typeLabel: "DualSense / PlayStation Controller", prompts: { confirm: "✕", back: "○", secondary: "□", options: "△", para: "PARA", shoulderPrevious: "L1", shoulderNext: "R1" } };
   }
   if (/nintendo|switch|057e/i.test(value)) {
-    return { type: "nintendo", typeLabel: "Nintendo", prompts: { confirm: "B", back: "A", secondary: "Y", options: "X", para: "PARA", shoulderPrevious: "L", shoulderNext: "R" } };
+    return { type: "nintendo", typeLabel: "Nintendo Controller", prompts: { confirm: "B", back: "A", secondary: "Y", options: "X", para: "PARA", shoulderPrevious: "L", shoulderNext: "R" } };
   }
-  return { type: "para", typeLabel: "PARA", prompts: { confirm: "Blue", back: "Red", secondary: "Green", options: "Yellow", para: "PARA", shoulderPrevious: "Left", shoulderNext: "Right" } };
+  if (/pulsewave|para controller|para pulse/i.test(value)) return { type: "para", typeLabel: "PulseWave Controller", prompts: { confirm: "Blue", back: "Red", secondary: "Green", options: "Yellow", para: "PARA", shoulderPrevious: "Left", shoulderNext: "Right" } };
+  return { type: "generic", typeLabel: "Wireless / USB Gamepad", prompts: { confirm: "A", back: "B", secondary: "X", options: "Y", para: "Home", shoulderPrevious: "L", shoulderNext: "R" } };
 }
 
 function meaningful(gamepad) {
@@ -130,6 +131,7 @@ export class GamepadNavigation {
       if (edge(3)) this.handlers.options();
       if (edge(4)) this.handlers.shoulder(-1);
       if (edge(5)) this.handlers.shoulder(1);
+      if (edge(11) && !document.querySelector(".para-browser-app")) document.dispatchEvent(new CustomEvent("para-immersive-toggle"));
     }
 
     const paraIndex = gamepad.buttons.length > 16 ? 16 : 9;

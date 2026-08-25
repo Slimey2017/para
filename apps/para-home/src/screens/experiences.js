@@ -49,7 +49,7 @@ export function isStoreItemInstalled(id) {
 }
 
 function installedStoreCard(item, autofocus = false) {
-  return `<article class="demo-card"><span class="demo-art" style="--demo-accent:#8d43ff"><i>${escapeHtml((item.title || "P")[0])}</i><b></b></span><div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
+  return `<article class="demo-card"><span class="demo-art" style="--demo-accent:#8d43ff"><i>${escapeHtml((item.title || "P")[0])}</i><b></b></span><div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")} · <b class="ownership-badge">Installed · Owned</b></span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
 }
 
 function demoCard(demo, { installed = false, autofocus = false } = {}) {

@@ -4,7 +4,7 @@ import { page, tile, listRow, progress, toggleRow } from "../ui/components.js";
 import { demoStorageBytes } from "../services/experience-runtime.js";
 
 export function controllerScreen() {
-  return page({ title: "Controllers", description: "Controllers available to PARA.", eyebrow: "Input", body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"><i data-controller-live-stick></i><b data-controller-live-button="0"></b><b data-controller-live-button="1"></b><b data-controller-live-button="2"></b><b data-controller-live-button="3"></b></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section><div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="para">PARA</b><strong>PARA</strong><small>Tap controls · hold Home</small></span></div></div>` });
+  return page({ title: "Controllers", description: "Controllers available to PARA. PulseWave features appear only on verified PulseWave hardware.", eyebrow: "Input", body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"><i data-controller-live-stick></i><b data-controller-live-button="0"></b><b data-controller-live-button="1"></b><b data-controller-live-button="2"></b><b data-controller-live-button="3"></b></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section><div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="para">PARA</b><strong>PARA</strong><small>Tap controls · hold Home</small></span></div></div><section class="panel pulsewave-firmware" data-pulsewave-firmware hidden><span class="eyebrow">PulseWave hardware</span><h2>Controller firmware</h2><p>Firmware updates, battery health, wake support, and hardware profiles are available only for genuine PulseWave controllers.</p><button class="action-button" data-action="check-controller-firmware">Check for update</button></section>` });
 }
 
 export function updateControllerScreen(controller) {
@@ -15,6 +15,7 @@ export function updateControllerScreen(controller) {
   name.textContent = controller.connected ? controller.name : "No controller connected";
   detail.textContent = controller.connected ? `${controller.typeLabel} controls active` : "Connect a controller, then press any button.";
   map.hidden = !controller.connected;
+  const firmware = document.querySelector("[data-pulsewave-firmware]"); if (firmware) firmware.hidden = !(controller.connected && controller.type === "para");
 }
 
 export function activateControllerScreen() {
@@ -29,7 +30,7 @@ export function activateControllerScreen() {
 }
 
 export function storageScreen() {
-  return page({ title: "Storage", description: "Disk space and connected drives.", eyebrow: "System", body: `<div data-storage-view><div class="library-loading"><span></span><strong>Reading storage…</strong></div></div>` });
+  return page({ title: "Storage", description: "Disk space, saved data, and connected drives.", eyebrow: "System", body: `<div class="storage-shortcuts"><button class="action-button action-button--ghost" data-route="saved-data" data-autofocus="true">Saved Data</button></div><div data-storage-view><div class="library-loading"><span></span><strong>Reading storage…</strong></div></div>` });
 }
 
 export async function activateStorage() {
@@ -78,7 +79,7 @@ export function accessibilityScreen() {
 }
 
 export function networkScreen() {
-  return page({ title: "Network", description: "Connections available to PARA.", eyebrow: "System", body: `<div class="panel"><div class="panel__head"><h2>Connections</h2><button class="action-button action-button--ghost" data-action="refresh-network" data-autofocus="true">Refresh</button></div><div data-network-view><div class="library-loading"><span></span><strong>Checking connections…</strong></div></div></div>` });
+  return page({ title: "Network", description: "Connections available to PARA.", eyebrow: "System", body: `<section class="panel network-service-status"><div class="panel__head"><div><span class="eyebrow">PARA Network</span><h2>${navigator.onLine ? "Services available" : "Offline"}</h2></div><span class="${navigator.onLine ? "status-ok" : "status-warn"}">${navigator.onLine ? "Online" : "Attention"}</span></div><p>${navigator.onLine ? "Store, social, cloud saves, and account services can connect." : "Local games, saves, Files, and Settings remain available."}</p></section><div class="panel"><div class="panel__head"><h2>Connections</h2><button class="action-button action-button--ghost" data-action="refresh-network" data-autofocus="true">Refresh</button></div><div data-network-view><div class="library-loading"><span></span><strong>Checking connections…</strong></div></div></div>` });
 }
 
 export async function activateNetwork() {
@@ -188,5 +189,10 @@ export async function activateHealth() {
 }
 
 export function recoveryScreen() {
-  return page({ title: "Recovery", description: "Safe actions for the PARA interface.", eyebrow: "Repair & health", body: `<div class="recovery-list">${listRow({ title: "Restart PARA", meta: "Reload the interface", icon: "↻", action: "restart-shell", autofocus: true })}${listRow({ title: "Replay welcome setup", meta: "Clear PARA interface preferences", icon: "≈", action: "reset-first-boot" })}</div>` });
+  return page({ title: "PARA Recovery", description: "Repair the system without exposing developer tools.", eyebrow: "Recovery environment", body: `<section class="recovery-status panel"><span class="status-ok">Ready</span><div><h2>Choose a recovery action</h2><p>PARA keeps repair actions separate from normal Home.</p></div></section><div class="recovery-list">${listRow({ title: "Repair Storage", meta: "Check system and game data for problems", icon: "▯", action: "repair-storage", autofocus: true })}${listRow({ title: "Network Recovery", meta: "Reconnect and repair PARA Network services", icon: "⌁", action: "network-recovery" })}${listRow({ title: "Roll Back Update", meta: "Return to the previous known-good PARA build", icon: "↶", action: "rollback-update" })}${listRow({ title: "Safe Mode", meta: "Start only core PARA services", icon: "+", action: "safe-mode" })}${listRow({ title: "Restart PARA", meta: "Restart normally", icon: "↻", action: "restart-shell" })}${listRow({ title: "Reset PARA", meta: "Reset interface preferences and replay setup", icon: "≈", action: "reset-first-boot" })}</div>` });
+}
+
+export function savedDataScreen() {
+  const saves = [{game:"Slimey Battle Royale",size:"428 MB",when:"Today · 11:42 PM",cloud:"Synced"},{game:"Kashimo",size:"91 MB",when:"Yesterday · 9:14 PM",cloud:"3 versions"}];
+  return page({ title:"Saved Data", description:"Local saves, cloud history, and restore points.", eyebrow:"Storage", body:`<section class="panel"><div class="panel__head"><div><span class="eyebrow">Save protection</span><h2>Local + Cloud</h2></div><span class="status-ok">Synced</span></div><p>PARA keeps game installations separate from saved data so uninstalling a game does not silently erase progress.</p></section><div class="saved-data-list">${saves.map((x,i)=>`<button class="notification-row" ${i===0?"data-autofocus='true'":""} data-action="open-save-history"><span>☁</span><div><strong>${x.game}</strong><small>${x.size} · ${x.when}</small></div><b>${x.cloud}</b></button>`).join("")}</div>` });
 }

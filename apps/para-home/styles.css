@@ -1639,3 +1639,5 @@ html:not([data-parapoint="active"]) .parapoint-cursor { display:none; }
   .browser-menu-button { display:none; }
   .para-browser--app .browser-controller-help { justify-content:center; gap:10px 14px; }
 }
+/* Console foundations: Immersive Home, Saved Data, recovery, verified hardware */
+html.para-immersive #para-app>.screen>*:not(.home-backdrop):not(.os-backdrop){opacity:0!important;pointer-events:none!important;transition:opacity .45s ease!important}html.para-immersive .home-backdrop__veil{opacity:.08!important}.storage-shortcuts{display:flex;justify-content:flex-end;margin-bottom:14px}.pulsewave-firmware{margin-top:20px}.saved-data-list{display:grid;gap:10px;margin-top:18px}.saved-data-list .notification-row b{margin-left:auto;color:#bda6ff}.recovery-status{display:flex;align-items:center;gap:18px;margin-bottom:18px}

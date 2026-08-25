@@ -23,6 +23,7 @@ export const screens = [
   { id: "control-center-settings", label: "Control Center customization", group: "system" },
   { id: "controller", label: "Controller pairing", group: "system" },
   { id: "storage", label: "Storage management", group: "system" },
+  { id: "saved-data", label: "Saved Data Manager", group: "system" },
   { id: "settings", label: "System settings", group: "system" },
   { id: "display", label: "Display settings", group: "system" },
   { id: "audio-settings", label: "Audio settings", group: "system" },
