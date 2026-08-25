@@ -194,6 +194,30 @@ function assetUrl(path) {
   return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
 }
 
+const ESRB_ART = {
+  RP: "/assets/esrb-rp.svg", E: "/assets/esrb-e.svg", "E10+": "/assets/esrb-e10.svg",
+  T: "/assets/esrb-t.svg", M: "/assets/esrb-m.svg", AO: "/assets/esrb-ao.svg", "RP-LM17": "/assets/esrb-rp-lm17.svg",
+};
+const ESRB_NAMES = { RP: "Rating Pending", E: "Everyone", "E10+": "Everyone 10+", T: "Teen", M: "Mature 17+", AO: "Adults Only 18+", "RP-LM17": "Rating Pending — Likely Mature 17+" };
+
+function commerceFor(item, meta) {
+  const pricing = item.pricing || meta.pricing || {};
+  const model = String(pricing.model || meta.distribution_type || "FREE").toUpperCase();
+  const amount = Number(pricing.price ?? meta.price ?? 0);
+  const currency = pricing.currency || meta.currency || "USD";
+  return { model, amount, currency, hasIap: Boolean(item.has_in_app_purchases || meta.has_in_app_purchases) };
+}
+
+function priceLabel(commerce) {
+  if (commerce.model === "FREE") return "Free";
+  try { return new Intl.NumberFormat("en-US", { style: "currency", currency: commerce.currency }).format(commerce.amount); }
+  catch { return `$${commerce.amount.toFixed(2)}`; }
+}
+
+function ratingFor(item, meta) {
+  return item.content_information?.age_rating || meta.age_rating || meta.rating || null;
+}
+
 export function activateStoreProduct() {
   const host = document.querySelector("[data-store-product]");
   if (!host) return () => {};
@@ -210,8 +234,16 @@ export function activateStoreProduct() {
     const hero = assetUrl(assets.hero || assets.cover || assets.icon);
     const cover = assetUrl(assets.cover || assets.icon || assets.hero);
     const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+    const commerce = commerceFor(item, meta);
+    const price = priceLabel(commerce);
+    const rating = ratingFor(item, meta);
+    const ratingCode = rating?.rating || rating?.code || "";
+    const ratingArt = ESRB_ART[ratingCode];
+    const descriptors = Array.isArray(rating?.descriptors) ? rating.descriptors : [];
+    const interactive = Array.isArray(rating?.interactive) ? rating.interactive : [];
+    const isOfficialRating = rating && rating.source && rating.source !== "PROVISIONAL";
+    const genres = [meta.genre, ...(Array.isArray(meta.genres) ? meta.genres : [])].filter(Boolean);
     sessionStorage.setItem("para.store.screenshots", JSON.stringify(shots));
-    const price = meta.distribution_type === "FREE" || !meta.distribution_type ? "Free" : meta.distribution_type;
     host.innerHTML = `
       <section class="store-product-hero" ${hero ? `style="--product-hero:url('${hero}')"` : ""}>
         <div class="store-product-hero__shade"></div>
@@ -219,20 +251,21 @@ export function activateStoreProduct() {
         <div class="store-product-hero__content">
           <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span>${escapeHtml((item.title || "P")[0])}</span>`}</div>
           <div class="store-product-copy">
-            <span>${escapeHtml(meta.genre || item.project_type || "GAME")}</span>
+            <span>${escapeHtml(genres[0] || item.project_type || "GAME")}</span>
             <h1>${escapeHtml(item.title || "Untitled")}</h1>
             <p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p>
-            <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small></div>
+            <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small>${commerce.hasIap || interactive.some(x => x.startsWith("In-Game Purchases")) ? `<small>In-Game Purchases</small>` : ""}</div>
             <div class="store-product-actions">
-              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Install</button>`}
+              ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : commerce.model === "FREE" ? `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Install</button>` : `<button class="action-button" type="button" disabled title="PARA Commerce checkout is not connected yet">Buy ${escapeHtml(price)}</button>`}
               <button class="action-button action-button--ghost" data-action="store-more-info">•••</button>
             </div>
           </div>
         </div>
       </section>
-      <section class="store-product-details store-product-details--compact">
-        <div><span class="store-product-section-label">ABOUT</span><h2>About</h2><p>${escapeHtml(meta.full_description || meta.short_description || "No description provided.")}</p></div>
-        <aside><span>Developer</span><strong>${escapeHtml(meta.developer_name || "Independent developer")}</strong><span>Runtime</span><strong>${escapeHtml(item.runtime || "PARA")}</strong><span>Release notes</span><strong>${escapeHtml(item.release_notes || "Initial release")}</strong></aside>
+      ${rating ? `<section class="store-rating-card"><div class="store-rating-card__art">${ratingArt ? `<img src="${ratingArt}" alt="${escapeHtml(ESRB_NAMES[ratingCode] || ratingCode)}">` : `<strong>${escapeHtml(ratingCode || "NR")}</strong>`}</div><div class="store-rating-card__copy"><span>AGE RATING${isOfficialRating ? "" : " • PROVISIONAL"}</span><h2>${escapeHtml(ESRB_NAMES[ratingCode] || ratingCode || "Not rated")}</h2>${descriptors.length ? `<p>${descriptors.map(escapeHtml).join(" • ")}</p>` : ""}${interactive.length ? `<div>${interactive.map(x => `<b>${escapeHtml(x)}</b>`).join("")}</div>` : ""}</div></section>` : ""}
+      <section class="store-product-details">
+        <div><span class="store-product-section-label">ABOUT</span><h2>About</h2><p>${escapeHtml(meta.full_description || meta.short_description || "No description provided.")}</p>${genres.length ? `<div class="store-product-tags">${[...new Set(genres)].map(g => `<span>${escapeHtml(g)}</span>`).join("")}</div>` : ""}</div>
+        <aside><span>Developer</span><strong>${escapeHtml(meta.developer_name || "Independent developer")}</strong><span>Runtime</span><strong>${escapeHtml(item.runtime || "PARA")}</strong><span>Architecture</span><strong>${escapeHtml((item.architectures || []).join(", ") || "Not specified")}</strong><span>Release notes</span><strong>${escapeHtml(item.release_notes || "Initial release")}</strong>${commerce.model === "PAID" ? `<span>Price</span><strong>${escapeHtml(price)}</strong>` : ""}</aside>
       </section>
       ${shots.length ? `<section class="store-product-gallery store-product-gallery--prominent"><div class="store-product-gallery__heading"><div><span>MEDIA</span><h2>Screenshots</h2></div><small>${shots.length} image${shots.length === 1 ? "" : "s"} • A to enlarge</small></div><div class="store-product-gallery__track">${shots.map((shot, index) => `<button type="button" class="store-product-shot" data-action="open-store-screenshot" data-shot-index="${index}" aria-label="Open screenshot ${index + 1}"><img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot ${index + 1}"><span>${index + 1} / ${shots.length}</span></button>`).join("")}</div></section>` : ""}
     `;

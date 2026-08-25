@@ -1655,3 +1655,12 @@ html[data-paraboard="open"] #para-app,html[data-paraboard="open"] .topbar{filter
 .browser-app-tabstrip{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));}
 .para-browser--app .para-browser-stage{min-height:0!important;}
 .parapoint-cursor{filter:drop-shadow(0 2px 5px rgba(0,0,0,.7));}
+
+/* ParaStore commerce + ratings pass */
+.store-product-page .content-scroll{overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;scrollbar-width:thin!important;scrollbar-color:rgba(174,104,255,.52) rgba(255,255,255,.03)!important;padding-bottom:160px!important}
+.store-product-page .content-scroll::-webkit-scrollbar{width:9px}.store-product-page .content-scroll::-webkit-scrollbar-thumb{background:rgba(174,104,255,.5);border-radius:99px}.store-product-page .content-scroll::-webkit-scrollbar-track{background:rgba(255,255,255,.025)}
+.store-rating-card{display:flex;align-items:center;gap:20px;margin:0 0 24px;padding:18px 22px;border:1px solid rgba(255,255,255,.12);border-radius:20px;background:linear-gradient(135deg,rgba(18,11,27,.9),rgba(8,7,13,.78));backdrop-filter:blur(18px)}
+.store-rating-card__art{width:72px;min-width:72px;display:grid;place-items:center}.store-rating-card__art img{display:block;max-width:68px;height:92px;object-fit:contain}.store-rating-card__art strong{font-size:2rem}
+.store-rating-card__copy>span{color:#c790ff;font-size:.65rem;font-weight:850;letter-spacing:.14em}.store-rating-card__copy h2{margin:4px 0 7px;font-size:1.35rem}.store-rating-card__copy p{margin:0;color:rgba(241,235,247,.72);font-size:.82rem}.store-rating-card__copy div{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}.store-rating-card__copy b,.store-product-tags span{padding:5px 9px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(255,255,255,.045);font-size:.67rem;color:rgba(244,239,249,.78)}
+.store-product-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.store-product-actions .action-button:disabled{opacity:.52;cursor:not-allowed;transform:none!important;outline:0!important;box-shadow:none!important}
+@media(max-width:700px){.store-rating-card{align-items:flex-start}.store-rating-card__art{width:58px;min-width:58px}.store-rating-card__art img{max-width:54px;height:76px}}
