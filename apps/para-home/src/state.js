@@ -13,7 +13,7 @@ export const BACKGROUND_OPTIONS = Object.freeze({
   "solid-black": { kind: "image", name: "Matte Black", image: "./assets/background-matte-black.png", color: "#020203" },
 });
 
-export const DEFAULT_CONTROL_CENTER_ORDER = Object.freeze(["home", "switcher", "notifications", "friends", "downloads", "music", "network", "audio", "microphone", "controllers", "profile", "power"]);
+export const DEFAULT_CONTROL_CENTER_ORDER = Object.freeze(["home", "switcher", "notifications", "friends", "downloads", "captures", "music", "network", "audio", "microphone", "controllers", "profile", "power"]);
 const DEFAULT_HOME_WIDGET_ORDER = ["network", "storage", "system"];
 
 function detectedSetupChoices() {

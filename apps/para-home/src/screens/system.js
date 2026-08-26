@@ -53,6 +53,7 @@ export function settingsScreen() {
     ["Network", "Wi-Fi, Ethernet & connection test", "network", "⌁", navigator.onLine ? "Online" : "Offline"],
     ["Account", "Profile, sign-in & family", "account", "●", "Local profile"],
     ["Storage", "Games, apps, captures & drives", "storage", "▯", "Manage storage"],
+    ["Media Gallery", "Screenshots and gameplay clips", "media-gallery", "▣", "Captures"],
     ["Accessibility", "Vision, hearing, controls & motion", "accessibility", "◎", "Quick access"],
     ["Notifications", "Friends, downloads & system alerts", "notifications", "◌", "Recent activity"],
     ["Games & Apps", "Library, files & game preferences", "games", "▦", "Your library"],

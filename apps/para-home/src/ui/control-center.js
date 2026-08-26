@@ -9,6 +9,7 @@ const definitions = {
   notifications: { title: "Notifications", icon: "notifications" },
   friends: { title: "Friends", icon: "friends" },
   downloads: { title: "Downloads", icon: "downloads" },
+  captures: { title: "Captures", icon: "captures" },
   music: { title: "Music", icon: "music" },
   network: { title: "Network", icon: "network" },
   audio: { title: "Sound", icon: "sound" },
@@ -29,6 +30,7 @@ function icon(name) {
     notifications: `<path d="M6 9a6 6 0 0 1 12 0c0 7 3 6 3 8H3c0-2 3-1 3-8Z"/><path d="M10 21h4"/>`,
     friends: `<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.5-5 3-7 6-7s5.5 2 6 7M14 14c3.5 0 6 2 6.5 6"/>`,
     downloads: `<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>`,
+    captures: `<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M8 5l1.5-2h5L16 5"/>`,
     music: `<path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>`,
     network: `<path d="M4 10a12 12 0 0 1 16 0M7 14a8 8 0 0 1 10 0M10 18a3 3 0 0 1 4 0"/><circle cx="12" cy="21" r=".5" class="icon-fill"/>`,
     sound: `<path d="M4 10h4l5-4v12l-5-4H4zM16 9a5 5 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>`,
@@ -87,6 +89,9 @@ function contextMarkup(id) {
     const count = currentData.runtime.notifications.length;
     return `<div class="control-center-context__copy"><span>Notifications</span><strong>${count ? `${count} new` : "You’re all caught up"}</strong></div>${count ? actionButton("View Notifications", `data-route="notifications"`, true) : ""}`;
   }
+  if (id === "captures") {
+    return `<div class="control-center-context__copy"><span>Captures</span><strong>Media Gallery</strong><small>Screenshots and gameplay clips</small></div><div class="control-center-power">${actionButton("Take Screenshot", `data-action="capture-screenshot"`, true)}${actionButton("Open Gallery", `data-route="media-gallery"`)}</div>`;
+  }
   if (id === "downloads") {
     const downloads = activeDownloads();
     if (!downloads.length) return `<div class="control-center-context__copy"><span>Downloads</span><strong>No active downloads</strong></div>${actionButton("Open ParaStore", `data-route="parastore"`, true)}`;
@@ -100,6 +105,7 @@ function availableIds({ capabilities, network, audio, microphone, controller, pr
   if (runtime.notifications.length) ids.push("notifications");
   if (capabilities.friends) ids.push("friends");
   ids.push("downloads");
+  ids.push("captures");
   if (capabilities.music) ids.push("music");
   if (capabilities.network && network?.interfaces?.length) ids.push("network");
   ids.push("audio");

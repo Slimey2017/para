@@ -16,6 +16,8 @@ import {
   appsScreen, activateApps, filterApps, launchLinuxApplication,
 } from "./screens/libraries.js";
 import { filesScreen, downloadsScreen, activateFiles, filesBack } from "./screens/files.js";
+import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture } from "./screens/media.js";
+import { captureScreenshot, recordRecentClip } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
@@ -77,6 +79,8 @@ const renderers = {
   apps: appsScreen,
   browser: browserScreen,
   games: gamesScreen,
+  "media-gallery": mediaGalleryScreen,
+  achievements: achievementsScreen,
   demos: demosScreen,
   parastore: paraStoreScreen,
   "store-product": storeProductScreen,
@@ -228,6 +232,8 @@ function render(route) {
   } else if (route === "files" || route === "downloads") {
     cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
     if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
+  } else if (route === "media-gallery") {
+    void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
   } else if (route === "storage") {
     activateStorage();
   } else if (route === "network") {
@@ -596,6 +602,16 @@ async function handleAction(action, target) {
     case "rollback-update": toast("Roll Back Update", "Rollback requires a previous verified system image."); break;
     case "safe-mode": toast("Safe Mode", "Safe Mode will load core PARA services only in the native build."); break;
     case "open-save-history": toast("Save History", "Versioned cloud restore is ready for cloud service integration."); break;
+    case "capture-screenshot":
+      try { await captureScreenshot(); toast("Screenshot saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Screenshot not saved", error?.message || "Capture permission was not granted."); }
+      break;
+    case "capture-clip":
+      try { toast("Recording", "Capturing 8 seconds…"); await recordRecentClip(8000); toast("Clip saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Clip not saved", error?.message || "Capture permission was not granted."); }
+      break;
+    case "delete-capture":
+      try { await removeCapture(target.dataset.captureId); toast("Capture deleted"); focus.focusFirst(); } catch { toast("Couldn’t delete capture"); }
+      break;
+    case "report-crash": toast("Problem report saved", "PARA kept the crash code and technical details for review."); break;
     case "toggle-reduced":
       toggle("reducedMotion", "Reduce motion");
       break;
@@ -1038,7 +1054,8 @@ function showCrashScreen(error) {
   cleanupScreen?.();
   cleanupClock?.();
   const detail = String(error?.stack || error?.message || error || "Unknown error");
-  root.innerHTML = `<section class="screen crash-screen" data-crash-screen><img src="./assets/para-logo.png" alt="" /><span class="eyebrow">PARA encountered a problem.</span><h1>This experience stopped unexpectedly.</h1><div><button class="action-button" data-action="restart-current-app" data-autofocus="true">Restart App</button><button class="action-button action-button--ghost" data-action="return-home-after-crash">Return Home</button></div><details><summary>Technical details</summary><pre></pre></details></section>`;
+  const crashCode = `PARA-GAME-${String(Math.abs([...detail].reduce((sum, ch) => ((sum * 31) + ch.charCodeAt(0)) | 0, 17)) % 1000).padStart(3, "0")}`;
+  root.innerHTML = `<section class="screen crash-screen" data-crash-screen><img src="./assets/para-logo.png" alt="" /><span class="eyebrow">PARA encountered a problem.</span><h1>This experience stopped unexpectedly.</h1><p class="crash-code">${crashCode}</p><div><button class="action-button" data-action="restart-current-app" data-autofocus="true">Restart App</button><button class="action-button action-button--ghost" data-action="report-crash">Report Problem</button><button class="action-button action-button--ghost" data-action="return-home-after-crash">Return Home</button></div><details><summary>Technical details</summary><pre></pre></details></section>`;
   root.querySelector("pre").textContent = detail;
   focus.focusFirst();
 }

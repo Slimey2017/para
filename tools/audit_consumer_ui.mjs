@@ -12,6 +12,7 @@ const files = await import("../apps/para-home/src/screens/files.js");
 const system = await import("../apps/para-home/src/screens/system.js");
 const personalization = await import("../apps/para-home/src/screens/personalization.js");
 const experiences = await import("../apps/para-home/src/screens/experiences.js");
+const media = await import("../apps/para-home/src/screens/media.js");
 
 const renderers = {
   startup: boot.startupScreen,
@@ -22,6 +23,8 @@ const renderers = {
   home: home.homeScreen,
   apps: libraries.appsScreen,
   games: experiences.gamesScreen,
+  "media-gallery": media.mediaGalleryScreen,
+  achievements: media.achievementsScreen,
   demos: experiences.demosScreen,
   parastore: experiences.paraStoreScreen,
   creator: experiences.creatorScreen,

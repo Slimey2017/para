@@ -109,8 +109,8 @@ export function gamesScreen() {
     eyebrow: "Explore",
     className: "demo-library-page",
     body: cards.length
-      ? `<div class="demo-library">${cards.join("")}</div>`
-      : `<div class="library-empty"><span>◉</span><h2>No games installed</h2><button class="action-button" data-route="parastore" data-autofocus="true">Open ParaStore</button></div>`,
+      ? `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div><div class="demo-library">${cards.join("")}</div>`
+      : `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div><div class="library-empty"><span>◉</span><h2>No games installed</h2><button class="action-button" data-route="parastore" data-autofocus="true">Open ParaStore</button></div>`,
   });
 }
 
