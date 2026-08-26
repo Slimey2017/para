@@ -1,6 +1,6 @@
 import { page } from "../ui/components.js";
 import { escapeHtml } from "../services/para-api.js";
-import { activateParaPoint, deactivateParaPoint, isParaPointActive } from "../ui/parapoint.js";
+import { deactivateParaPoint, isParaPointActive } from "../ui/parapoint.js";
 
 const START_PAGE = "about:blank";
 let historyStack = [];
@@ -15,7 +15,13 @@ function normalizeAddress(raw) {
 }
 
 function browserStartMarkup() {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#080711;color:#fff;font-family:system-ui;height:100%}body{display:grid;place-items:center}.start{max-width:760px;text-align:center;padding:40px}.mark{font-size:70px;color:#8d55ff}.start h1{font-size:44px;margin:8px}.start p{color:#aaa;line-height:1.5}.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:30px}.tile{background:#151122;border:1px solid #30244a;border-radius:18px;padding:20px;color:#ddd}</style></head><body><main class="start"><div class="mark">P</div><h1>PARA Browser</h1><p>Enter a website or search above. ParaPoint lets your controller act like a mouse, and ParaBoard opens for text entry.</p><div class="tiles"><div class="tile">Right stick<br><b>Move pointer</b></div><div class="tile">A<br><b>Click</b></div><div class="tile">Text field<br><b>ParaBoard</b></div></div></main></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+  *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#090711;color:#fff;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}body{min-height:100vh;display:grid;place-items:center;overflow:auto;background:radial-gradient(circle at 50% 42%,rgba(111,52,221,.22),transparent 34%),linear-gradient(180deg,#0b0814,#07060c 68%)}
+  .start{width:min(860px,calc(100% - 48px));text-align:center;padding:60px 24px 80px}.mark{width:76px;height:76px;margin:0 auto 18px;border-radius:24px;display:grid;place-items:center;font-size:42px;font-weight:950;background:linear-gradient(145deg,#8e4dff,#4935d7);box-shadow:0 18px 65px rgba(117,58,240,.32)}
+  h1{font-size:clamp(34px,5vw,56px);margin:0 0 10px;letter-spacing:-.04em}.lead{margin:0 auto;color:#a79eaf;line-height:1.55;max-width:590px;font-size:15px}.search{margin:32px auto 0;max-width:680px;padding:17px 20px;border:1px solid rgba(255,255,255,.13);border-radius:18px;background:rgba(5,4,9,.88);color:#b9b0c3;text-align:left;box-shadow:0 15px 50px rgba(0,0,0,.28)}
+  .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px auto 0;max-width:680px}.quick a{display:block;padding:17px 14px;border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(20,15,30,.72);color:#ddd6e7;text-decoration:none;font-size:13px}.quick a:hover{border-color:#8755ff;background:#211535}.quick b{display:block;margin-bottom:4px;color:#fff}.foot{margin-top:28px;color:#685f73;font-size:11px}
+  @media(max-width:620px){.quick{grid-template-columns:1fr}.start{padding-top:38px}}
+  </style></head><body><main class="start"><div class="mark">P</div><h1>New tab</h1><p class="lead">Search from the address bar or open a favorite site. ParaPoint stays off until you turn it on.</p><div class="search">⌕ &nbsp; Search or enter a website above</div><div class="quick"><a href="https://www.youtube.com"><b>YouTube</b>Video</a><a href="https://www.wikipedia.org"><b>Wikipedia</b>Reference</a><a href="https://www.google.com"><b>Google</b>Search</a></div><div class="foot">PARA Browser • Web edition</div></main></body></html>`;
 }
 
 export function browserScreen() {
@@ -46,6 +52,12 @@ export function browserScreen() {
       </header>
       <div class="para-browser-stage">
         <iframe data-browser-frame title="PARA Browser page" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads" referrerpolicy="no-referrer"></iframe>
+        <aside class="browser-first-run" data-browser-tutorial hidden aria-label="Para Browser controls">
+          <header><span>CONTROLLER BROWSING</span><button type="button" data-action="dismiss-browser-tutorial" aria-label="Dismiss browser tutorial">×</button></header>
+          <strong>Browse from the couch</strong>
+          <div><span><b>Right stick</b> Move ParaPoint</span><span><b>A</b> Click</span><span><b>Y</b> ParaBoard</span></div>
+          <small>ParaPoint only turns on when you choose it.</small>
+        </aside>
         <div class="browser-site-note" data-browser-note hidden>That site blocks embedded browsing in the PARA web edition. The native PARA Browser will open it normally.</div>
       </div>
       <footer class="browser-controller-help"><span><b>A</b> Select</span><span><b>B</b> Back</span><span><b>Y</b> ParaBoard</span><span><b>Right stick</b> ParaPoint</span><span><b>L3</b> Pointer</span><span><b>PARA</b> Control Center</span></footer>
@@ -89,8 +101,12 @@ export function activateBrowser() {
   historyStack = [START_PAGE];
   historyIndex = 0;
   loadFrame(START_PAGE, false);
-  activateParaPoint();
+  deactivateParaPoint();
   updateParaPointState();
+  const tutorial = document.querySelector("[data-browser-tutorial]");
+  let tutorialSeen = false;
+  try { tutorialSeen = localStorage.getItem("para.browser.tutorialSeen") === "1"; } catch {}
+  if (tutorial && !tutorialSeen) tutorial.hidden = false;
   const onChange = () => updateParaPointState();
   const onBack = () => { if (!browserBack()) deactivateParaPoint(); updateParaPointState(); };
   const onEnter = (event) => {

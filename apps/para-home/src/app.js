@@ -892,6 +892,12 @@ async function handleAction(action, target) {
       toggleParaPoint();
       updateParaPointState();
       break;
+    case "dismiss-browser-tutorial": {
+      const tutorial = document.querySelector("[data-browser-tutorial]");
+      if (tutorial) tutorial.hidden = true;
+      try { localStorage.setItem("para.browser.tutorialSeen", "1"); } catch {}
+      break;
+    }
     case "browser-go": {
       const address = document.querySelector("[data-browser-address]");
       browserNavigate(address?.value || "");
