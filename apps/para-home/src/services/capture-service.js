@@ -171,5 +171,7 @@ export async function shareCapture(id, target = "system") {
   link.download = file.name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
-  return target === "phone" ? "Saved for phone transfer" : "Capture exported";
+  if (target === "phone") return "Capture exported for phone transfer";
+  if (target === "files") return "Capture exported to your Downloads folder";
+  return "Capture exported";
 }

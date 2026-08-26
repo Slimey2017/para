@@ -359,6 +359,32 @@ function openSwitcher() {
   requestAnimationFrame(()=>focus.focusFirst());
 }
 
+function openShareCenter(target) {
+  const captureId = target?.dataset?.captureId;
+  if (!captureId || !overlay.hidden) return false;
+  const captureKind = target.dataset.captureKind === "clip" ? "Gameplay clip" : "Screenshot";
+  clearTimeout(overlayCloseTimer);
+  overlayReturnFocus = focus.current || target;
+  overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div>
+    <section class="share-center" role="dialog" aria-modal="true" aria-label="Share Center">
+      <header class="share-center__header"><div><span>PARA SHARE CENTER</span><h2>Share ${captureKind}</h2><small>Choose where this capture goes.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close Share Center">×</button></header>
+      <div class="share-center__destinations" data-focus-zone="share-destinations">
+        <button type="button" class="share-destination share-destination--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${captureId}" data-autofocus="true"><b>▶</b><span><strong>YouTube</strong><small>Upload video or Short</small></span><em>Connect</em></button>
+        <button type="button" class="share-destination share-destination--facebook" data-action="share-capture" data-share-target="facebook" data-capture-id="${captureId}"><b>f</b><span><strong>Facebook</strong><small>Post to your connected account</small></span><em>Connect</em></button>
+        <button type="button" class="share-destination share-destination--chat" data-action="share-capture" data-share-target="chat" data-capture-id="${captureId}"><b>◌</b><span><strong>PARA Chat</strong><small>Send to a friend or group</small></span><em>PARA</em></button>
+        <button type="button" class="share-destination share-destination--phone" data-action="share-capture" data-share-target="phone" data-capture-id="${captureId}"><b>▯</b><span><strong>Send to Phone</strong><small>Export for nearby or companion transfer</small></span><em>Export</em></button>
+        <button type="button" class="share-destination share-destination--system" data-action="share-capture" data-share-target="system" data-capture-id="${captureId}"><b>↗</b><span><strong>More</strong><small>Open the device share sheet</small></span><em>Share</em></button>
+        <button type="button" class="share-destination share-destination--save" data-action="share-capture" data-share-target="files" data-capture-id="${captureId}"><b>⇩</b><span><strong>Save to Files</strong><small>Export the original capture</small></span><em>Save</em></button>
+      </div>
+      <footer class="share-center__footer"><span><b data-prompt="confirm">A</b> Select</span><span><b data-prompt="back">B</b> Back</span><span>Connected apps will publish directly in native PARA.</span></footer>
+    </section>`;
+  overlay.hidden = false;
+  overlay.classList.remove("is-closing");
+  updateControllerPrompts();
+  requestAnimationFrame(() => focus.focusFirst({ zone: "share-destinations" }));
+  return true;
+}
+
 function openGameOptions(target) {
   const button = target?.closest?.('[data-continue-item], [data-store-id], .demo-card');
   if (!button) return false;
@@ -627,16 +653,23 @@ async function handleAction(action, target) {
     case "save-replay":
       try { const ms = Number(target.dataset.replayMs || 60000); await saveReplayClip(ms); toast("Recent gameplay saved", `Saved the last ${ms >= 60000 ? Math.round(ms/60000) + "m" : Math.round(ms/1000) + "s"}`); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Replay not saved", error?.message || "Replay is unavailable."); }
       break;
+    case "open-share-center":
+      openShareCenter(target);
+      break;
     case "share-capture":
       try {
         const destination = target.dataset.shareTarget || "system";
-        if (["youtube","facebook","chat"].includes(destination)) {
-          await shareCapture(target.dataset.captureId, destination);
-          toast(`Ready for ${destination === "chat" ? "PARA Chat" : destination[0].toUpperCase()+destination.slice(1)}`, "Capture exported. Account/API handoff connects in the native PARA build.");
-        } else {
-          const result = await shareCapture(target.dataset.captureId, destination);
-          toast("Share", result);
+        if (["youtube", "facebook"].includes(destination)) {
+          toast(`${destination === "youtube" ? "YouTube" : "Facebook"} account needed`, "Direct publishing connects through Settings → Connected Apps in native PARA.");
+          break;
         }
+        if (destination === "chat") {
+          toast("PARA Chat sharing", "Recipient picker connects when PARA accounts and messaging service are online.");
+          break;
+        }
+        const result = await shareCapture(target.dataset.captureId, destination);
+        closeControlCenter(false);
+        toast(destination === "phone" ? "Send to Phone" : destination === "files" ? "Saved to Files" : "Share", result);
       } catch (error) { toast("Couldn’t share capture", error?.message || "Sharing is unavailable."); }
       break;
     case "media-toggle":
