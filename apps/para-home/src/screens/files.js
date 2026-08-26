@@ -653,3 +653,13 @@ export function activateFiles({ focus, initialLocation = "home" }) {
     document.removeEventListener("para-options", onOptions);
   };
 }
+
+export function downloadManagerScreen() {
+  return `<section class="screen page downloads-manager-page"><header class="page-header"><span class="eyebrow">System</span><h1>Downloads & Updates</h1><p>Install queue, updates, and completed downloads.</p></header><div data-download-manager><div class="library-loading"><span></span><strong>Reading queue…</strong></div></div></section>`;
+}
+export async function activateDownloadManager({ focus }={}) {
+  const host=document.querySelector("[data-download-manager]"); if(!host) return ()=>{};
+  const { profileRuntime } = await import("../services/experience-runtime.js");
+  const render=()=>{ const items=profileRuntime().downloads||[]; host.innerHTML=items.length?`<div class="saved-data-list">${items.map((x,i)=>`<article class="notification-row" ${i===0?'data-autofocus="true"':''}><span>↓</span><div><strong>${escapeHtml(x.title||x.id)}</strong><small>${x.status==='complete'?'Installed':x.status==='paused'?`Paused · ${x.progress||0}%`:`Downloading · ${x.progress||0}%`}</small></div><div class="download-actions">${x.status==='downloading'?`<button data-action="pause-download" data-download-id="${escapeHtml(x.id)}">Pause</button>`:''}${x.status==='paused'?`<button data-action="resume-download" data-download-id="${escapeHtml(x.id)}">Resume</button>`:''}${x.status!=='complete'?`<button data-action="cancel-download" data-download-id="${escapeHtml(x.id)}">Cancel</button>`:''}</div></article>`).join('')}</div>`:`<div class="library-empty"><span>↓</span><h2>Nothing downloading</h2><p>New games and updates will appear here.</p></div>`; focus?.focusFirst?.(); };
+  render(); const timer=setInterval(render,1000); document.addEventListener("para-runtimechange",render); return ()=>{clearInterval(timer);document.removeEventListener("para-runtimechange",render);};
+}

@@ -15,14 +15,14 @@ import { homeScreen, activateHome } from "./screens/home.js";
 import {
   appsScreen, activateApps, filterApps, launchLinuxApplication,
 } from "./screens/libraries.js";
-import { filesScreen, downloadsScreen, activateFiles, filesBack } from "./screens/files.js";
+import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture } from "./screens/media.js";
 import { captureScreenshot, recordRecentClip } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
   accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen, audioSettingsScreen,
-  notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen,
+  notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen, activateSavedData,
 } from "./screens/system.js";
 import {
   gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
@@ -46,7 +46,7 @@ import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, su
 import { mediaSessionAction, setMediaVolume, setGameMediaBalance, mediaSessionState } from "./services/media-session.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
-  activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall,
+  activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall, pauseDownload, resumeDownload, cancelDownload,
 } from "./services/experience-runtime.js";
 import { toggleMicrophone } from "./services/microphone.js";
 import {
@@ -95,7 +95,7 @@ const renderers = {
   "demo-racer": () => gameScreen("demo-racer"),
   "demo-platformer": () => gameScreen("demo-platformer"),
   files: filesScreen,
-  downloads: downloadsScreen,
+  downloads: downloadManagerScreen,
   controller: controllerScreen,
   storage: storageScreen,
   "saved-data": savedDataScreen,
@@ -230,8 +230,12 @@ function render(route) {
     cleanupScreen = activateStoreCart();
   } else if (route === "store-game") {
     cleanupScreen = activateStoreGame();
-  } else if (route === "files" || route === "downloads") {
-    cleanupScreen = activateFiles({ focus, initialLocation: route === "downloads" ? "downloads" : "home" });
+  } else if (route === "files") {
+    cleanupScreen = activateFiles({ focus, initialLocation: "home" });
+  } else if (route === "downloads") {
+    cleanupScreen = await activateDownloadManager({ focus });
+  } else if (route === "saved-data") {
+    cleanupScreen = await activateSavedData();
     if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
   } else if (route === "media-gallery") {
     void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
@@ -602,7 +606,10 @@ async function handleAction(action, target) {
     case "network-recovery": toast("Network Recovery", "PARA Network recovery check started."); break;
     case "rollback-update": toast("Roll Back Update", "Rollback requires a previous verified system image."); break;
     case "safe-mode": toast("Safe Mode", "Safe Mode will load core PARA services only in the native build."); break;
-    case "open-save-history": toast("Save History", "Versioned cloud restore is ready for cloud service integration."); break;
+    case "open-save-history": toast("Save History", "Local restore points are protected. Cloud restore will appear when PARA Cloud is connected."); break;
+    case "pause-download": pauseDownload(target.dataset.downloadId); toast("Download paused"); break;
+    case "resume-download": resumeDownload(target.dataset.downloadId); toast("Download resumed"); break;
+    case "cancel-download": cancelDownload(target.dataset.downloadId); toast("Download canceled"); break;
     case "capture-screenshot":
       try { await captureScreenshot(); toast("Screenshot saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Screenshot not saved", error?.message || "Capture permission was not granted."); }
       break;

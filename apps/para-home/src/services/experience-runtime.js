@@ -186,3 +186,23 @@ export function favoriteExperience(id, favorite = true) {
   emit();
   return favorite;
 }
+
+export function pauseDownload(id) {
+  const runtime = refreshDemoDownloads();
+  const now = Date.now();
+  const downloads = runtime.downloads.map((item) => {
+    if (item.id !== id || item.status !== "downloading") return item;
+    const elapsed = Math.max(0, now - item.startedAt);
+    return { ...item, status: "paused", elapsedMs: elapsed, progress: Math.min(99, Math.floor((elapsed / item.durationMs) * 100)) };
+  });
+  setProfileRuntime({ downloads }); emit(); return true;
+}
+export function resumeDownload(id) {
+  const runtime = getProfileRuntime(); const now = Date.now();
+  const downloads = runtime.downloads.map((item) => item.id === id && item.status === "paused" ? { ...item, status: "downloading", startedAt: now - (item.elapsedMs || 0) } : item);
+  setProfileRuntime({ downloads }); emit(); return true;
+}
+export function cancelDownload(id) {
+  const runtime = getProfileRuntime();
+  setProfileRuntime({ downloads: runtime.downloads.filter((item) => item.id !== id) }); emit(); return true;
+}

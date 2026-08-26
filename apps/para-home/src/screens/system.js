@@ -194,6 +194,10 @@ export function recoveryScreen() {
 }
 
 export function savedDataScreen() {
-  const saves = [{game:"Slimey Battle Royale",size:"428 MB",when:"Today · 11:42 PM",cloud:"Synced"},{game:"Kashimo",size:"91 MB",when:"Yesterday · 9:14 PM",cloud:"3 versions"}];
-  return page({ title:"Saved Data", description:"Local saves, cloud history, and restore points.", eyebrow:"Storage", body:`<section class="panel"><div class="panel__head"><div><span class="eyebrow">Save protection</span><h2>Local + Cloud</h2></div><span class="status-ok">Synced</span></div><p>PARA keeps game installations separate from saved data so uninstalling a game does not silently erase progress.</p></section><div class="saved-data-list">${saves.map((x,i)=>`<button class="notification-row" ${i===0?"data-autofocus='true'":""} data-action="open-save-history"><span>☁</span><div><strong>${x.game}</strong><small>${x.size} · ${x.when}</small></div><b>${x.cloud}</b></button>`).join("")}</div>` });
+  return page({ title:"Saved Data", description:"Local saves, restore points, and cloud-sync readiness.", eyebrow:"Storage", body:`<section class="panel"><div class="panel__head"><div><span class="eyebrow">Save protection</span><h2>Never tied to uninstall</h2></div><span class="status-ok">Protected</span></div><p>PARA keeps game installations separate from saved data. Local versions remain available even when cloud services are offline.</p></section><div data-saved-data-view><div class="library-loading"><span></span><strong>Reading saves…</strong></div></div>` });
+}
+export async function activateSavedData() {
+  const host=document.querySelector("[data-saved-data-view]"); if(!host)return()=>{};
+  const {listSaveData}=await import("../services/save-data.js");
+  const render=()=>{const saves=listSaveData(); host.innerHTML=saves.length?`<div class="saved-data-list">${saves.map((x,i)=>`<button class="notification-row" ${i===0?"data-autofocus='true'":""} data-action="open-save-history" data-save-id="${x.gameId}"><span>☁</span><div><strong>${x.title}</strong><small>${new Date(x.updatedAt).toLocaleString()} · ${x.versions.length} restore point${x.versions.length===1?'':'s'}</small></div><b>${x.syncState}</b></button>`).join('')}</div>`:`<div class="library-empty"><span>☁</span><h2>No save data yet</h2><p>Supported games will create local saves here. PARA does not invent demo saves.</p></div>`}; render(); document.addEventListener("para-savedatachange",render); return()=>document.removeEventListener("para-savedatachange",render);
 }

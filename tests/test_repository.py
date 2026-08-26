@@ -296,3 +296,13 @@ class RepositoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def test_core_resilience_services_present():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    save = (root / "apps/para-home/src/services/save-data.js").read_text()
+    runtime = (root / "apps/para-home/src/services/experience-runtime.js").read_text()
+    system = (root / "apps/para-home/src/screens/system.js").read_text()
+    assert "VERSION_LIMIT" in save and "restoreSaveVersion" in save
+    assert "pauseDownload" in runtime and "resumeDownload" in runtime and "cancelDownload" in runtime
+    assert "PARA does not invent demo saves" in system
