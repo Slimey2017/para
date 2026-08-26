@@ -133,6 +133,47 @@ export async function saveReplayClip(durationMs = 60_000) {
   return saveCapture({ type: "clip", blob, durationMs: actualDuration });
 }
 
+
+let manualRecording = null;
+
+export function manualRecordingStatus() {
+  return { active: Boolean(manualRecording), startedAt: manualRecording?.startedAt || 0 };
+}
+
+export async function startManualRecording() {
+  if (manualRecording) return manualRecordingStatus();
+  const stream = await requestScreenStream({ audio: true });
+  const mimeType = recorderMimeType();
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks = [];
+  const startedAt = Date.now();
+  recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+  recorder.start(1000);
+  stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+    if (manualRecording?.stream === stream) void stopManualRecording();
+  }, { once: true });
+  manualRecording = { stream, recorder, chunks, startedAt };
+  return manualRecordingStatus();
+}
+
+export async function stopManualRecording() {
+  if (!manualRecording) throw new Error("No PARA recording is active.");
+  const current = manualRecording;
+  manualRecording = null;
+  const stopped = new Promise((resolve) => {
+    current.recorder.addEventListener("stop", resolve, { once: true });
+  });
+  if (current.recorder.state !== "inactive") {
+    current.recorder.requestData();
+    current.recorder.stop();
+    await stopped;
+  }
+  current.stream.getTracks().forEach((track) => track.stop());
+  const blob = new Blob(current.chunks, { type: current.recorder.mimeType || "video/webm" });
+  if (!blob.size) throw new Error("The recording was empty.");
+  return saveCapture({ type: "clip", blob, durationMs: Date.now() - current.startedAt });
+}
+
 export async function recordRecentClip(durationMs = 8000) {
   const stream = await requestScreenStream({ audio: true });
   try {

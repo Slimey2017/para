@@ -1,18 +1,88 @@
 import { page } from "../ui/components.js";
 import { deleteCapture, listCaptures } from "../services/capture-service.js";
 
-const liveUrls = new Set();
+const liveUrls = new Map();
 const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+let activeItems = [];
+let selectedCaptureId = "";
+let galleryFilter = "all";
 
-function releaseUrls() { for (const url of liveUrls) URL.revokeObjectURL(url); liveUrls.clear(); }
+function releaseUrls() {
+  for (const url of liveUrls.values()) URL.revokeObjectURL(url);
+  liveUrls.clear();
+}
+
+function mediaUrl(item) {
+  if (!liveUrls.has(item.id)) liveUrls.set(item.id, URL.createObjectURL(item.blob));
+  return liveUrls.get(item.id);
+}
+
+function durationLabel(ms = 0) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = String(total % 60).padStart(2, "0");
+  return minutes ? `${minutes}:${seconds}` : `0:${seconds}`;
+}
+
+function details(item) {
+  if (item.type === "clip") return `${durationLabel(item.durationMs)} · ${item.mimeType?.includes("webm") ? "WebM" : "Video"}`;
+  return `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}${item.width ? " · " : ""}Screenshot`;
+}
+
+function heroMarkup(item) {
+  if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
+  const url = mediaUrl(item);
+  const media = item.type === "clip"
+    ? `<video src="${url}" preload="metadata" playsinline muted></video><span class="capture-hero__play" aria-hidden="true">▶</span>`
+    : `<img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}">`;
+  return `<article class="capture-hero" data-selected-capture="${item.id}">
+    <button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View ${item.type === "clip" ? "gameplay clip" : "screenshot"} fullscreen">${media}</button>
+    <div class="capture-hero__info">
+      <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
+      <div class="capture-hero__actions" data-focus-zone="capture-actions">
+        <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
+        <button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}"><b>↗</b><span>Share</span></button>
+        <button type="button" class="capture-action" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}"><b>⇩</b><span>Save</span></button>
+        <button type="button" class="capture-action capture-action--danger" data-action="delete-capture" data-capture-id="${item.id}"><b>×</b><span>Delete</span></button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function railMarkup(items) {
+  if (!items.length) return "";
+  return `<section class="capture-rail" aria-label="Captures"><header><strong>${items.length} ${items.length === 1 ? "capture" : "captures"}</strong><small>Choose a capture to preview</small></header><div class="capture-rail__track" data-focus-zone="capture-rail">${items.map((item) => {
+    const url = mediaUrl(item);
+    const media = item.type === "clip" ? `<video src="${url}" preload="metadata" muted playsinline></video>` : `<img src="${url}" alt="">`;
+    return `<button type="button" class="capture-thumb ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${durationLabel(item.durationMs)}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${fmt.format(item.createdAt)}</small></span></button>`;
+  }).join("")}</div></section>`;
+}
+
+function filteredItems() {
+  if (galleryFilter === "videos") return activeItems.filter((item) => item.type === "clip");
+  if (galleryFilter === "screenshots") return activeItems.filter((item) => item.type !== "clip");
+  return activeItems;
+}
+
+function refreshGalleryMarkup({ keepFocus = false } = {}) {
+  const host = document.querySelector("[data-media-gallery]");
+  if (!host) return;
+  const items = filteredItems();
+  if (!items.some((item) => item.id === selectedCaptureId)) selectedCaptureId = items[0]?.id || "";
+  const selected = items.find((item) => item.id === selectedCaptureId) || items[0] || null;
+  const focusId = keepFocus ? document.activeElement?.dataset?.captureId : null;
+  host.innerHTML = `${heroMarkup(selected)}${railMarkup(items)}`;
+  document.querySelectorAll("[data-media-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.mediaFilter === galleryFilter));
+  if (focusId) document.querySelector(`[data-action="select-media-capture"][data-capture-id="${focusId}"]`)?.focus();
+}
 
 export function mediaGalleryScreen() {
   return page({
     title: "Media Gallery",
-    description: "Screenshots and gameplay clips captured on PARA.",
-    eyebrow: "Captures",
-    className: "media-gallery-page",
-    body: `<section class="media-gallery-toolbar"><div><span class="eyebrow">Your captures</span><h2>Gallery</h2></div><div><button class="action-button" data-action="start-replay" data-autofocus="true">Start PARA Replay</button><button class="action-button action-button--ghost" data-action="save-replay" data-replay-ms="30000">Save Last 30s</button><button class="action-button action-button--ghost" data-action="save-replay" data-replay-ms="60000">Save Last 1m</button><button class="action-button action-button--ghost" data-action="save-replay" data-replay-ms="300000">Save Last 5m</button><button class="action-button action-button--ghost" data-action="capture-screenshot">Screenshot</button></div></section><div data-media-gallery><div class="library-loading"><span></span><strong>Opening captures…</strong></div></div>`,
+    description: "Screenshots and gameplay videos captured on PARA.",
+    eyebrow: "Capture",
+    className: "media-gallery-page capture-gallery-page",
+    body: `<section class="capture-gallery-topbar"><div class="capture-filter-tabs" role="tablist" aria-label="Media filter"><button type="button" class="is-active" data-action="filter-media-gallery" data-media-filter="all">All</button><button type="button" data-action="filter-media-gallery" data-media-filter="videos">Videos</button><button type="button" data-action="filter-media-gallery" data-media-filter="screenshots">Screenshots</button></div><button type="button" class="capture-open-controls" data-action="open-control-center">◎ Capture Controls</button></section><div data-media-gallery><div class="library-loading"><span></span><strong>Opening captures…</strong></div></div>`,
   });
 }
 
@@ -21,25 +91,32 @@ export async function activateMediaGallery() {
   const host = document.querySelector("[data-media-gallery]");
   if (!host) return () => releaseUrls();
   try {
-    const items = await listCaptures();
-    if (!items.length) {
-      host.innerHTML = `<div class="library-empty media-gallery-empty"><span>▣</span><h2>No captures yet</h2><p>Take a screenshot or record a short clip. PARA asks before sharing your screen.</p></div>`;
-      return () => releaseUrls();
-    }
-    host.innerHTML = `<div class="media-gallery-grid">${items.map((item) => {
-      const url = URL.createObjectURL(item.blob); liveUrls.add(url);
-      const label = item.type === "clip" ? `${Math.round((item.durationMs || 0) / 1000)}s clip` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
-      const preview = item.type === "clip" ? `<video src="${url}" controls preload="metadata" playsinline></video>` : `<img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}">`;
-      return `<article class="media-gallery-card" data-capture-id="${item.id}"><div class="media-gallery-preview">${preview}</div><div class="media-gallery-card__copy"><span>${item.type === "clip" ? "GAMEPLAY CLIP" : "SCREENSHOT"}</span><strong>${fmt.format(item.createdAt)}</strong><small>${label}</small><div class="media-gallery-actions"><button type="button" class="media-share-primary" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}">Share</button><button type="button" data-action="delete-capture" data-capture-id="${item.id}">Delete</button></div></div></article>`;
-    }).join("")}</div>`;
+    activeItems = await listCaptures();
+    if (!selectedCaptureId || !activeItems.some((item) => item.id === selectedCaptureId)) selectedCaptureId = activeItems[0]?.id || "";
+    refreshGalleryMarkup();
   } catch (error) {
-    host.innerHTML = `<div class="library-empty"><span>!</span><h2>Gallery could not open</h2><p>${String(error?.message || "Capture storage is unavailable.")}</p></div>`;
+    host.innerHTML = `<div class="capture-gallery-empty"><span>!</span><h2>Gallery could not open</h2><p>${String(error?.message || "Capture storage is unavailable.")}</p></div>`;
   }
   return () => releaseUrls();
 }
 
+export function selectMediaCapture(id) {
+  if (!activeItems.some((item) => item.id === id)) return false;
+  selectedCaptureId = id;
+  refreshGalleryMarkup({ keepFocus: true });
+  return true;
+}
+
+export function filterMediaGallery(filter = "all") {
+  galleryFilter = ["videos", "screenshots"].includes(filter) ? filter : "all";
+  selectedCaptureId = filteredItems()[0]?.id || "";
+  refreshGalleryMarkup();
+  return true;
+}
+
 export async function removeCapture(id) {
   await deleteCapture(id);
+  if (selectedCaptureId === id) selectedCaptureId = "";
   return activateMediaGallery();
 }
 

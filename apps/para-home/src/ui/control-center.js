@@ -3,6 +3,7 @@ import { paraApi, escapeHtml } from "../services/para-api.js";
 import { activeDownloads, profileRuntime, runningExperiences } from "../services/experience-runtime.js";
 import { microphoneState } from "../services/microphone.js";
 import { mediaSessionState } from "../services/media-session.js";
+import { replayStatus, manualRecordingStatus } from "../services/capture-service.js";
 
 const definitions = {
   home: { title: "Home", icon: "home" },
@@ -91,7 +92,9 @@ function contextMarkup(id) {
     return `<div class="control-center-context__copy"><span>Notifications</span><strong>${count ? `${count} new` : "You’re all caught up"}</strong></div>${count ? actionButton("View Notifications", `data-route="notifications"`, true) : ""}`;
   }
   if (id === "captures") {
-    return `<div class="control-center-context__copy"><span>Captures</span><strong>Media Gallery</strong><small>Screenshots and gameplay clips</small></div><div class="control-center-power">${actionButton("Take Screenshot", `data-action="capture-screenshot"`, true)}${actionButton("Open Gallery", `data-route="media-gallery"`)}</div>`;
+    const recording = manualRecordingStatus();
+    const replay = replayStatus();
+    return `<div class="control-center-context__copy"><span>Capture</span><strong>${recording.active ? "Recording now" : replay.active ? "PARA Replay ready" : "Capture gameplay"}</strong><small>${recording.active ? "Stop to save this recording" : replay.active ? "Save what happened, take a screenshot, or start a full recording" : "Screenshots, recordings, and recent gameplay"}</small></div><div class="capture-quick-actions">${actionButton("▣ Screenshot", `data-action="capture-screenshot"`, true)}${actionButton("↺ Save Recent", `data-action="open-replay-menu"`)}${actionButton(recording.active ? "■ Stop & Save" : "● Start Recording", `data-action="toggle-manual-recording"`)}${actionButton("▤ Media Gallery", `data-route="media-gallery"`)}</div>`;
   }
   if (id === "music") {
     const media = currentData.media || mediaSessionState();

@@ -16,8 +16,8 @@ import {
   appsScreen, activateApps, filterApps, launchLinuxApplication,
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
-import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture } from "./screens/media.js";
-import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture } from "./services/capture-service.js";
+import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
+import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
@@ -125,6 +125,7 @@ let preferenceTimer = null;
 let idleSleepTimer = null;
 let idleDimTimer = null;
 let overlayCloseTimer = null;
+let captureViewerUrl = "";
 let activeInputDevice = "keyboard";
 
 function toast(title, message = "") {
@@ -319,6 +320,7 @@ async function openControlCenter() {
 
 function closeControlCenter(restore = true) {
   if (overlay.hidden) return;
+  if (captureViewerUrl) { URL.revokeObjectURL(captureViewerUrl); captureViewerUrl = ""; }
   overlay.classList.add("is-closing");
   const returnTarget = restore ? overlayReturnFocus : null;
   clearTimeout(overlayCloseTimer);
@@ -361,7 +363,7 @@ function openSwitcher() {
 
 function openShareCenter(target) {
   const captureId = target?.dataset?.captureId;
-  if (!captureId || !overlay.hidden) return false;
+  if (!captureId || (!overlay.hidden && !overlay.querySelector("[data-capture-viewer]"))) return false;
   const captureKind = target.dataset.captureKind === "clip" ? "Gameplay clip" : "Screenshot";
   clearTimeout(overlayCloseTimer);
   overlayReturnFocus = focus.current || target;
@@ -385,6 +387,63 @@ function openShareCenter(target) {
   return true;
 }
 
+
+async function openCaptureViewer(captureId) {
+  const items = await listCaptures();
+  const index = items.findIndex((item) => item.id === captureId);
+  if (index < 0) { toast("Capture not found"); return false; }
+  const item = items[index];
+  const previous = items[(index - 1 + items.length) % items.length];
+  const next = items[(index + 1) % items.length];
+  if (captureViewerUrl) URL.revokeObjectURL(captureViewerUrl);
+  captureViewerUrl = URL.createObjectURL(item.blob);
+  clearTimeout(overlayCloseTimer);
+  if (overlay.hidden) overlayReturnFocus = focus.current;
+  const media = item.type === "clip"
+    ? `<video src="${captureViewerUrl}" controls autoplay playsinline></video>`
+    : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
+  const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
+  const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
+  overlay.innerHTML = `<div class="capture-viewer" data-capture-viewer data-capture-id="${item.id}" data-prev-id="${previous.id}" data-next-id="${next.id}">
+    <header class="capture-viewer__header"><div><span>PARA MEDIA</span><strong>${item.type === "clip" ? "Gameplay video" : "Screenshot"}</strong><small>${when} · ${length}</small></div><button type="button" data-action="close-control-center" aria-label="Close viewer">×</button></header>
+    <div class="capture-viewer__stage">${media}</div>
+    <footer class="capture-viewer__controls">
+      ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${previous.id}">← Previous</button>` : ""}
+      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" data-autofocus="true">↗ Share</button>
+      <button type="button" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}">⇩ Save</button>
+      <button type="button" data-action="capture-browser-fullscreen">⛶ Fullscreen</button>
+      ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${next.id}">Next →</button>` : ""}
+    </footer>
+    <div class="capture-viewer__legend"><span><b data-prompt="back">B</b> Close</span><span><b data-prompt="shoulderPrevious">LB</b><b data-prompt="shoulderNext">RB</b> Previous / Next</span></div>
+  </div>`;
+  overlay.hidden = false;
+  overlay.classList.remove("is-closing");
+  updateControllerPrompts();
+  requestAnimationFrame(() => focus.focusFirst());
+  return true;
+}
+
+function openReplaySaveMenu() {
+  clearTimeout(overlayCloseTimer);
+  if (overlay.hidden) overlayReturnFocus = focus.current;
+  const replay = replayStatus();
+  const durations = [
+    [30_000, "30 seconds"], [60_000, "1 minute"], [3 * 60_000, "3 minutes"], [5 * 60_000, "5 minutes"],
+    [10 * 60_000, "10 minutes"], [15 * 60_000, "15 minutes"], [30 * 60_000, "30 minutes"],
+  ];
+  overlay.innerHTML = `<div class="capture-menu-scrim" data-action="close-control-center"></div><section class="capture-menu" role="dialog" aria-modal="true" aria-label="Save recent gameplay">
+    <header><span>PARA REPLAY</span><h2>Save what happened</h2><small>${replay.active ? "Replay is keeping recent gameplay in a temporary buffer." : "Turn on Replay first, then PARA can save what happened before you pressed the button."}</small></header>
+    <div class="capture-menu__grid" data-focus-zone="replay-duration">
+      ${replay.active ? durations.map(([ms,label], index) => `<button type="button" data-action="save-replay" data-replay-ms="${ms}" ${index === 0 ? 'data-autofocus="true"' : ""}><b>↺</b><span>Last ${label}</span></button>`).join("") : `<button type="button" class="capture-menu__enable" data-action="start-replay-from-menu" data-autofocus="true"><b>●</b><span><strong>Turn On PARA Replay</strong><small>Browser preview asks which screen to capture. Native PARA will manage this at the system level.</small></span></button>`}
+    </div>
+    <footer><span><b data-prompt="confirm">A</b> Select</span><span><b data-prompt="back">B</b> Back</span></footer>
+  </section>`;
+  overlay.hidden = false;
+  overlay.classList.remove("is-closing");
+  updateControllerPrompts();
+  requestAnimationFrame(() => focus.focusFirst({ zone: "replay-duration" }));
+}
+
 function openGameOptions(target) {
   const button = target?.closest?.('[data-continue-item], [data-store-id], .demo-card');
   if (!button) return false;
@@ -400,6 +459,8 @@ function openGameOptions(target) {
 
 function shoulder(direction) {
   if (consumePowerInput()) return;
+  const viewer = overlay.querySelector("[data-capture-viewer]");
+  if (!overlay.hidden && viewer) { void openCaptureViewer(direction < 0 ? viewer.dataset.prevId : viewer.dataset.nextId); return; }
   if (router.current() === "home") {
     document.dispatchEvent(new CustomEvent("para-home-section-shift", { detail: { direction } }));
     return;
@@ -641,6 +702,38 @@ async function handleAction(action, target) {
     case "pause-download": pauseDownload(target.dataset.downloadId); toast("Download paused"); break;
     case "resume-download": resumeDownload(target.dataset.downloadId); toast("Download resumed"); break;
     case "cancel-download": cancelDownload(target.dataset.downloadId); toast("Download canceled"); break;
+    case "open-replay-menu":
+      openReplaySaveMenu();
+      break;
+    case "start-replay-from-menu":
+      try { await startReplayBuffer(); toast("PARA Replay started", "Recent gameplay is now being buffered."); openReplaySaveMenu(); } catch (error) { toast("Replay could not start", error?.message || "Screen capture is unavailable."); }
+      break;
+    case "toggle-manual-recording":
+      try {
+        if (manualRecordingStatus().active) { await stopManualRecording(); toast("Recording saved", "Added to Media Gallery"); }
+        else { await startManualRecording(); toast("Recording started", "Open Control Center again to stop and save it."); }
+        if (!overlay.hidden && overlay.querySelector("[data-control-center-context]")) showControlCenterContext("captures", true, focus);
+        if (router.current() === "media-gallery") await activateMediaGallery();
+      } catch (error) { toast("Recording unavailable", error?.message || "Screen capture is unavailable."); }
+      break;
+    case "open-media-viewer":
+      await openCaptureViewer(target.dataset.captureId);
+      break;
+    case "step-capture-viewer":
+      await openCaptureViewer(target.dataset.captureId);
+      break;
+    case "capture-browser-fullscreen": {
+      const viewer = overlay.querySelector("[data-capture-viewer]");
+      try { if (!document.fullscreenElement) await viewer?.requestFullscreen?.(); else await document.exitFullscreen?.(); } catch { toast("Fullscreen unavailable"); }
+      break;
+    }
+    case "select-media-capture":
+      selectMediaCapture(target.dataset.captureId);
+      break;
+    case "filter-media-gallery":
+      filterMediaGallery(target.dataset.mediaFilter);
+      focus.focusFirst();
+      break;
     case "capture-screenshot":
       try { await captureScreenshot(); toast("Screenshot saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Screenshot not saved", error?.message || "Capture permission was not granted."); }
       break;
@@ -648,7 +741,7 @@ async function handleAction(action, target) {
       try { toast("Recording", "Capturing 8 seconds…"); await recordRecentClip(8000); toast("Clip saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Clip not saved", error?.message || "Capture permission was not granted."); }
       break;
     case "start-replay":
-      try { await startReplayBuffer(); toast("PARA Replay started", "Recent gameplay is now kept in a temporary rolling buffer."); } catch (error) { toast("Replay could not start", error?.message || "Screen capture is unavailable."); }
+      try { await startReplayBuffer(); toast("PARA Replay started", "Recent gameplay is now kept in a temporary rolling buffer."); if (!overlay.hidden && overlay.querySelector("[data-control-center-context]")) showControlCenterContext("captures", true, focus); } catch (error) { toast("Replay could not start", error?.message || "Screen capture is unavailable."); }
       break;
     case "save-replay":
       try { const ms = Number(target.dataset.replayMs || 60000); await saveReplayClip(ms); toast("Recent gameplay saved", `Saved the last ${ms >= 60000 ? Math.round(ms/60000) + "m" : Math.round(ms/1000) + "s"}`); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Replay not saved", error?.message || "Replay is unavailable."); }
