@@ -82,10 +82,61 @@ export async function captureScreenshot() {
   } finally { stream.getTracks().forEach((track) => track.stop()); }
 }
 
+let replay = null;
+
+function recorderMimeType() {
+  return ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+    .find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+}
+
+export function replayStatus() {
+  return { active: Boolean(replay), startedAt: replay?.startedAt || 0, maxDurationMs: replay?.maxDurationMs || 0 };
+}
+
+export async function startReplayBuffer(maxDurationMs = 30 * 60 * 1000) {
+  if (replay) return replayStatus();
+  const stream = await requestScreenStream({ audio: true });
+  const mimeType = recorderMimeType();
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks = [];
+  const startedAt = Date.now();
+
+  recorder.ondataavailable = (event) => {
+    if (!event.data?.size) return;
+    chunks.push({ blob: event.data, at: Date.now() });
+    const cutoff = Date.now() - maxDurationMs;
+    while (chunks.length > 1 && chunks[0].at < cutoff) chunks.shift();
+  };
+  recorder.start(1000);
+  stream.getVideoTracks()[0]?.addEventListener("ended", () => stopReplayBuffer(), { once: true });
+  replay = { stream, recorder, chunks, startedAt, maxDurationMs };
+  return replayStatus();
+}
+
+export function stopReplayBuffer() {
+  if (!replay) return;
+  const current = replay;
+  replay = null;
+  if (current.recorder.state !== "inactive") current.recorder.stop();
+  current.stream.getTracks().forEach((track) => track.stop());
+}
+
+export async function saveReplayClip(durationMs = 60_000) {
+  if (!replay) throw new Error("PARA Replay is not running. Start Replay first.");
+  replay.recorder.requestData();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const cutoff = Date.now() - durationMs;
+  const selected = replay.chunks.filter((part) => part.at >= cutoff);
+  if (!selected.length) throw new Error("Replay has not buffered enough gameplay yet.");
+  const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || "video/webm" });
+  const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
+  return saveCapture({ type: "clip", blob, durationMs: actualDuration });
+}
+
 export async function recordRecentClip(durationMs = 8000) {
   const stream = await requestScreenStream({ audio: true });
   try {
-    const supported = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+    const supported = recorderMimeType();
     const recorder = new MediaRecorder(stream, supported ? { mimeType: supported } : undefined);
     const chunks = [];
     recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
@@ -98,4 +149,27 @@ export async function recordRecentClip(durationMs = 8000) {
     if (!blob.size) throw new Error("The clip was empty.");
     return saveCapture({ type: "clip", blob, durationMs });
   } finally { stream.getTracks().forEach((track) => track.stop()); }
+}
+
+export async function getCapture(id) {
+  if (!globalThis.indexedDB) return null;
+  return transact("readonly", (store) => store.get(id));
+}
+
+export async function shareCapture(id, target = "system") {
+  const item = await getCapture(id);
+  if (!item) throw new Error("Capture not found.");
+  const extension = item.type === "clip" ? "webm" : "webp";
+  const file = new File([item.blob], `PARA-${item.id}.${extension}`, { type: item.mimeType || item.blob.type });
+  if (target === "system" && navigator.share && navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ title: "Shared from PARA", text: "Captured on PARA", files: [file] });
+    return "Shared";
+  }
+  const url = URL.createObjectURL(item.blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  return target === "phone" ? "Saved for phone transfer" : "Capture exported";
 }

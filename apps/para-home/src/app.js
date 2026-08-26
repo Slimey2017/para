@@ -17,7 +17,7 @@ import {
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture } from "./screens/media.js";
-import { captureScreenshot, recordRecentClip } from "./services/capture-service.js";
+import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
@@ -620,6 +620,24 @@ async function handleAction(action, target) {
       break;
     case "capture-clip":
       try { toast("Recording", "Capturing 8 seconds…"); await recordRecentClip(8000); toast("Clip saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Clip not saved", error?.message || "Capture permission was not granted."); }
+      break;
+    case "start-replay":
+      try { await startReplayBuffer(); toast("PARA Replay started", "Recent gameplay is now kept in a temporary rolling buffer."); } catch (error) { toast("Replay could not start", error?.message || "Screen capture is unavailable."); }
+      break;
+    case "save-replay":
+      try { const ms = Number(target.dataset.replayMs || 60000); await saveReplayClip(ms); toast("Recent gameplay saved", `Saved the last ${ms >= 60000 ? Math.round(ms/60000) + "m" : Math.round(ms/1000) + "s"}`); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Replay not saved", error?.message || "Replay is unavailable."); }
+      break;
+    case "share-capture":
+      try {
+        const destination = target.dataset.shareTarget || "system";
+        if (["youtube","facebook","chat"].includes(destination)) {
+          await shareCapture(target.dataset.captureId, destination);
+          toast(`Ready for ${destination === "chat" ? "PARA Chat" : destination[0].toUpperCase()+destination.slice(1)}`, "Capture exported. Account/API handoff connects in the native PARA build.");
+        } else {
+          const result = await shareCapture(target.dataset.captureId, destination);
+          toast("Share", result);
+        }
+      } catch (error) { toast("Couldn’t share capture", error?.message || "Sharing is unavailable."); }
       break;
     case "media-toggle":
       await mediaSessionAction("toggle");
