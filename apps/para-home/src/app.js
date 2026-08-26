@@ -233,10 +233,15 @@ function render(route) {
   } else if (route === "files") {
     cleanupScreen = activateFiles({ focus, initialLocation: "home" });
   } else if (route === "downloads") {
-    cleanupScreen = await activateDownloadManager({ focus });
+    void activateDownloadManager({ focus }).then((cleanup) => {
+      if (router.current() === "downloads") cleanupScreen = cleanup;
+      else cleanup?.();
+    });
   } else if (route === "saved-data") {
-    cleanupScreen = await activateSavedData();
-    if (route === "files") recordExperience({ id: "para:files", title: "Files", route: "files", kind: "App", accent: "#8458ff", mark: "▱" });
+    void activateSavedData().then((cleanup) => {
+      if (router.current() === "saved-data") cleanupScreen = cleanup;
+      else cleanup?.();
+    });
   } else if (route === "media-gallery") {
     void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
   } else if (route === "storage") {
