@@ -1803,3 +1803,12 @@ html[data-modal-owner] #para-app { overflow:hidden; }
   .para-browser--app > .browser-controller-help{justify-content:center!important}
 }
 
+
+/* PARA Media Session */
+.control-center-now-playing { display:flex; align-items:center; gap:14px; min-width:0; }
+.control-center-now-playing img,.control-center-now-playing__art { width:64px; height:64px; border-radius:12px; object-fit:cover; flex:0 0 auto; display:grid; place-items:center; background:linear-gradient(145deg,rgba(142,73,255,.34),rgba(255,255,255,.06)); font-size:26px; }
+.control-center-media-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.audio-media-note { display:flex; gap:12px; align-items:flex-start; margin:14px 0 0; padding:14px 16px; border-radius:14px; background:rgba(138,74,255,.08); border:1px solid rgba(163,110,255,.18); }
+.audio-media-note>span { font-size:22px; color:#bd91ff; }
+.audio-media-note strong,.audio-media-note small { display:block; }
+.audio-media-note small { margin-top:4px; color:var(--muted,#aaa2b8); line-height:1.45; }

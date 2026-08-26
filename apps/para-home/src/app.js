@@ -43,6 +43,7 @@ import {
 import { paraApi } from "./services/para-api.js";
 import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
 import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, suspendMenuMusic } from "./services/menu-music.js";
+import { mediaSessionAction, setMediaVolume, setGameMediaBalance, mediaSessionState } from "./services/media-session.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
   activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall,
@@ -608,6 +609,18 @@ async function handleAction(action, target) {
     case "capture-clip":
       try { toast("Recording", "Capturing 8 seconds…"); await recordRecentClip(8000); toast("Clip saved", "Added to Media Gallery"); await activateMediaGallery(); focus.focusFirst(); } catch (error) { toast("Clip not saved", error?.message || "Capture permission was not granted."); }
       break;
+    case "media-toggle":
+      await mediaSessionAction("toggle");
+      showControlCenterContext("music");
+      break;
+    case "media-previous":
+      await mediaSessionAction("previous");
+      showControlCenterContext("music");
+      break;
+    case "media-next":
+      await mediaSessionAction("next");
+      showControlCenterContext("music");
+      break;
     case "delete-capture":
       try { await removeCapture(target.dataset.captureId); toast("Capture deleted"); focus.focusFirst(); } catch { toast("Couldn’t delete capture"); }
       break;
@@ -992,6 +1005,8 @@ document.addEventListener("change", async (event) => {
     setInterfaceSoundVolume(event.target.value);
     schedulePreferenceSave();
   }
+  if (event.target.matches("[data-media-volume]")) setMediaVolume(event.target.value);
+  if (event.target.matches("[data-game-media-volume]")) setGameMediaBalance(event.target.value);
 });
 
 document.addEventListener("input", (event) => {
@@ -1024,6 +1039,8 @@ document.addEventListener("input", (event) => {
     setInterfaceSoundVolume(event.target.value);
     document.querySelectorAll("[data-interface-volume-output], [data-audio-output]").forEach((output) => { output.textContent = `${event.target.value}%`; });
   }
+  if (event.target.matches("[data-media-volume]")) setMediaVolume(event.target.value);
+  if (event.target.matches("[data-game-media-volume]")) setGameMediaBalance(event.target.value);
 });
 
 function resetIdleSleep() {

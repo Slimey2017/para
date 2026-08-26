@@ -2,6 +2,7 @@ import { getProfilePreferences, getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { activeDownloads, profileRuntime, runningExperiences } from "../services/experience-runtime.js";
 import { microphoneState } from "../services/microphone.js";
+import { mediaSessionState } from "../services/media-session.js";
 
 const definitions = {
   home: { title: "Home", icon: "home" },
@@ -92,6 +93,12 @@ function contextMarkup(id) {
   if (id === "captures") {
     return `<div class="control-center-context__copy"><span>Captures</span><strong>Media Gallery</strong><small>Screenshots and gameplay clips</small></div><div class="control-center-power">${actionButton("Take Screenshot", `data-action="capture-screenshot"`, true)}${actionButton("Open Gallery", `data-route="media-gallery"`)}</div>`;
   }
+  if (id === "music") {
+    const media = currentData.media || mediaSessionState();
+    if (!media.active) return `<div class="control-center-context__copy"><span>Now Playing</span><strong>No media session</strong><small>Open a compatible music or podcast app.</small></div>${actionButton("Audio Settings", `data-route="audio-settings"`, true)}`;
+    const subtitle = [media.artist, media.appName].filter(Boolean).map(escapeHtml).join(" · ");
+    return `<div class="control-center-now-playing">${media.artwork ? `<img src="${escapeHtml(media.artwork)}" alt="">` : `<span class="control-center-now-playing__art">♫</span>`}<div class="control-center-context__copy"><span>Now Playing</span><strong>${escapeHtml(media.title)}</strong><small>${subtitle}</small></div></div><div class="control-center-media-actions">${media.canPrevious ? actionButton("Previous", `data-action="media-previous"`) : ""}${actionButton(media.playbackState === "playing" ? "Pause" : "Play", `data-action="media-toggle"`, true)}${media.canNext ? actionButton("Next", `data-action="media-next"`) : ""}</div><label class="control-center-volume"><span>Music</span><input type="range" min="0" max="100" step="2" value="${media.volume}" aria-label="Music volume" data-media-volume /></label><label class="control-center-volume"><span>Game</span><input type="range" min="0" max="100" step="2" value="${media.gameVolume}" aria-label="Game volume" data-game-media-volume /></label>`;
+  }
   if (id === "downloads") {
     const downloads = activeDownloads();
     if (!downloads.length) return `<div class="control-center-context__copy"><span>Downloads</span><strong>No active downloads</strong></div>${actionButton("Open ParaStore", `data-route="parastore"`, true)}`;
@@ -100,13 +107,13 @@ function contextMarkup(id) {
   return "";
 }
 
-function availableIds({ capabilities, network, audio, microphone, controller, profile, runtime }) {
+function availableIds({ capabilities, network, audio, microphone, controller, profile, runtime, media }) {
   const ids = ["home", "switcher"];
   if (runtime.notifications.length) ids.push("notifications");
   if (capabilities.friends) ids.push("friends");
   ids.push("downloads");
   ids.push("captures");
-  if (capabilities.music) ids.push("music");
+  ids.push("music");
   if (capabilities.network && network?.interfaces?.length) ids.push("network");
   ids.push("audio");
   if (audio?.microphone || microphone.available) ids.push("microphone");
@@ -168,7 +175,8 @@ export async function populateControlCenter({ overlay, controller, focus }) {
   const profile = getState().activeProfile;
   const preferences = getProfilePreferences();
   const runtime = profileRuntime();
-  currentData = { capabilities, network, audio, microphone, controller, profile, preferences, runtime };
+  const media = mediaSessionState();
+  currentData = { capabilities, network, audio, microphone, controller, profile, preferences, runtime, media };
   const available = availableIds(currentData);
   const hidden = new Set(preferences.controlCenter.hidden.filter((id) => !["home", "power"].includes(id)));
   const ordered = [...preferences.controlCenter.order, ...available.filter((id) => !preferences.controlCenter.order.includes(id))]
@@ -190,9 +198,9 @@ export async function populateControlCenter({ overlay, controller, focus }) {
   showControlCenterContext(selected);
   window.clearInterval(overlay._paraControlCenterTimer);
   overlay._paraControlCenterTimer = window.setInterval(() => {
-    if (overlay.hidden || lastSelectedId !== "downloads") return;
-    currentData.runtime = profileRuntime();
-    showControlCenterContext("downloads");
+    if (overlay.hidden) return;
+    if (lastSelectedId === "downloads") { currentData.runtime = profileRuntime(); showControlCenterContext("downloads"); }
+    if (lastSelectedId === "music") { currentData.media = mediaSessionState(); showControlCenterContext("music"); }
   }, 500);
 }
 
