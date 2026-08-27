@@ -43,7 +43,7 @@ def health() -> dict[str, Any]:
         "name": "para-api",
         "status": "ok",
         "version": (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-        "build": "v10-game-control-center",
+        "build": "v11-m-control-center-match",
         "time": datetime.now(timezone.utc).isoformat(),
     }
 

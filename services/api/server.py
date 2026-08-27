@@ -422,24 +422,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       :host{all:initial}
       *{box-sizing:border-box}
       button{font:inherit}
-      #systemButton{
-        pointer-events:auto;position:fixed;top:14px;left:14px;width:42px;height:42px;border:1px solid rgba(211,174,255,.22);
-        border-radius:50%;display:grid;place-items:center;background:rgba(8,6,13,.42);color:rgba(255,255,255,.46);
-        box-shadow:0 6px 28px rgba(0,0,0,.26);backdrop-filter:blur(12px);cursor:pointer;opacity:.32;
-        transition:opacity .16s ease,transform .16s ease,border-color .16s ease,background .16s ease
-      }
-      #systemButton:hover,#systemButton:focus-visible{opacity:1;transform:scale(1.07);border-color:rgba(207,164,255,.68);background:rgba(25,13,39,.78);outline:none}
-      #systemButton span{font:900 18px/1 system-ui,sans-serif;letter-spacing:-.12em;transform:translateX(-1px)}
-      #systemButton::after{
-        content:"Control Center";position:absolute;left:50px;top:8px;padding:7px 10px;border-radius:9px;white-space:nowrap;
-        color:#fff;background:rgba(9,6,14,.92);font:700 11px/1 system-ui,sans-serif;opacity:0;transform:translateX(-5px);pointer-events:none;transition:.14s ease
-      }
-      #systemButton:hover::after,#systemButton:focus-visible::after{opacity:1;transform:none}
+      #systemButton{display:none}
       #overlay{pointer-events:auto;position:fixed;inset:0;display:none;color:#f8f5fb;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
       #overlay.open{display:block}
-      .scrim{position:absolute;inset:0;background:rgba(1,1,5,.28);backdrop-filter:blur(3px)}
-      .dock{position:absolute;left:50%;bottom:max(24px,3vh);width:min(1040px,calc(100vw - 56px));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:12px}
-      .context{width:min(760px,calc(100vw - 80px));min-height:108px;padding:16px 18px;display:none;align-items:center;justify-content:space-between;gap:18px;border:1px solid rgba(212,176,255,.25);border-radius:20px;background:rgba(10,7,15,.88);box-shadow:0 18px 55px rgba(0,0,0,.5);backdrop-filter:blur(18px)}
+      .scrim{position:absolute;inset:0;background:rgba(1,1,7,.58);backdrop-filter:blur(2.8px)}
+      .dock{position:absolute;left:50%;bottom:max(29px,5.2vh);width:min(1040px,calc(100vw - 40px));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px}
+      .context{width:min(760px,calc(100vw - 80px));min-height:108px;margin-bottom:4px;padding:16px 18px;display:none;align-items:center;justify-content:space-between;gap:18px;border:1px solid rgba(212,176,255,.25);border-radius:20px;background:rgba(10,7,15,.9);box-shadow:0 18px 55px rgba(0,0,0,.5);backdrop-filter:blur(18px)}
       .context.show{display:flex}
       .contextCopy span,.contextCopy strong,.contextCopy small{display:block}
       .contextCopy span{color:#c89cff;font:850 10px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase}
@@ -448,38 +436,44 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       .contextActions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
       .contextActions button{min-height:42px;padding:0 14px;border:1px solid rgba(255,255,255,.13);border-radius:12px;color:#eee7f5;background:rgba(255,255,255,.045);cursor:pointer}
       .contextActions button:hover,.contextActions button:focus-visible{border-color:rgba(216,180,255,.7);background:rgba(131,52,224,.17);outline:none}
-      .strip{max-width:100%;padding:9px 14px 8px;display:flex;gap:6px;overflow:auto;border:1px solid rgba(210,175,255,.22);border-radius:25px;background:rgba(8,6,12,.9);box-shadow:0 24px 70px rgba(0,0,0,.58);backdrop-filter:blur(18px);scrollbar-width:none}
+      .strip{width:max-content;max-width:100%;min-height:83px;padding:2px 9px;display:flex;align-items:center;justify-content:flex-start;gap:5px;overflow-x:auto;overflow-y:hidden;border:1px solid rgba(191,143,240,.34);border-radius:23px;background:rgba(7,5,11,.89);box-shadow:0 20px 65px rgba(0,0,0,.6),0 0 28px rgba(111,43,196,.08);backdrop-filter:blur(17px);scrollbar-width:none}
       .strip::-webkit-scrollbar{display:none}
-      .tile{flex:0 0 74px;height:74px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid transparent;border-radius:17px;color:rgba(239,232,246,.58);background:transparent;cursor:pointer;outline:none;transition:.14s ease}
-      .tile b{width:34px;height:34px;display:grid;place-items:center;font:700 19px/1 system-ui,sans-serif}
-      .tile strong{font:720 10px/1 system-ui,sans-serif;white-space:nowrap}
-      .tile:hover,.tile:focus-visible,.tile.focused{transform:translateY(-4px) scale(1.06);color:#fff;border-color:rgba(214,177,255,.5);background:rgba(130,48,225,.14);box-shadow:0 0 23px rgba(147,65,243,.2)}
-      .prompt{color:rgba(239,232,246,.58);font:650 11px/1 system-ui,sans-serif}
-      .prompt b{margin:0 5px;padding:4px 7px;border:1px solid rgba(205,165,255,.36);border-radius:8px;color:#fff}
+      .tile{flex:0 0 65px;min-width:65px;height:72px;padding:6px 2px 5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:1px solid transparent;border-radius:16px;color:rgba(217,207,226,.43);background:transparent;cursor:pointer;outline:none;transition:color .13s ease,border-color .13s ease,background .13s ease,box-shadow .13s ease}
+      .tile span{width:33px;height:33px;display:grid;place-items:center}
+      .tile svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+      .tile svg .icon-fill{fill:currentColor;stroke:none}
+      .tile strong{max-width:69px;overflow:hidden;font:720 9px/1.05 system-ui,sans-serif;text-overflow:ellipsis;white-space:nowrap;opacity:.7}
+      .tile:hover,.tile:focus-visible,.tile.focused{color:#fff;border-color:rgba(196,139,255,.73);background:linear-gradient(180deg,rgba(113,42,185,.22),rgba(92,28,154,.16));box-shadow:inset 0 0 0 1px rgba(213,174,255,.12),0 0 0 2px rgba(133,55,220,.11),0 0 24px rgba(153,73,241,.22)}
+      .tile:hover strong,.tile:focus-visible strong,.tile.focused strong{opacity:1}
+      .prompt{display:flex;align-items:center;justify-content:center;gap:6px;color:rgba(217,207,226,.48);font:650 10px/1 system-ui,sans-serif}
+      .prompt b{min-width:21px;height:19px;padding:0 5px;display:grid;place-items:center;border:1px solid rgba(205,165,255,.36);border-radius:6px;color:rgba(255,255,255,.82);font-size:9px}
       #recording{pointer-events:auto;position:fixed;top:16px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:9px;padding:9px 13px;border:1px solid rgba(255,105,121,.4);border-radius:999px;color:#fff;background:rgba(17,7,11,.86);box-shadow:0 12px 36px rgba(0,0,0,.35);backdrop-filter:blur(16px);cursor:pointer;font:750 11px/1 system-ui,sans-serif}
       #recording.show{display:flex}
       #recording i{width:8px;height:8px;border-radius:50%;background:#ff5266;box-shadow:0 0 12px #ff5266}
       #toast{position:fixed;left:50%;bottom:138px;transform:translate(-50%,18px);padding:10px 14px;border:1px solid rgba(203,162,255,.28);border-radius:12px;color:#fff;background:rgba(8,6,12,.92);font:700 12px/1.3 system-ui,sans-serif;opacity:0;pointer-events:none;transition:.18s ease}
       #toast.show{opacity:1;transform:translate(-50%,0)}
-      @media(max-width:720px){.dock{width:calc(100vw - 20px)}.context{width:100%;align-items:flex-start;flex-direction:column}.strip{width:100%}.tile{flex-basis:66px}.contextActions{justify-content:flex-start}}
+      @media(max-width:820px){.dock{width:calc(100vw - 16px)}.strip{max-width:calc(100vw - 16px)}.tile{flex-basis:60px;min-width:60px}.context{width:calc(100vw - 24px);align-items:flex-start;flex-direction:column}.contextActions{justify-content:flex-start}}
     </style>
-    <button id="systemButton" type="button" aria-label="Open PARA Control Center" title="PARA Control Center"><span>P</span></button>
+    <button id="systemButton" type="button" aria-label="Open PARA Control Center"></button>
     <button id="recording" type="button" aria-label="Stop and save recording"><i></i><span>Recording · Stop & Save</span></button>
     <div id="overlay" aria-hidden="true">
       <div class="scrim" data-action="resume"></div>
       <div class="dock" role="dialog" aria-modal="true" aria-label="PARA Control Center">
         <section id="context" class="context"></section>
         <nav id="strip" class="strip" aria-label="Quick controls">
-          <button class="tile" data-action="resume"><b>▶</b><strong>Resume</strong></button>
-          <button class="tile" data-action="home"><b>⌂</b><strong>Home</strong></button>
-          <button class="tile" data-action="games"><b>▦</b><strong>Games</strong></button>
-          <button class="tile" data-action="capture"><b>◉</b><strong>Capture</strong></button>
-          <button class="tile" data-action="media"><b>▣</b><strong>Media</strong></button>
-          <button class="tile" data-action="fullscreen"><b>⛶</b><strong>Fullscreen</strong></button>
-          <button class="tile" data-action="sound"><b>♫</b><strong>Sound</strong></button>
-          <button class="tile" data-action="settings"><b>⚙</b><strong>Settings</strong></button>
+          <button class="tile" data-action="home"><span><svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.5V21h13V9.5M9.5 21v-7h5v7"/></svg></span><strong>Home</strong></button>
+          <button class="tile" data-action="switcher"><span><svg viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="11" rx="2"/><path d="M7 19h12a2 2 0 0 0 2-2V9"/></svg></span><strong>Switcher</strong></button>
+          <button class="tile" data-action="notifications"><span><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 7 3 6 3 8H3c0-2 3-1 3-8Z"/><path d="M10 21h4"/></svg></span><strong>Notifications</strong></button>
+          <button class="tile" data-action="downloads"><span><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg></span><strong>Downloads</strong></button>
+          <button class="tile" data-action="capture"><span><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M8 5l1.5-2h5L16 5"/></svg></span><strong>Captures</strong></button>
+          <button class="tile" data-action="music"><span><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></span><strong>Music</strong></button>
+          <button class="tile" data-action="network"><span><svg viewBox="0 0 24 24"><path d="M4 10a12 12 0 0 1 16 0M7 14a8 8 0 0 1 10 0M10 18a3 3 0 0 1 4 0"/><circle cx="12" cy="21" r=".5" class="icon-fill"/></svg></span><strong>Network</strong></button>
+          <button class="tile" data-action="sound"><span><svg viewBox="0 0 24 24"><path d="M4 10h4l5-4v12l-5-4H4zM16 9a5 5 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></span><strong>Sound</strong></button>
+          <button class="tile" data-action="microphone"><span><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 12a6.5 6.5 0 0 0 13 0M12 18.5V22M8.5 22h7"/></svg></span><strong>Microphone</strong></button>
+          <button class="tile" data-action="profile"><span><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.7-5 3.2-7 7.5-7s6.8 2 7.5 7"/></svg></span><strong>Profile</strong></button>
+          <button class="tile" data-action="power"><span><svg viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M6.3 5.4a9 9 0 1 0 11.4 0"/></svg></span><strong>Power</strong></button>
         </nav>
-        <div class="prompt"><b>PARA / F1</b>Close <b>A / Enter</b>Select <b>B / Esc</b>Back</div>
+        <div class="prompt"><b>M</b><span>Close</span></div>
       </div>
     </div>
     <div id="toast"></div>
@@ -679,11 +673,16 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   async function action(name, button) {
     if (name === 'resume') return closeShell();
     if (name === 'home') return location.href = '/#/home';
-    if (name === 'games') return location.href = '/#/games';
-    if (name === 'media') return location.href = '/#/media';
-    if (name === 'settings') return location.href = '/#/settings';
+    if (name === 'switcher') { sessionStorage.setItem('para-open-switcher', '1'); return location.href = '/#/home'; }
+    if (name === 'notifications') return location.href = '/#/notifications';
+    if (name === 'downloads') return location.href = '/#/downloads';
     if (name === 'capture') return showContext('capture');
+    if (name === 'music') return location.href = '/#/audio-settings';
+    if (name === 'network') return location.href = '/#/network';
     if (name === 'sound') return showContext('sound');
+    if (name === 'microphone') return location.href = '/#/audio-settings';
+    if (name === 'profile') return location.href = '/#/account';
+    if (name === 'power') return location.href = '/#/power';
     if (name === 'fullscreen') {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
@@ -718,7 +717,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   });
 
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'F1') {
+    if (event.key?.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault(); event.stopImmediatePropagation(); toggleShell(); return;
     }
     if (!shellOpen) return;
