@@ -65,7 +65,7 @@ export function pruneContinueQueue(applicationIds = []) {
   const runtime = getProfileRuntime();
   const applications = new Set(applicationIds);
   const installed = new Set(runtime.installedDemos.map((id) => `demo:${id}`));
-  const keep = (item) => item.id.startsWith("para:") || installed.has(item.id) || applications.has(item.id);
+  const keep = (item) => item.id.startsWith("para:") || item.id.startsWith("store:") || installed.has(item.id) || applications.has(item.id);
   const recent = runtime.recent.filter(keep).slice(0, CONTINUE_LIMIT);
   const running = runtime.running.filter(keep);
   if (recent.length === runtime.recent.length && running.length === runtime.running.length) return recent;

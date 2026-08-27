@@ -299,6 +299,77 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   let paraHeld = false;
   let focusedIndex = 0;
   let inputMaskInstalled = false;
+  const HOME_STATE_KEY = 'para.home.state.v5';
+  const GAME_ACTIVITY_ID = `store:${RUNTIME_ID}`;
+  const gameSessionStartedAt = Date.now();
+  const mirroredAudioNodes = new WeakSet();
+  const audioCaptureDestinations = new Set();
+  const maskedPadCache = new Map();
+
+  function recordGameActivity() {
+    try {
+      const state = JSON.parse(localStorage.getItem(HOME_STATE_KEY) || '{}');
+      const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
+      const profileRuntime = { ...(state.profileRuntime || {}) };
+      const runtime = {
+        recent: [], running: [], installedDemos: [], downloads: [], notifications: [], marks: [],
+        creator: { note: '', drawing: '' }, saveData: [],
+        ...(profileRuntime[profile] || {})
+      };
+      const now = Date.now();
+      const previous = (runtime.recent || []).find((item) => item.id === GAME_ACTIVITY_ID) || {};
+      const entry = {
+        ...previous,
+        id: GAME_ACTIVITY_ID,
+        storeId: RUNTIME_ID,
+        title: GAME_TITLE,
+        route: 'games',
+        kind: 'Game',
+        platform: 'PARA',
+        accent: previous.accent || '#985dff',
+        mark: previous.mark || (GAME_TITLE.trim().slice(0, 1).toUpperCase() || 'P'),
+        lastOpened: now,
+        queuedAt: now,
+        queueStatus: '',
+        sessionStartedAt: gameSessionStartedAt,
+        playTimeMs: Number(previous.playTimeMs || 0) + Math.max(0, now - (Number(previous.sessionStartedAt) === gameSessionStartedAt ? Number(previous.lastSessionCheckpoint || gameSessionStartedAt) : gameSessionStartedAt)),
+        lastSessionCheckpoint: now
+      };
+      runtime.recent = [entry, ...(runtime.recent || []).filter((item) => item.id !== GAME_ACTIVITY_ID)].slice(0, 10);
+      runtime.running = [entry, ...(runtime.running || []).filter((item) => item.id !== GAME_ACTIVITY_ID)].slice(0, 6);
+      profileRuntime[profile] = runtime;
+      state.profileRuntime = profileRuntime;
+      localStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
+      sessionStorage.setItem('para.store.lastPlayed', RUNTIME_ID);
+    } catch (_) {}
+  }
+
+  recordGameActivity();
+  const activityTimer = setInterval(recordGameActivity, 30000);
+  addEventListener('pagehide', () => { recordGameActivity(); clearInterval(activityTimer); }, { once: true });
+
+  // Mirror WebAudio into a capture stream before the game scripts initialize.
+  try {
+    const nativeAudioConnect = globalThis.AudioNode?.prototype?.connect;
+    if (nativeAudioConnect) {
+      globalThis.AudioNode.prototype.connect = function(destination, ...rest) {
+        const result = nativeAudioConnect.call(this, destination, ...rest);
+        try {
+          if (this.context && destination === this.context.destination && !mirroredAudioNodes.has(this)) {
+            let mirror = this.context.__paraCaptureDestination;
+            if (!mirror) {
+              mirror = this.context.createMediaStreamDestination();
+              Object.defineProperty(this.context, '__paraCaptureDestination', { value: mirror });
+              audioCaptureDestinations.add(mirror);
+            }
+            nativeAudioConnect.call(this, mirror);
+            mirroredAudioNodes.add(this);
+          }
+        } catch (_) {}
+        return result;
+      };
+    }
+  } catch (_) {}
 
   const nativeGetGamepads = navigator.getGamepads?.bind(navigator);
   function installGamepadMask() {
@@ -311,14 +382,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
           if (!shellOpen) return pads;
           return pads.map((pad) => {
             if (!pad) return pad;
-            return new Proxy(pad, {
+            if (maskedPadCache.has(pad.index)) return maskedPadCache.get(pad.index);
+            const neutralButtons = pad.buttons.map(() => ({ pressed: false, touched: false, value: 0 }));
+            const neutralAxes = pad.axes.map(() => 0);
+            const proxy = new Proxy(pad, {
               get(target, prop) {
-                if (prop === 'buttons') return target.buttons.map((button) => ({ pressed: false, touched: false, value: 0 }));
-                if (prop === 'axes') return target.axes.map(() => 0);
+                if (prop === 'buttons') return neutralButtons;
+                if (prop === 'axes') return neutralAxes;
                 const value = Reflect.get(target, prop, target);
                 return typeof value === 'function' ? value.bind(target) : value;
               }
             });
+            maskedPadCache.set(pad.index, proxy);
+            return proxy;
           });
         }
       });
@@ -371,46 +447,56 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     stream?.getTracks?.().forEach((track) => track.stop());
   }
 
-  async function requestParaStream(audio = false) {
-    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Screen capture is unavailable in this browser.');
-    configureCaptureHandle();
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 60 }, displaySurface: 'browser' },
-      audio: audio ? { suppressLocalAudioPlayback: false } : false,
-      preferCurrentTab: true,
-      selfBrowserSurface: 'include',
-      surfaceSwitching: 'exclude',
-      monitorTypeSurfaces: 'exclude',
-      systemAudio: 'exclude'
-    });
-    const track = stream.getVideoTracks()[0];
-    if (!track) {
-      stopStream(stream);
-      throw new Error('PARA did not receive a video track.');
-    }
-    const surface = track.getSettings?.().displaySurface;
-    if (surface && surface !== 'browser') {
-      stopStream(stream);
-      throw new Error('Choose This Tab (PARA), not your whole screen or another window.');
-    }
-    const handle = typeof track.getCaptureHandle === 'function' ? track.getCaptureHandle() : null;
-    if (handle && handle.handle !== PARA_CAPTURE_HANDLE) {
-      stopStream(stream);
-      throw new Error('Choose This Tab (PARA), not another Chrome tab.');
-    }
-    if (document.body && globalThis.RestrictionTarget?.fromElement && typeof track.restrictTo === 'function') {
-      try {
-        const restriction = await globalThis.RestrictionTarget.fromElement(document.body);
-        await track.restrictTo(restriction);
-      } catch (_) {}
-    }
-    return stream;
+  function captureCanvasCandidates() {
+    return [...document.querySelectorAll('canvas')]
+      .map((canvas) => ({ canvas, rect: canvas.getBoundingClientRect() }))
+      .filter(({ canvas, rect }) => {
+        const style = getComputedStyle(canvas);
+        return rect.width >= 64 && rect.height >= 64 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
+      })
+      .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
   }
 
-  function recorderMimeType() {
+  function primaryGameCanvas() {
+    return captureCanvasCandidates()[0]?.canvas || null;
+  }
+
+  function capturedGameAudioTracks() {
+    const tracks = [];
+    for (const destination of audioCaptureDestinations) {
+      for (const track of destination.stream?.getAudioTracks?.() || []) tracks.push(track);
+    }
+    for (const media of document.querySelectorAll('audio,video')) {
+      try {
+        const stream = media.captureStream?.();
+        for (const track of stream?.getAudioTracks?.() || []) tracks.push(track);
+      } catch (_) {}
+    }
+    return [...new Map(tracks.map((track) => [track.id, track])).values()];
+  }
+
+  function requestGameStream(audio = false) {
+    const canvas = primaryGameCanvas();
+    if (!canvas?.captureStream) {
+      throw new Error('This WEB game does not expose a capturable game canvas. PARA did not open a browser screen-share popup.');
+    }
+    let canvasStream;
+    try { canvasStream = canvas.captureStream(60); }
+    catch (_) { throw new Error('This game canvas cannot be captured by the browser.'); }
+    const videoTrack = canvasStream.getVideoTracks()[0];
+    if (!videoTrack) throw new Error('PARA could not get gameplay video from this game.');
+    try { videoTrack.contentHint = 'motion'; } catch (_) {}
+    const tracks = [videoTrack];
+    if (audio) tracks.push(...capturedGameAudioTracks());
+    return new MediaStream(tracks);
+  }
+
+  function recorderMimeType(hasAudio = false) {
     const probe = document.createElement('video');
-    return ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
-      .find((type) => MediaRecorder.isTypeSupported?.(type) && probe.canPlayType(type) !== '') || '';
+    const types = hasAudio
+      ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
+      : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
+    return types.find((type) => MediaRecorder.isTypeSupported?.(type) && probe.canPlayType(type) !== '') || '';
   }
 
   const host = document.createElement('div');
@@ -423,11 +509,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       *{box-sizing:border-box}
       button{font:inherit}
       #systemButton{display:none}
-      #overlay{pointer-events:auto;position:fixed;inset:0;display:none;color:#f8f5fb;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+      #overlay{pointer-events:auto;position:fixed;inset:0;display:none;contain:layout paint style;color:#f8f5fb;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
       #overlay.open{display:block}
-      .scrim{position:absolute;inset:0;background:rgba(1,1,7,.58);backdrop-filter:blur(2.8px)}
-      .dock{position:absolute;left:50%;bottom:max(29px,5.2vh);width:min(1040px,calc(100vw - 40px));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px}
-      .context{width:min(760px,calc(100vw - 80px));min-height:108px;margin-bottom:4px;padding:16px 18px;display:none;align-items:center;justify-content:space-between;gap:18px;border:1px solid rgba(212,176,255,.25);border-radius:20px;background:rgba(10,7,15,.9);box-shadow:0 18px 55px rgba(0,0,0,.5);backdrop-filter:blur(18px)}
+      .scrim{position:absolute;inset:0;background:rgba(1,1,7,.66)}
+      .dock{position:absolute;left:50%;bottom:max(29px,5.2vh);width:min(1040px,calc(100vw - 40px));transform:translate3d(-50%,0,0);will-change:transform;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px}
+      .context{width:min(760px,calc(100vw - 80px));min-height:108px;margin-bottom:4px;padding:16px 18px;display:none;align-items:center;justify-content:space-between;gap:18px;border:1px solid rgba(212,176,255,.25);border-radius:20px;background:rgba(10,7,15,.9);box-shadow:0 18px 55px rgba(0,0,0,.5);}
       .context.show{display:flex}
       .contextCopy span,.contextCopy strong,.contextCopy small{display:block}
       .contextCopy span{color:#c89cff;font:850 10px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase}
@@ -436,9 +522,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       .contextActions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
       .contextActions button{min-height:42px;padding:0 14px;border:1px solid rgba(255,255,255,.13);border-radius:12px;color:#eee7f5;background:rgba(255,255,255,.045);cursor:pointer}
       .contextActions button:hover,.contextActions button:focus-visible{border-color:rgba(216,180,255,.7);background:rgba(131,52,224,.17);outline:none}
-      .strip{width:max-content;max-width:100%;min-height:83px;padding:2px 9px;display:flex;align-items:center;justify-content:flex-start;gap:5px;overflow-x:auto;overflow-y:hidden;border:1px solid rgba(191,143,240,.34);border-radius:23px;background:rgba(7,5,11,.89);box-shadow:0 20px 65px rgba(0,0,0,.6),0 0 28px rgba(111,43,196,.08);backdrop-filter:blur(17px);scrollbar-width:none}
+      .strip{width:max-content;max-width:100%;min-height:83px;padding:2px 9px;display:flex;align-items:center;justify-content:flex-start;gap:5px;overflow-x:auto;overflow-y:hidden;border:1px solid rgba(191,143,240,.34);border-radius:23px;background:rgba(7,5,11,.89);box-shadow:0 20px 65px rgba(0,0,0,.6),0 0 28px rgba(111,43,196,.08);;scrollbar-width:none}
       .strip::-webkit-scrollbar{display:none}
-      .tile{flex:0 0 65px;min-width:65px;height:72px;padding:6px 2px 5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:1px solid transparent;border-radius:16px;color:rgba(217,207,226,.43);background:transparent;cursor:pointer;outline:none;transition:color .13s ease,border-color .13s ease,background .13s ease,box-shadow .13s ease}
+      .tile{flex:0 0 65px;min-width:65px;height:72px;padding:6px 2px 5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:1px solid transparent;border-radius:16px;color:rgba(217,207,226,.43);background:transparent;cursor:pointer;outline:none;transition:color .08s linear,border-color .08s linear,background .08s linear}
       .tile span{width:33px;height:33px;display:grid;place-items:center}
       .tile svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
       .tile svg .icon-fill{fill:currentColor;stroke:none}
@@ -447,7 +533,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       .tile:hover strong,.tile:focus-visible strong,.tile.focused strong{opacity:1}
       .prompt{display:flex;align-items:center;justify-content:center;gap:6px;color:rgba(217,207,226,.48);font:650 10px/1 system-ui,sans-serif}
       .prompt b{min-width:21px;height:19px;padding:0 5px;display:grid;place-items:center;border:1px solid rgba(205,165,255,.36);border-radius:6px;color:rgba(255,255,255,.82);font-size:9px}
-      #recording{pointer-events:auto;position:fixed;top:16px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:9px;padding:9px 13px;border:1px solid rgba(255,105,121,.4);border-radius:999px;color:#fff;background:rgba(17,7,11,.86);box-shadow:0 12px 36px rgba(0,0,0,.35);backdrop-filter:blur(16px);cursor:pointer;font:750 11px/1 system-ui,sans-serif}
+      #recording{pointer-events:auto;position:fixed;top:16px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:9px;padding:9px 13px;border:1px solid rgba(255,105,121,.4);border-radius:999px;color:#fff;background:rgba(17,7,11,.86);box-shadow:0 12px 36px rgba(0,0,0,.35);;cursor:pointer;font:750 11px/1 system-ui,sans-serif}
       #recording.show{display:flex}
       #recording i{width:8px;height:8px;border-radius:50%;background:#ff5266;box-shadow:0 0 12px #ff5266}
       #toast{position:fixed;left:50%;bottom:138px;transform:translate(-50%,18px);padding:10px 14px;border:1px solid rgba(203,162,255,.28);border-radius:12px;color:#fff;background:rgba(8,6,12,.92);font:700 12px/1.3 system-ui,sans-serif;opacity:0;pointer-events:none;transition:.18s ease}
@@ -560,23 +646,17 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   async function screenshot() {
     closeShell();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    let stream;
     try {
-      stream = await requestParaStream(false);
-      const video = document.createElement('video');
-      video.srcObject = stream; video.muted = true; video.playsInline = true;
-      await video.play();
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || innerWidth;
-      canvas.height = video.videoHeight || innerHeight;
-      canvas.getContext('2d', { alpha: false }).drawImage(video, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Screenshot failed.')), 'image/webp', .94));
-      await saveCapture({ type: 'screenshot', blob, width: canvas.width, height: canvas.height });
+      const canvas = primaryGameCanvas();
+      if (!canvas) throw new Error('No gameplay canvas was found to capture.');
+      const blob = await new Promise((resolve, reject) => {
+        try { canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Screenshot failed.')), 'image/webp', .94); }
+        catch (_) { reject(new Error('This game canvas blocks screenshots.')); }
+      });
+      await saveCapture({ type: 'screenshot', blob, width: canvas.width || innerWidth, height: canvas.height || innerHeight });
       toast('Screenshot saved to PARA Media');
     } catch (error) {
       toast(error?.message || 'Screenshot failed');
-    } finally {
-      stopStream(stream);
     }
   }
 
@@ -584,16 +664,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeShell();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
-      const stream = await requestParaStream(true);
-      const type = recorderMimeType();
-      const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      const stream = requestGameStream(true);
+      const hasAudio = stream.getAudioTracks().length > 0;
+      const type = recorderMimeType(hasAudio);
+      const options = type ? { mimeType: type, videoBitsPerSecond: 8_000_000 } : { videoBitsPerSecond: 8_000_000 };
+      const recorder = new MediaRecorder(stream, options);
       const chunks = [];
       const startedAt = Date.now();
       recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
-      recorder.start(1000);
-      manualRecording = { stream, recorder, chunks, startedAt };
+      recorder.onerror = () => toast('PARA recording encountered an encoder error');
+      recorder.start(250);
+      manualRecording = { stream, recorder, chunks, startedAt, stopping: false };
       recordingPill.classList.add('show');
-      toast('Recording started');
+      toast(hasAudio ? 'Gameplay recording started' : 'Gameplay recording started · video only');
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
     } catch (error) {
       toast(error?.message || 'Recording could not start');
@@ -602,28 +685,25 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   async function stopRecording(fromTrackEnd = false) {
     const active = manualRecording;
-    if (!active) return;
-    manualRecording = null;
+    if (!active || active.stopping) return;
+    active.stopping = true;
     recordingPill.classList.remove('show');
     try {
       if (active.recorder.state !== 'inactive') {
-        active.recorder.requestData();
-        await new Promise((resolve) => {
-          active.recorder.addEventListener('stop', resolve, { once: true });
-          active.recorder.stop();
-        });
+        const stopped = new Promise((resolve) => active.recorder.addEventListener('stop', resolve, { once: true }));
+        active.recorder.stop();
+        await stopped;
       }
+      await new Promise((resolve) => setTimeout(resolve, 80));
       const blob = new Blob(active.chunks, { type: active.recorder.mimeType || 'video/webm' });
-      if (blob.size) {
-        await saveCapture({ type: 'clip', blob, durationMs: Date.now() - active.startedAt });
-        toast('Video saved to PARA Media');
-      } else {
-        toast('Recording was empty');
-      }
+      if (blob.size < 256) throw new Error('PARA did not receive gameplay frames from this title.');
+      await saveCapture({ type: 'clip', blob, durationMs: Date.now() - active.startedAt });
+      toast('Video saved to PARA Media');
     } catch (error) {
       toast(error?.message || 'Recording could not be saved');
     } finally {
-      if (!fromTrackEnd) stopStream(active.stream);
+      manualRecording = null;
+      stopStream(active.stream);
     }
   }
 
@@ -631,9 +711,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeShell();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
-      const stream = await requestParaStream(true);
-      const type = recorderMimeType();
-      const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      if (replay) { toast('PARA Replay is already running'); return; }
+      const stream = requestGameStream(true);
+      const hasAudio = stream.getAudioTracks().length > 0;
+      const type = recorderMimeType(hasAudio);
+      const options = type ? { mimeType: type, videoBitsPerSecond: 7_000_000 } : { videoBitsPerSecond: 7_000_000 };
+      const recorder = new MediaRecorder(stream, options);
       const chunks = [];
       recorder.ondataavailable = (event) => {
         if (!event.data?.size) return;
@@ -641,14 +724,14 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         const cutoff = Date.now() - 30 * 60 * 1000;
         while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
       };
-      recorder.start(1000);
+      recorder.start(500);
       replay = { stream, recorder, chunks, startedAt: Date.now() };
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
         if (replay?.recorder.state !== 'inactive') replay.recorder.stop();
         replay = null;
         toast('PARA Replay stopped');
       }, { once: true });
-      toast('PARA Replay is running');
+      toast(hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only');
     } catch (error) {
       toast(error?.message || 'Replay could not start');
     }
@@ -658,11 +741,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (!replay) { toast('Start PARA Replay first'); return; }
     try {
       replay.recorder.requestData();
-      await new Promise((resolve) => setTimeout(resolve, 180));
+      await new Promise((resolve) => setTimeout(resolve, 220));
       const cutoff = Date.now() - durationMs;
       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
       const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
-      if (!blob.size) throw new Error('Replay has not buffered enough gameplay yet.');
+      if (blob.size < 256) throw new Error('Replay has not buffered gameplay frames yet.');
       await saveCapture({ type: 'clip', blob, durationMs: Math.min(durationMs, Date.now() - replay.startedAt) });
       toast('Recent gameplay saved to PARA Media');
     } catch (error) {

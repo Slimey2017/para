@@ -628,7 +628,7 @@ function launchStoreGameDirect(storeId) {
   if (!id) return false;
   sessionStorage.setItem("para.store.launch", id);
   sessionStorage.setItem("para.store.lastLibraryRoute", "games");
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v10`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v12`;
   window.location.assign(source);
   return true;
 }
@@ -1192,6 +1192,10 @@ document.addEventListener("click", (event) => {
   }
   const target = event.target.closest("[data-route], [data-action]");
   if (!target || target.disabled || target.getAttribute("aria-disabled") === "true") return;
+  if (target.matches("[data-continue-item]") && target.dataset.storeId) {
+    launchStoreGameDirect(target.dataset.storeId);
+    return;
+  }
   if (target.dataset.route) navigate(target.dataset.route, {}, target);
   else handleAction(target.dataset.action, target);
 });

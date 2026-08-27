@@ -295,6 +295,31 @@ class RepositoryTests(unittest.TestCase):
         focus = (ROOT / "apps/para-home/src/focus-manager.js").read_text(encoding="utf-8")
         self.assertIn('["p", "m"]', focus)
 
+    def test_store_games_persist_into_continue_and_resume_directly(self):
+        runtime = (ROOT / "apps/para-home/src/services/experience-runtime.js").read_text(encoding="utf-8")
+        home = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn('item.id.startsWith("store:")', runtime)
+        self.assertIn('data-store-id=', home)
+        self.assertIn('target.matches("[data-continue-item]") && target.dataset.storeId', app)
+        self.assertIn("const GAME_ACTIVITY_ID = `store:${RUNTIME_ID}`", server)
+        self.assertIn("localStorage.setItem(HOME_STATE_KEY", server)
+
+    def test_game_capture_uses_canvas_without_display_picker(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn('canvas.captureStream(60)', server)
+        self.assertIn('function requestGameStream(audio = false)', server)
+        self.assertNotIn('getDisplayMedia', server)
+        self.assertIn('createMediaStreamDestination()', server)
+        self.assertIn("PARA did not receive gameplay frames", server)
+
+    def test_game_control_center_uses_m_and_avoids_fullscreen_blur(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn("event.key?.toLowerCase() === 'm'", server)
+        self.assertIn('maskedPadCache', server)
+        self.assertNotIn('backdrop-filter:', server)
+
 
 if __name__ == "__main__":
     unittest.main()
