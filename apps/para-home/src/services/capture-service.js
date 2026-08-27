@@ -1,6 +1,7 @@
 const DB_NAME = "para-media-gallery";
 const STORE = "captures";
 const DB_VERSION = 1;
+const PARA_CAPTURE_HANDLE = `para-self-capture:${globalThis.location?.origin || "local"}`;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -57,15 +58,93 @@ async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0 }
   return item;
 }
 
+function stopStream(stream) {
+  stream?.getTracks?.().forEach((track) => track.stop());
+}
+
+function emitCaptureState() {
+  if (!globalThis.document) return;
+  document.dispatchEvent(new CustomEvent("para-capture-state", {
+    detail: { recording: manualRecordingStatus(), replay: replayStatus() },
+  }));
+}
+
+function configureCaptureHandle() {
+  const devices = navigator.mediaDevices;
+  if (!devices?.setCaptureHandleConfig) return;
+  try {
+    devices.setCaptureHandleConfig({
+      handle: PARA_CAPTURE_HANDLE,
+      exposeOrigin: false,
+      permittedOrigins: ["*"],
+    });
+  } catch {
+    // Capture Handle is an enhancement. getDisplayMedia still works without it.
+  }
+}
+
+configureCaptureHandle();
+
+async function restrictToPara(track, stream) {
+  const displaySurface = track.getSettings?.().displaySurface;
+  if (displaySurface && displaySurface !== "browser") {
+    stopStream(stream);
+    throw new Error("Choose This Tab (PARA). PARA will not record another window or your whole screen.");
+  }
+
+  const captureHandle = typeof track.getCaptureHandle === "function" ? track.getCaptureHandle() : null;
+  if (captureHandle && captureHandle.handle !== PARA_CAPTURE_HANDLE) {
+    stopStream(stream);
+    throw new Error("That is another Chrome tab. Choose This Tab (PARA) when Chrome asks what to share.");
+  }
+
+  const target = document.querySelector("#para-app");
+  if (target && globalThis.RestrictionTarget?.fromElement && typeof track.restrictTo === "function") {
+    try {
+      const restrictionTarget = await globalThis.RestrictionTarget.fromElement(target);
+      await track.restrictTo(restrictionTarget);
+      track.contentHint = "detail";
+      return true;
+    } catch {
+      stopStream(stream);
+      throw new Error("PARA could not lock capture to this tab. Choose This Tab (PARA), not another Chrome tab.");
+    }
+  }
+
+  // On modern Chromium Capture Handle can still prove self-capture even if
+  // Element Capture is unavailable. Older browsers cannot verify which tab
+  // the user selected, so the browser picker remains the final authority.
+  if (captureHandle?.handle === PARA_CAPTURE_HANDLE) {
+    track.contentHint = "detail";
+    return true;
+  }
+  return false;
+}
+
 async function requestScreenStream({ audio = false } = {}) {
   if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("Screen capture is unavailable on this device.");
-  return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
+  configureCaptureHandle();
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: { frameRate: { ideal: 30, max: 60 }, displaySurface: "browser" },
+    audio: audio ? { suppressLocalAudioPlayback: false } : false,
+    preferCurrentTab: true,
+    selfBrowserSurface: "include",
+    surfaceSwitching: "exclude",
+    monitorTypeSurfaces: "exclude",
+    systemAudio: "exclude",
+  });
+  const track = stream.getVideoTracks()[0];
+  if (!track) {
+    stopStream(stream);
+    throw new Error("PARA did not receive a video track.");
+  }
+  await restrictToPara(track, stream);
+  return stream;
 }
 
 export async function captureScreenshot() {
   const stream = await requestScreenStream();
   try {
-    const track = stream.getVideoTracks()[0];
     const video = document.createElement("video");
     video.srcObject = stream;
     video.muted = true;
@@ -79,18 +158,40 @@ export async function captureScreenshot() {
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("Could not create screenshot.")), "image/webp", 0.94));
     return saveCapture({ type: "screenshot", blob, width: canvas.width, height: canvas.height });
-  } finally { stream.getTracks().forEach((track) => track.stop()); }
+  } finally { stopStream(stream); }
 }
 
 let replay = null;
 
 function recorderMimeType() {
-  return ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
-    .find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+  const probe = document.createElement("video");
+  return ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm"]
+    .find((type) => MediaRecorder.isTypeSupported?.(type) && probe.canPlayType(type) !== "") || "";
+}
+
+async function assertPlayableVideo(blob) {
+  if (!blob?.size) throw new Error("The recording was empty.");
+  const url = URL.createObjectURL(blob);
+  try {
+    await new Promise((resolve, reject) => {
+      const video = document.createElement("video");
+      const timer = setTimeout(() => reject(new Error("The video file could not be finalized.")), 5000);
+      video.preload = "metadata";
+      video.muted = true;
+      video.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+      video.onerror = () => { clearTimeout(timer); reject(new Error("Chrome could not play the recorded video.")); };
+      video.src = url;
+      video.load();
+    });
+  } finally { URL.revokeObjectURL(url); }
 }
 
 export function replayStatus() {
-  return { active: Boolean(replay), startedAt: replay?.startedAt || 0, maxDurationMs: replay?.maxDurationMs || 0 };
+  return {
+    active: Boolean(replay),
+    startedAt: replay?.startedAt || 0,
+    maxDurationMs: replay?.maxDurationMs || 0,
+  };
 }
 
 export async function startReplayBuffer(maxDurationMs = 30 * 60 * 1000) {
@@ -100,16 +201,22 @@ export async function startReplayBuffer(maxDurationMs = 30 * 60 * 1000) {
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   const chunks = [];
   const startedAt = Date.now();
+  let firstChunk = null;
 
   recorder.ondataavailable = (event) => {
     if (!event.data?.size) return;
-    chunks.push({ blob: event.data, at: Date.now() });
+    const part = { blob: event.data, at: Date.now() };
+    if (!firstChunk) firstChunk = part;
+    chunks.push(part);
     const cutoff = Date.now() - maxDurationMs;
-    while (chunks.length > 1 && chunks[0].at < cutoff) chunks.shift();
+    // Keep the first WebM chunk because it contains the file initialization
+    // data needed for playback. Roll only later media clusters.
+    while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
   };
   recorder.start(1000);
   stream.getVideoTracks()[0]?.addEventListener("ended", () => stopReplayBuffer(), { once: true });
-  replay = { stream, recorder, chunks, startedAt, maxDurationMs };
+  replay = { stream, recorder, chunks, firstChunk, startedAt, maxDurationMs };
+  emitCaptureState();
   return replayStatus();
 }
 
@@ -118,26 +225,32 @@ export function stopReplayBuffer() {
   const current = replay;
   replay = null;
   if (current.recorder.state !== "inactive") current.recorder.stop();
-  current.stream.getTracks().forEach((track) => track.stop());
+  stopStream(current.stream);
+  emitCaptureState();
 }
 
 export async function saveReplayClip(durationMs = 60_000) {
   if (!replay) throw new Error("PARA Replay is not running. Start Replay first.");
   replay.recorder.requestData();
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await new Promise((resolve) => setTimeout(resolve, 180));
   const cutoff = Date.now() - durationMs;
-  const selected = replay.chunks.filter((part) => part.at >= cutoff);
-  if (!selected.length) throw new Error("Replay has not buffered enough gameplay yet.");
-  const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || "video/webm" });
+  const recent = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
+  if (!recent.length) throw new Error("Replay has not buffered enough gameplay yet.");
+  const blob = new Blob(recent.map((part) => part.blob), { type: replay.recorder.mimeType || "video/webm" });
+  await assertPlayableVideo(blob);
   const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
   return saveCapture({ type: "clip", blob, durationMs: actualDuration });
 }
 
-
 let manualRecording = null;
 
 export function manualRecordingStatus() {
-  return { active: Boolean(manualRecording), startedAt: manualRecording?.startedAt || 0 };
+  return {
+    active: Boolean(manualRecording),
+    stopping: Boolean(manualRecording?.stopping),
+    startedAt: manualRecording?.startedAt || 0,
+    elapsedMs: manualRecording ? Date.now() - manualRecording.startedAt : 0,
+  };
 }
 
 export async function startManualRecording() {
@@ -148,30 +261,43 @@ export async function startManualRecording() {
   const chunks = [];
   const startedAt = Date.now();
   recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
-  recorder.start(1000);
+  recorder.start(500);
+  manualRecording = { stream, recorder, chunks, startedAt, stopping: false };
+  emitCaptureState();
   stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-    if (manualRecording?.stream === stream) void stopManualRecording();
+    if (manualRecording?.stream === stream) void stopManualRecording().catch(() => {});
   }, { once: true });
-  manualRecording = { stream, recorder, chunks, startedAt };
   return manualRecordingStatus();
 }
 
 export async function stopManualRecording() {
   if (!manualRecording) throw new Error("No PARA recording is active.");
+  if (manualRecording.stopping) throw new Error("PARA is already saving this recording.");
   const current = manualRecording;
-  manualRecording = null;
-  const stopped = new Promise((resolve) => {
-    current.recorder.addEventListener("stop", resolve, { once: true });
-  });
-  if (current.recorder.state !== "inactive") {
-    current.recorder.requestData();
-    current.recorder.stop();
-    await stopped;
+  current.stopping = true;
+  emitCaptureState();
+  try {
+    const stopped = new Promise((resolve, reject) => {
+      current.recorder.addEventListener("stop", resolve, { once: true });
+      current.recorder.addEventListener("error", () => reject(current.recorder.error || new Error("Recording failed.")), { once: true });
+    });
+    if (current.recorder.state !== "inactive") {
+      current.recorder.requestData();
+      current.recorder.stop();
+      await stopped;
+    }
+    // MediaRecorder dispatches its final dataavailable before stop, but an extra
+    // task turn keeps Chromium implementations from racing IndexedDB storage.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stopStream(current.stream);
+    const blob = new Blob([...current.chunks], { type: current.recorder.mimeType || "video/webm" });
+    await assertPlayableVideo(blob);
+    return await saveCapture({ type: "clip", blob, durationMs: Date.now() - current.startedAt });
+  } finally {
+    stopStream(current.stream);
+    if (manualRecording === current) manualRecording = null;
+    emitCaptureState();
   }
-  current.stream.getTracks().forEach((track) => track.stop());
-  const blob = new Blob(current.chunks, { type: current.recorder.mimeType || "video/webm" });
-  if (!blob.size) throw new Error("The recording was empty.");
-  return saveCapture({ type: "clip", blob, durationMs: Date.now() - current.startedAt });
 }
 
 export async function recordRecentClip(durationMs = 8000) {
@@ -181,15 +307,21 @@ export async function recordRecentClip(durationMs = 8000) {
     const recorder = new MediaRecorder(stream, supported ? { mimeType: supported } : undefined);
     const chunks = [];
     recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
-    const stopped = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = () => reject(recorder.error || new Error("Recording failed.")); });
+    const stopped = new Promise((resolve, reject) => {
+      recorder.onstop = resolve;
+      recorder.onerror = () => reject(recorder.error || new Error("Recording failed."));
+    });
     recorder.start(500);
     await new Promise((resolve) => setTimeout(resolve, durationMs));
-    if (recorder.state !== "inactive") recorder.stop();
+    if (recorder.state !== "inactive") {
+      recorder.requestData();
+      recorder.stop();
+    }
     await stopped;
     const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
-    if (!blob.size) throw new Error("The clip was empty.");
+    await assertPlayableVideo(blob);
     return saveCapture({ type: "clip", blob, durationMs });
-  } finally { stream.getTracks().forEach((track) => track.stop()); }
+  } finally { stopStream(stream); }
 }
 
 export async function getCapture(id) {

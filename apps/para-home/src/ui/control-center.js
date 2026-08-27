@@ -204,6 +204,7 @@ export async function populateControlCenter({ overlay, controller, focus }) {
     if (overlay.hidden) return;
     if (lastSelectedId === "downloads") { currentData.runtime = profileRuntime(); showControlCenterContext("downloads"); }
     if (lastSelectedId === "music") { currentData.media = mediaSessionState(); showControlCenterContext("music"); }
+    if (lastSelectedId === "captures") showControlCenterContext("captures");
   }, 500);
 }
 

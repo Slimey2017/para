@@ -143,6 +143,47 @@ function toast(title, message = "") {
   setTimeout(() => node.remove(), 3200);
 }
 
+let recordingHudTimer = null;
+
+function recordingClock(ms = 0) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, "0");
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
+}
+
+function syncRecordingHud() {
+  const status = manualRecordingStatus();
+  let hud = document.querySelector("[data-para-recording-hud]");
+  if (!status.active) {
+    hud?.remove();
+    window.clearInterval(recordingHudTimer);
+    recordingHudTimer = null;
+    document.documentElement.classList.remove("para-is-recording");
+    return;
+  }
+  document.documentElement.classList.add("para-is-recording");
+  if (!hud) {
+    hud = document.createElement("button");
+    hud.type = "button";
+    hud.className = "para-recording-hud";
+    hud.dataset.paraRecordingHud = "true";
+    hud.dataset.action = "toggle-manual-recording";
+    hud.setAttribute("aria-label", "Stop and save PARA recording");
+    document.body.append(hud);
+  }
+  hud.disabled = Boolean(status.stopping);
+  hud.innerHTML = `<i></i><span><strong>${status.stopping ? "Saving recording…" : "Recording PARA"}</strong><small>${recordingClock(status.elapsedMs)} · ${status.stopping ? "Please wait" : "Stop & Save"}</small></span><b>${status.stopping ? "…" : "■"}</b>`;
+  if (!recordingHudTimer) recordingHudTimer = window.setInterval(syncRecordingHud, 500);
+}
+
+document.addEventListener("para-capture-state", () => {
+  syncRecordingHud();
+  const context = overlay.querySelector?.("[data-control-center-context][data-context-for='captures']");
+  if (context && !overlay.hidden) showControlCenterContext("captures", false, focus);
+});
+
 function updateControllerPrompts() {
   const promptSource = activeInputDevice === "controller" ? controllerStatus : keyboardController();
   document.documentElement.dataset.controller = promptSource.type;
@@ -400,7 +441,7 @@ async function openCaptureViewer(captureId) {
   clearTimeout(overlayCloseTimer);
   if (overlay.hidden) overlayReturnFocus = focus.current;
   const media = item.type === "clip"
-    ? `<video src="${captureViewerUrl}" controls autoplay playsinline></video>`
+    ? `<video controls playsinline preload="metadata"><source src="${captureViewerUrl}" type="${item.mimeType || "video/webm"}">Your browser could not play this PARA recording.</video>`
     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
@@ -418,6 +459,11 @@ async function openCaptureViewer(captureId) {
   </div>`;
   overlay.hidden = false;
   overlay.classList.remove("is-closing");
+  const viewerVideo = overlay.querySelector("[data-capture-viewer] video");
+  if (viewerVideo) {
+    viewerVideo.addEventListener("error", () => toast("Video could not play", "This capture was not finalized correctly."), { once: true });
+    viewerVideo.load();
+  }
   updateControllerPrompts();
   requestAnimationFrame(() => focus.focusFirst());
   return true;
@@ -711,7 +757,8 @@ async function handleAction(action, target) {
     case "toggle-manual-recording":
       try {
         if (manualRecordingStatus().active) { await stopManualRecording(); toast("Recording saved", "Added to Media Gallery"); }
-        else { await startManualRecording(); toast("Recording started", "Open Control Center again to stop and save it."); }
+        else { await startManualRecording(); toast("Recording started", "A Stop & Save control stays on screen after Control Center closes."); }
+        syncRecordingHud();
         if (!overlay.hidden && overlay.querySelector("[data-control-center-context]")) showControlCenterContext("captures", true, focus);
         if (router.current() === "media-gallery") await activateMediaGallery();
       } catch (error) { toast("Recording unavailable", error?.message || "Screen capture is unavailable."); }
@@ -1285,3 +1332,6 @@ document.addEventListener("para-controllerinput", (event) => {
   if (!scroller) return;
   scroller.scrollBy({ top: y * 34, behavior: "auto" });
 });
+
+// Keep the persistent recording control synchronized with capture-service state.
+syncRecordingHud();

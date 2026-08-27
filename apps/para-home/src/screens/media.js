@@ -32,11 +32,11 @@ function details(item) {
 function heroMarkup(item) {
   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
   const url = mediaUrl(item);
-  const media = item.type === "clip"
-    ? `<video src="${url}" preload="metadata" playsinline muted></video><span class="capture-hero__play" aria-hidden="true">▶</span>`
-    : `<img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}">`;
+  const mediaStage = item.type === "clip"
+    ? `<div class="capture-hero__media capture-hero__media--video"><video src="${url}" preload="metadata" playsinline controls></video><button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
+    : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
   return `<article class="capture-hero" data-selected-capture="${item.id}">
-    <button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View ${item.type === "clip" ? "gameplay clip" : "screenshot"} fullscreen">${media}</button>
+    ${mediaStage}
     <div class="capture-hero__info">
       <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
       <div class="capture-hero__actions" data-focus-zone="capture-actions">
