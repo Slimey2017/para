@@ -384,37 +384,14 @@ export function activateStoreGame() {
   const host = document.querySelector("[data-store-game-runtime]");
   if (!host) return () => {};
   const id = sessionStorage.getItem("para.store.launch") || "";
-  const item = installedStoreItems().find((entry) => entry.id === id);
-  if (!item) {
-    host.innerHTML = `<div class="library-empty"><span>!</span><h2>Game is not installed</h2><button class="action-button" data-route="parastore">Open ParaStore</button></div>`;
+  if (!id) {
+    host.innerHTML = `<div class="library-empty"><span>!</span><h2>No game selected</h2><button class="action-button" data-route="games">Back to Games</button></div>`;
     return () => {};
   }
-
-  recordExperience({ id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game", kind: "Game", accent: "#8d43ff", mark: (item.title || "P")[0], storeId: item.id });
-  const source = `/api/v1/store/content/${encodeURIComponent(item.id)}/index.html?para_game_mode=1`;
-  let alive = true;
-
-  host.innerHTML = `<div class="store-game-boot"><span class="store-game-boot__spinner"></span><strong>Starting ${escapeHtml(item.title || "Game")}</strong><small>Switching to PARA Game Mode…</small></div>`;
-
-  const start = async () => {
-    try {
-      const response = await fetch(source, { cache: "no-store" });
-      const type = response.headers.get("content-type") || "";
-      if (!response.ok) throw new Error(`Game entry point returned ${response.status}`);
-      if (!type.includes("text/html")) throw new Error(`Game entry point is ${type || "not HTML"}`);
-      if (!alive) return;
-
-      // WEB titles run as the top-level document. This avoids browser iframe
-      // restrictions and uses the exact URL that can be opened directly.
-      window.location.assign(source);
-    } catch (error) {
-      if (!alive) return;
-      host.innerHTML = `<div class="library-empty"><span>!</span><h2>The game could not start</h2><p>${escapeHtml(error.message || "Published build is unavailable")}</p><button class="action-button" data-route="store-product" data-autofocus="true">Back to product</button></div>`;
-    }
-  };
-
-  void start();
-  return () => { alive = false; };
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v9`;
+  host.innerHTML = `<div class="store-game-boot"><span class="store-game-boot__spinner"></span><strong>Starting game…</strong><small>Opening direct PARA Game Mode…</small></div>`;
+  window.location.replace(source);
+  return () => {};
 }
 
 export function messagesScreen() {

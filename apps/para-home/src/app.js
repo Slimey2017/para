@@ -623,6 +623,16 @@ async function openSystemApplication(target) {
   }
 }
 
+function launchStoreGameDirect(storeId) {
+  const id = String(storeId || "").trim();
+  if (!id) return false;
+  sessionStorage.setItem("para.store.launch", id);
+  sessionStorage.setItem("para.store.lastLibraryRoute", "games");
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v9`;
+  window.location.assign(source);
+  return true;
+}
+
 async function handleAction(action, target) {
   const state = getState();
   switch (action) {
@@ -891,9 +901,9 @@ async function handleAction(action, target) {
       break;
     case "resume-experience": {
       const storeId = target.dataset.storeId || "";
-      if (storeId) sessionStorage.setItem("para.store.launch", storeId);
       closeControlCenter(false);
-      navigate(target.dataset.experienceRoute || "home", {}, target);
+      if (storeId) launchStoreGameDirect(storeId);
+      else navigate(target.dataset.experienceRoute || "home", {}, target);
       break;
     }
     case "close-experience":
@@ -903,8 +913,9 @@ async function handleAction(action, target) {
       break;
     case "game-option-play": {
       const storeId = target.dataset.storeId || "";
-      if (storeId) { sessionStorage.setItem("para.store.launch", storeId); closeControlCenter(false); navigate("store-game", {}, target); }
-      else if (target.dataset.optionRoute) { closeControlCenter(false); navigate(target.dataset.optionRoute, {}, target); }
+      closeControlCenter(false);
+      if (storeId) launchStoreGameDirect(storeId);
+      else if (target.dataset.optionRoute) navigate(target.dataset.optionRoute, {}, target);
       break;
     }
     case "game-option-info":
@@ -1055,10 +1066,7 @@ async function handleAction(action, target) {
       break;
     }
     case "play-store-game":
-      if (target.dataset.storeId) {
-        sessionStorage.setItem("para.store.launch", target.dataset.storeId);
-        navigate("store-game", {}, target);
-      }
+      if (target.dataset.storeId) launchStoreGameDirect(target.dataset.storeId);
       break;
     case "uninstall-store-game":
       if (target.dataset.storeId) {
