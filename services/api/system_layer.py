@@ -9,6 +9,7 @@ import mimetypes
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -917,7 +918,7 @@ def _application_roles(raw: str, name: str) -> list[str]:
 
 def _desktop_entries() -> dict[str, dict[str, Any]]:
     entries: dict[str, dict[str, Any]] = {}
-    if not _launch_enabled or not shutil.which("gio"):
+    if not _launch_enabled or platform.system() != "Linux" or not shutil.which("gio"):
         return entries
     for root in _application_dirs():
         if not root.is_dir():
@@ -953,23 +954,131 @@ def _desktop_entries() -> dict[str, dict[str, Any]]:
     return entries
 
 
+def _steam_library_roots() -> list[Path]:
+    if platform.system() != "Windows":
+        return []
+    candidates: list[Path] = []
+    for key in ["ProgramFiles(x86)", "ProgramFiles"]:
+        raw = os.environ.get(key)
+        if raw:
+            candidates.append(Path(raw) / "Steam")
+    roots: list[Path] = []
+    for steam in candidates:
+        if steam not in roots and steam.is_dir():
+            roots.append(steam)
+        libraries = steam / "steamapps" / "libraryfolders.vdf"
+        if not libraries.is_file():
+            continue
+        try:
+            text = libraries.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for raw_path in re.findall(r'"path"\s*"([^"]+)"', text):
+            library = Path(raw_path.replace("\\\\", "\\"))
+            if library not in roots and library.is_dir():
+                roots.append(library)
+    return roots
+
+
+def _steam_entries() -> dict[str, dict[str, Any]]:
+    entries: dict[str, dict[str, Any]] = {}
+    if not _launch_enabled or platform.system() != "Windows":
+        return entries
+    for root in _steam_library_roots():
+        steamapps = root / "steamapps"
+        for manifest in sorted(steamapps.glob("appmanifest_*.acf")):
+            try:
+                text = manifest.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            appid_match = re.search(r'"appid"\s*"(\d+)"', text)
+            name_match = re.search(r'"name"\s*"([^"]+)"', text)
+            if not appid_match or not name_match:
+                continue
+            appid = appid_match.group(1)
+            name = name_match.group(1).strip()
+            if not name:
+                continue
+            identifier = f"windows:steam:{appid}"
+            entries[identifier] = {
+                "id": identifier,
+                "name": name,
+                "category": "Entertainment",
+                "roles": ["game"],
+                "icon": None,
+                "launch": {"kind": "windows-steam", "store": "Steam"},
+                "_target": f"steam://rungameid/{appid}",
+            }
+    return entries
+
+
+def _windows_start_menu_entries() -> dict[str, dict[str, Any]]:
+    entries: dict[str, dict[str, Any]] = {}
+    if not _launch_enabled or platform.system() != "Windows":
+        return entries
+    roots = []
+    if os.environ.get("ProgramData"):
+        roots.append(Path(os.environ["ProgramData"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+    if os.environ.get("APPDATA"):
+        roots.append(Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+    steam_names = {item["name"].casefold() for item in _steam_entries().values()}
+    seen_names: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for shortcut in sorted(root.rglob("*.lnk")):
+            name = shortcut.stem.strip()
+            folded = name.casefold()
+            if not name or folded in seen_names or folded in steam_names:
+                continue
+            seen_names.add(folded)
+            game_hint = any(part.casefold() in {"games", "steam", "epic games", "gog.com"} for part in shortcut.parts)
+            identifier = f"windows:shortcut:{hashlib.sha256(str(shortcut).encode('utf-8')).hexdigest()[:20]}"
+            entries[identifier] = {
+                "id": identifier,
+                "name": name,
+                "category": "Entertainment" if game_hint else "Tools",
+                "roles": ["game"] if game_hint else [],
+                "icon": None,
+                "launch": {"kind": "windows-shortcut"},
+                "_target": str(shortcut),
+            }
+    return entries
+
+
+def _system_entries() -> dict[str, dict[str, Any]]:
+    if not _launch_enabled:
+        return {}
+    if platform.system() == "Windows":
+        return {**_steam_entries(), **_windows_start_menu_entries()}
+    return _desktop_entries()
+
+
 def applications() -> dict[str, Any]:
     built_in = {"id": "para:files", "name": "Files", "category": "Tools", "roles": [], "icon": None, "launch": {"kind": "route", "route": "files"}}
-    linux = [{key: value for key, value in item.items() if not key.startswith("_")} for item in _desktop_entries().values()]
-    apps = ([built_in] if _controls_enabled else []) + linux
+    native = [{key: value for key, value in item.items() if not key.startswith("_")} for item in _system_entries().values()]
+    apps = ([built_in] if _controls_enabled else []) + native
     categories = [name for name in ["All Apps", "Entertainment", "Tools"] if name == "All Apps" or any(item["category"] == name for item in apps)]
     return {"applications": apps, "categories": categories}
 
 
 def launch_application(identifier: str) -> tuple[int, dict[str, Any]]:
-    app = _desktop_entries().get(identifier)
+    app = _system_entries().get(identifier)
     if not app:
         return 404, {"error": "application_not_available"}
-    gio = shutil.which("gio")
-    if not gio:
-        return 503, {"error": "launcher_unavailable"}
     try:
-        subprocess.Popen([gio, "launch", app["_desktop_file"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        if identifier.startswith("linux:"):
+            gio = shutil.which("gio")
+            if not gio:
+                return 503, {"error": "launcher_unavailable"}
+            subprocess.Popen([gio, "launch", app["_desktop_file"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        elif identifier.startswith("windows:"):
+            startfile = getattr(os, "startfile", None)
+            if startfile is None:
+                return 503, {"error": "launcher_unavailable"}
+            startfile(app["_target"])
+        else:
+            return 400, {"error": "unsupported_launcher"}
     except OSError:
         return 503, {"error": "launch_failed"}
     return 202, {"accepted": True, "id": identifier}

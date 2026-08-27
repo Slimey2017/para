@@ -34,7 +34,7 @@ function applicationButton(application, up = "", down = "") {
   const name = escapeHtml(application.name);
   const destination = application.launch?.kind === "route"
     ? `data-route="${escapeHtml(application.launch.route)}"`
-    : `data-action="launch-linux-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
+    : `data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
   return `<button class="home-flow-row" type="button" ${destination} data-focus-id="home-app:${escapeHtml(application.id)}"${navigationAttributes(up, down)}><span class="home-flow-row__art">${applicationArtwork(application)}</span><span class="home-flow-row__copy"><strong>${name}</strong><small>Creator app</small></span><i aria-hidden="true">›</i></button>`;
 }
 

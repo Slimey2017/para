@@ -13,7 +13,7 @@ import {
 import { createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
-  appsScreen, activateApps, filterApps, launchLinuxApplication,
+  appsScreen, activateApps, filterApps, launchSystemApplication,
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
@@ -25,7 +25,7 @@ import {
   notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen, activateSavedData,
 } from "./screens/system.js";
 import {
-  gamesScreen, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
+  gamesScreen, activateGames, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
   creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct, activateStoreCart,
   storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem, addStoreCartItem, removeStoreCartItem,
   playCreatorTone, clearCreatorDrawing, currentStoreCartIds,
@@ -255,6 +255,8 @@ function render(route) {
     cleanupScreen = activateHome({ focus, controller: controllerStatus });
   } else if (route === "apps") {
     activateApps({ focus });
+  } else if (route === "games") {
+    void activateGames({ focus });
   } else if (route === "browser") {
     cleanupScreen = activateBrowser();
     recordExperience({ id: "para:browser", title: "PARA Browser", route: "browser", kind: "App", accent: "#4285ff", mark: "◎" });
@@ -610,11 +612,11 @@ function toggle(key, label) {
   rerender();
 }
 
-async function openLinuxApplication(target) {
+async function openSystemApplication(target) {
   const name = target.dataset.appName || "Application";
   try {
-    await launchLinuxApplication(target.dataset.appId);
-    recordExperience({ id: target.dataset.appId, title: name, route: "apps", kind: "App", accent: "#9161ff", mark: name.slice(0, 1).toUpperCase() });
+    await launchSystemApplication(target.dataset.appId);
+    recordExperience({ id: target.dataset.appId, title: name, route: target.dataset.appKind === "Game" ? "games" : "apps", kind: target.dataset.appKind || "App", accent: "#9161ff", mark: name.slice(0, 1).toUpperCase() });
     toast(`Opening ${name}`);
   } catch {
     toast(`${name} couldn’t be opened`);
@@ -856,8 +858,11 @@ async function handleAction(action, target) {
     case "reload-apps":
       activateApps({ focus });
       break;
+    case "launch-system-app":
+      openSystemApplication(target);
+      break;
     case "launch-linux-app":
-      openLinuxApplication(target);
+      openSystemApplication(target);
       break;
     case "toggle-account-menu": {
       const wrap = target.closest("[data-account-quick]");

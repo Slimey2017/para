@@ -3,7 +3,7 @@ import { page } from "../ui/components.js";
 
 function applicationCard(application, index) {
   const name = escapeHtml(application.name);
-  const route = application.launch?.kind === "route" ? `data-route="${escapeHtml(application.launch.route)}"` : `data-action="launch-linux-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
+  const route = application.launch?.kind === "route" ? `data-route="${escapeHtml(application.launch.route)}"` : `data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
   const icon = application.icon
     ? `<img src="${application.icon}" alt="" />`
     : application.id === "para:files"
@@ -52,6 +52,6 @@ export function filterApps(category) {
   document.querySelectorAll("[data-app-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.appFilter === category));
 }
 
-export async function launchLinuxApplication(id) {
+export async function launchSystemApplication(id) {
   return paraApi.launchApplication(id);
 }

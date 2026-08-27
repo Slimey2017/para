@@ -96,6 +96,12 @@ function demoCard(demo, { installed = false, autofocus = false } = {}) {
   return `<article class="demo-card">${demoArt(demo)}<div class="demo-card__copy"><span>${demo.genre} · ${formatBytes(demo.sizeBytes)}</span><h2>${demo.name}</h2><p>${demo.tagline}</p></div><button class="action-button" ${action} ${autofocus && !download ? "data-autofocus='true'" : ""}>${label}</button>${installed ? `<button class="demo-remove" data-action="remove-demo" data-demo-id="${demo.id}">Remove</button>` : ""}</article>`;
 }
 
+function nativeGameCard(application, autofocus = false) {
+  const name = escapeHtml(application.name || "Game");
+  const store = application.launch?.store ? `${escapeHtml(application.launch.store)} · ` : "PC · ";
+  return `<article class="demo-card native-game-card"><span class="demo-art" style="--demo-accent:#6f35ff"><i>${name.slice(0,1)}</i><b></b></span><div class="demo-card__copy"><span>${store}<b class="ownership-badge">Installed</b></span><h2>${name}</h2><p>Installed on this computer and ready to launch through PARA.</p></div><button class="action-button" data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}" data-app-kind="Game" ${autofocus ? "data-autofocus='true'" : ""}>Play</button></article>`;
+}
+
 export function gamesScreen() {
   const storeGames = installedStoreItems().filter((item) => (item.project_type || "GAME") === "GAME");
   const demos = installedDemos();
@@ -105,13 +111,31 @@ export function gamesScreen() {
   ];
   return page({
     title: "Games",
-    description: "Games installed for this profile.",
+    description: "Games installed for this profile and on this computer.",
     eyebrow: "Explore",
     className: "demo-library-page",
-    body: cards.length
-      ? `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div><div class="demo-library">${cards.join("")}</div>`
-      : `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div><div class="library-empty"><span>◉</span><h2>No games installed</h2><button class="action-button" data-route="parastore" data-autofocus="true">Open ParaStore</button></div>`,
+    body: `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div>
+      <div class="demo-library" data-profile-games>${cards.join("")}</div>
+      <div class="demo-library" data-native-game-library><div class="library-loading"><span></span><strong>Finding PC games…</strong></div></div>
+      <div class="library-empty" data-games-empty ${cards.length ? "hidden" : ""}><span>◉</span><h2>No games installed</h2><p>PARA checks ParaStore installs, demos, and local PC game libraries.</p><button class="action-button" data-route="parastore">Open ParaStore</button></div>`,
   });
+}
+
+export async function activateGames({ focus } = {}) {
+  const host = document.querySelector("[data-native-game-library]");
+  const empty = document.querySelector("[data-games-empty]");
+  const profileGames = document.querySelector("[data-profile-games]");
+  if (!host) return;
+  try {
+    const payload = await paraApi.applications();
+    const games = (payload.applications || []).filter((item) => item.roles?.includes("game"));
+    host.innerHTML = games.map((item, index) => nativeGameCard(item, !profileGames?.children.length && index === 0)).join("");
+    if (empty) empty.hidden = Boolean(games.length || profileGames?.children.length);
+    if (!games.length) host.innerHTML = "";
+    focus?.focusFirst?.();
+  } catch {
+    host.innerHTML = `<div class="library-empty library-empty--small"><span>◌</span><h2>PC games couldn’t be scanned</h2><p>Make sure local app launching is enabled, then reopen Games.</p></div>`;
+  }
 }
 
 

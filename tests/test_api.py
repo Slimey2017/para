@@ -50,6 +50,24 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(system_layer._application_roles("Game;", "Installed Game"), ["game"])
         self.assertEqual(system_layer._application_roles("Utility;", "Calculator"), [])
 
+    def test_windows_steam_games_are_discovered_and_launchable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            steam = Path(temporary) / "Steam"
+            steamapps = steam / "steamapps"
+            steamapps.mkdir(parents=True)
+            (steamapps / "appmanifest_123.acf").write_text('"AppState"\n{\n  "appid" "123"\n  "name" "Test Game"\n}', encoding="utf-8")
+            environment = {"ProgramFiles(x86)": temporary, "ProgramFiles": str(Path(temporary) / "Other"), "ProgramData": str(Path(temporary) / "Data"), "APPDATA": str(Path(temporary) / "Roaming")}
+            with patch.dict(os.environ, environment, clear=False), patch("system_layer.platform.system", return_value="Windows"), patch.object(system_layer.os, "startfile", create=True) as startfile:
+                system_layer.configure(launch_enabled=True, controls_enabled=True)
+                payload = system_layer.applications()
+                game = next(item for item in payload["applications"] if item["id"] == "windows:steam:123")
+                self.assertEqual(game["roles"], ["game"])
+                self.assertEqual(game["launch"]["store"], "Steam")
+                status, result = system_layer.launch_application(game["id"])
+                self.assertEqual(status, 202)
+                self.assertTrue(result["accepted"])
+                startfile.assert_called_once_with("steam://rungameid/123")
+
     def test_unknown_route_returns_not_found(self):
         status, payload = resolve("/api/v1/does-not-exist")
         self.assertEqual(status, 404)

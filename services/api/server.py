@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PARA API server for the hosted console UI and local Linux system bridge."""
+"""PARA API server for the hosted console UI and local system bridge."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import ipaddress
 import json
 import mimetypes
 import os
+import platform
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -486,7 +487,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1", help="Numeric bind address")
     parser.add_argument("--port", type=int, default=4173)
     parser.add_argument("--allow-nonlocal", action="store_true", help="Permit a hosted public bind")
-    parser.add_argument("--enable-app-launch", action="store_true", help="Expose and launch discovered Linux desktop applications")
+    parser.add_argument("--enable-app-launch", action="store_true", help="Expose and launch discovered local applications and games")
     parser.add_argument("--enable-power-actions", action="store_true", help="Permit fixed suspend, reboot, and poweroff requests on a local bind")
     parser.add_argument("--enable-file-operations", action="store_true", help="Permit file opening, file changes, Trash, and volume actions on a local bind")
     return parser.parse_args()
@@ -505,7 +506,8 @@ def validate_bind(host: str, allow_nonlocal: bool = False):
 def main() -> int:
     args = parse_args()
     validate_bind(args.host, args.allow_nonlocal)
-    launch_enabled = args.enable_app_launch and not args.allow_nonlocal
+    env_launch = os.environ.get("PARA_ENABLE_APP_LAUNCH", "").strip().casefold() in {"1", "true", "yes", "on"}
+    launch_enabled = (args.enable_app_launch or env_launch) and not args.allow_nonlocal
     power_enabled = args.enable_power_actions and not args.allow_nonlocal
     file_operations_enabled = args.enable_file_operations and not args.allow_nonlocal
     controls_enabled = not args.allow_nonlocal
@@ -517,7 +519,8 @@ def main() -> int:
     )
     server = ThreadingHTTPServer((args.host, args.port), ParaHandler)
     print(f"PARA API + Home: http://{args.host}:{args.port}")
-    print("Linux application launch is enabled." if launch_enabled else "Linux application launch is off.")
+    host_os = platform.system()
+    print(f"{host_os} application/game launch is enabled." if launch_enabled else f"{host_os} application/game launch is off.")
     print("Linux power actions are enabled." if power_enabled else "Linux power actions are off.")
     print("Linux file operations are enabled." if file_operations_enabled else "Linux file operations are read-only.")
     try:
