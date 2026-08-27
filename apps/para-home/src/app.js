@@ -628,7 +628,7 @@ function launchStoreGameDirect(storeId) {
   if (!id) return false;
   sessionStorage.setItem("para.store.launch", id);
   sessionStorage.setItem("para.store.lastLibraryRoute", "games");
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v9`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v10`;
   window.location.assign(source);
   return true;
 }
