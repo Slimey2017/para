@@ -1,6 +1,6 @@
 id = "network"
 status = "read-only"
 frontend_routes = ["network", "setup"]
-current_provider = "services/gateway/system_layer.py"
+current_provider = "services/api/system_layer.py"
 future_runtime = "Permission-aware D-Bus client"
 linux_apis = ["NetworkManager", "iwd", "systemd-resolved"]

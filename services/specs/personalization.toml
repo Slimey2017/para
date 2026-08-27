@@ -1,7 +1,7 @@
 id = "personalization"
 status = "local-session"
 frontend_routes = ["personalization", "background", "control-center-settings"]
-current_provider = "services/gateway/system_layer.py"
+current_provider = "services/api/system_layer.py"
 future_runtime = "Profile service with an account-authorized settings portal"
 linux_apis = ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "desktop file picker"]
 security_note = "Keep preferences and custom artwork separate per profile; apply family policy only after an account authority exists."

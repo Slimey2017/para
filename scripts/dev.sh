@@ -20,7 +20,7 @@ if [[ "${PARA_ENABLE_FILE_OPERATIONS:-0}" == "1" ]]; then
   PARA_FILE_ARGS+=(--enable-file-operations)
 fi
 
-exec python3 "$PARA_REPO_ROOT/services/gateway/server.py" \
+exec python3 "$PARA_REPO_ROOT/services/api/server.py" \
   --host "$PARA_DEV_HOST" \
   --port "$PARA_DEV_PORT" \
   "${PARA_LAUNCH_ARGS[@]}" \

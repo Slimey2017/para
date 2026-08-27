@@ -1,0 +1,19 @@
+[Unit]
+Description=PARA API and Home service
+PartOf=para-home.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Template only. Installation and activation are always manual.
+WorkingDirectory=%h/PARA
+ExecStart=/usr/bin/python3 %h/PARA/services/api/server.py --host 127.0.0.1 --port 4173 --enable-app-launch
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=para-home.target

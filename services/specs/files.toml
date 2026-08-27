@@ -1,7 +1,7 @@
 id = "files"
 status = "local-session"
 frontend_routes = ["files", "downloads"]
-current_provider = "services/gateway/system_layer.py"
+current_provider = "services/api/system_layer.py"
 future_runtime = "Dedicated local PARA Files daemon with portal-scoped clients and indexed search"
 linux_apis = ["xdg-user-dirs", "GIO", "freedesktop Trash", "udisks2", "lsblk", "recently-used.xbel"]
 read_behavior = "available on an unprivileged loopback session"

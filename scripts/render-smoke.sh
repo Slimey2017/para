@@ -28,7 +28,7 @@ for attempt in range(30):
             payload = json.load(response)
             headers = response.headers
         assert payload["status"] == "ok"
-        assert payload["name"] == "para-gateway"
+        assert payload["name"] == "para-api"
         assert headers["X-Content-Type-Options"] == "nosniff"
         assert headers["X-Frame-Options"] == "DENY"
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/capabilities", timeout=1) as response:

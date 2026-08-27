@@ -46,7 +46,7 @@ All nine audit phases have been started in this branch. The stabilization gate p
 
 ## Phase 9 repository / deploy
 - Removed the obsolete `services/mock-api/server.py` contradiction.
-- Linux unit now launches `services/gateway/server.py`.
+- Linux unit now launches `services/api/server.py`.
 - Added `scripts/stabilization-check.sh`.
 - Render still calls the expected `scripts/check.sh`, which now delegates to the stabilization gate.
 - Gate result: project validation PASS, consumer UI audit PASS, 37/37 tests PASS, shell/static checks PASS.

@@ -152,7 +152,7 @@ PARA/
 ├── platform/linux/
 │   ├── session/para-home-session.sh
 │   └── systemd/user/
-│       ├── para-gateway.service
+│       ├── para-api.service
 │       └── para-home.target
 ├── recovery/safe-recovery.sh
 ├── schemas/accounts.sql
@@ -164,7 +164,7 @@ PARA/
 │   ├── render-start.sh
 │   └── smoke.sh
 ├── services/
-│   ├── gateway/
+│   ├── api/
 │   │   ├── server.py
 │   │   └── system_layer.py
 │   ├── native/
@@ -409,12 +409,12 @@ selection capsule, static labels, or default file-manager links. This avoids
 turning concept art into a fake file interface while keeping the future game
 available for real implementation.
 
-## Backend and Linux gateway
+## PARA API and Linux system bridge
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `services/gateway/server.py` | Serves PARA Home plus versioned JSON/image endpoints, security headers, bind policy, bounded request validation, PARA Files endpoints, optional app launch, and optional fixed power/file/volume actions. | Python standard library HTTP server | Working. Hosted binds disable local file access, writes, application launch, and Linux power calls. | Replace transport for production scale while retaining the API and safety policy. Calls `system_layer.py`. |
-| `services/gateway/system_layer.py` | Reads system, storage, network, XDG folders, actual file metadata, Recent, Trash, lsblk volumes, apps, and mounts; performs bounded search; controls PipeWire; persists profile settings/images; and exposes fixed Linux actions only after the corresponding local opt-in. | Python standard library + Linux files/APIs + `gio`/`lsblk`/`udisksctl`/`wpctl`/`systemctl` | Working locally. Read-only PARA Files is on for loopback; application launch, file changes, volume changes, and power are explicit opt-ins. | Split domains into D-Bus/portal services, add polkit, file-transfer progress/cancel, index events, and transactional undo. |
+| `services/api/server.py` | Real PARA HTTP server. Serves PARA Home plus versioned JSON/image endpoints, ParaStore reads, checkout quotes, security headers, bind policy, request validation, PARA Files endpoints, optional app launch, and optional fixed power/file/volume actions. | Python standard library HTTP server | Working. Hosted binds disable local file access, writes, application launch, and Linux power calls. | Add authenticated remote account, chat, capture upload, and sharing routes as those services come online. Calls `system_layer.py`. |
+| `services/api/system_layer.py` | Reads system, storage, network, XDG folders, actual file metadata, Recent, Trash, lsblk volumes, apps, and mounts; performs bounded search; controls PipeWire; persists profile settings/images; and exposes fixed Linux actions only after the corresponding local opt-in. | Python standard library + Linux files/APIs + `gio`/`lsblk`/`udisksctl`/`wpctl`/`systemctl` | Working locally. Read-only PARA Files is on for loopback; application launch, file changes, volume changes, and power are explicit opt-ins. | Split domains into D-Bus/portal services, add polkit, file-transfer progress/cancel, index events, and transactional undo. |
 | `interfaces/openapi.yaml` | Contract for all gateway endpoints. | OpenAPI 3.1 | Current. | Add complete component schemas and generated clients. |
 | `packages/para-protocol/src/index.ts` | Shared API/controller/application types. | TypeScript | Current source package. | Generate from OpenAPI and publish internally. |
 | `config/services.json` | Declares operational and contract-only domains. | JSON | Working. | Add schema validation and runtime capability discovery. |
@@ -467,7 +467,7 @@ UI:
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `platform/linux/systemd/user/para-gateway.service` | Hardened user-service template for a future local install. | systemd | Template only and never enabled automatically. | Package with reviewed paths and desktop-session integration. Starts the gateway locally. |
+| `platform/linux/systemd/user/para-api.service` | Hardened user-service template for a future local install. | systemd | Template only and never enabled automatically. | Package with reviewed paths and desktop-session integration. Starts the PARA API locally. |
 | `platform/linux/systemd/user/para-home.target` | Groups future PARA user services. | systemd | Template only. | Add explicit dependencies after services exist. |
 | `platform/linux/session/para-home-session.sh` | States that the current desktop remains untouched. | Bash | Working information command. | Replace with a dedicated opt-in Wayland session launcher after testing. |
 | `recovery/safe-recovery.sh` | Lists destructive categories kept disabled and points to repository diagnostics. | Bash | Working and non-destructive. | Signed offline repair tooling. |
@@ -477,17 +477,17 @@ UI:
 
 | File | What / why | Technology | Status | Next work / communicates with |
 |---|---|---|---|---|
-| `scripts/dev.sh` | Starts the loopback gateway. App launch, Linux power, and file/volume changes use three separate environment flags. | Bash | Working. Read-only PARA Files is available locally by default. | Live reload, structured logging, and portal policy. |
+| `scripts/dev.sh` | Starts the loopback PARA API. App launch, Linux power, and file/volume changes use three separate environment flags. | Bash | Working. Read-only PARA Files is available locally by default. | Live reload, structured logging, and portal policy. |
 | `scripts/render-start.sh` | Binds to Render's `PORT` with explicit nonlocal permission and no app launching. | Bash | Working. | Replace transport only if traffic requires it. |
 | `scripts/check.sh` | Runs structural validation, consumer-copy audit, browser entry-module parsing, unit tests, shell syntax, and Python compilation. | Bash | Working. | Add CSS lint, browser accessibility, and contract diffs. |
-| `scripts/smoke.sh` | Starts a temporary local gateway and checks health. | Bash + Python | Working. | Add endpoint and concurrency checks. |
+| `scripts/smoke.sh` | Starts a temporary local PARA API and checks health. | Bash + Python | Working. | Add endpoint and concurrency checks. |
 | `scripts/render-smoke.sh` | Tests the hosted start path and security headers on loopback. | Bash + Python | Working. | Add static cache and graceful-shutdown checks. |
 | `scripts/native-check.sh` | Compiles native boundaries when compilers are installed. | Bash | Working; skips absent optional compilers. | Add CMake presets, clippy, sanitizers, and cross-builds. |
 | `tools/validate_project.py` | Enforces routes, services, specs, required files, and absence of destructive script patterns. | Python | Working. | Validate JSON/OpenAPI schemas and cross-file links. |
 | `tools/audit_consumer_ui.mjs` | Renders every screen and setup step, then rejects engineering copy or dead-action markers. | JavaScript | Working when Node is installed. | Add browser accessibility-tree and localization audits. |
 | `tools/paractl.py` | Reads health, capabilities, system, storage, network, audio, apps, directories, a requested PARA Files location, and one profile's personalization. | Python | Working against a running gateway. | Add D-Bus/event inspection once native services exist. |
 | `tools/package_release.py` | Produces a source archive while excluding Git, caches, builds, and prior archives. | Python | Working. | Add reproducible timestamps, checksums, SBOM, and signatures. |
-| `tests/test_api.py` | Verifies gateway health, host-backed values, PARA Files browse/search over temporary real entries, opt-in file changes, default action denial, fixed power commands, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, transfer rollback, concurrency, and fuzz tests. |
+| `tests/test_api.py` | Verifies API health, host-backed values, PARA Files browse/search over temporary real entries, opt-in file changes, default action denial, fixed power commands, 404s, and public-bind policy. | Python `unittest` | Working. | Add malformed input, transfer rollback, concurrency, and fuzz tests. |
 | `tests/test_repository.py` | Verifies route renderers, official assets, future Bear separation, PARA Files controls/shortcuts, contextual Home, PARA tap/hold, Power timing, local opt-in safety, Render wiring, and retired-code removal. | Python `unittest` | Working. | Add DOM interaction and visual-regression tests. |
 
 ## Build and run

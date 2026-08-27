@@ -1,7 +1,7 @@
 id = "hardware"
 status = "read-only"
 frontend_routes = ["intro", "home", "storage", "settings"]
-current_provider = "services/gateway/system_layer.py"
+current_provider = "services/api/system_layer.py"
 future_runtime = "Rust D-Bus service"
 linux_apis = ["sysfs", "procfs", "udev", "UPower", "hwmon"]
 startup_cues = ["para-startup-light", "para-startup-sound"]

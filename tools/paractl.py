@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small unprivileged CLI for inspecting the PARA Linux gateway."""
+"""Small unprivileged CLI for inspecting the PARA API."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def main() -> int:
             path = f"/api/v1/files/browse?path={urllib.parse.quote(args.path)}"
         print(json.dumps(request(args.base, path), indent=2))
     except (urllib.error.URLError, TimeoutError) as error:
-        print(f"PARA gateway is unavailable: {error}")
+        print(f"PARA API is unavailable: {error}")
         return 1
     return 0
 

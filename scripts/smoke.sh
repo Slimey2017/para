@@ -11,7 +11,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 "$PARA_REPO_ROOT/services/gateway/server.py" --host 127.0.0.1 --port "$PARA_SMOKE_PORT" >"$PARA_SMOKE_LOG" 2>&1 &
+python3 "$PARA_REPO_ROOT/services/api/server.py" --host 127.0.0.1 --port "$PARA_SMOKE_PORT" >"$PARA_SMOKE_LOG" 2>&1 &
 PARA_SMOKE_PID=$!
 
 python3 - "$PARA_SMOKE_PORT" <<'PY'
@@ -26,7 +26,7 @@ for attempt in range(30):
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/health", timeout=1) as response:
             payload = json.load(response)
         assert payload["status"] == "ok"
-        assert payload["name"] == "para-gateway"
+        assert payload["name"] == "para-api"
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/capabilities", timeout=1) as response:
             capabilities = json.load(response)
         assert capabilities["personalization"] is True

@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "services/gateway"))
+sys.path.insert(0, str(ROOT / "services/api"))
 from server import resolve, validate_bind  # noqa: E402
 import system_layer  # noqa: E402
 
@@ -17,11 +17,11 @@ class ApiContractTests(unittest.TestCase):
     def setUp(self):
         system_layer.configure(launch_enabled=False)
 
-    def test_health_reports_gateway(self):
+    def test_health_reports_api(self):
         status, payload = resolve("/api/v1/health")
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["name"], "para-gateway")
+        self.assertEqual(payload["name"], "para-api")
 
     def test_system_and_storage_come_from_host(self):
         system_status, system = resolve("/api/v1/system")

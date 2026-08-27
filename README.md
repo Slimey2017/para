@@ -88,7 +88,7 @@ Backgrounds are configured under Settings → Personalization → Background and
 saved separately for each local PARA profile. The included choices are Aurora
 Current, Violet Horizon, Midnight Flow, and Matte Black. The system chooser can
 also apply a PNG, JPEG, or WebP image; hosted builds retain it in IndexedDB and
-local Linux sessions can retain it through the gateway.
+local Linux sessions can retain it through the PARA API.
 
 Power includes Return Home, Sleep, Restart PARA, Turn Off PARA, Sign Out, and
 Recovery. Real Linux suspend, reboot, and poweroff calls remain off unless a
@@ -119,7 +119,7 @@ The repository includes `render.yaml`.
 No Supabase project, secret, or environment variable is required. Render
 provides `PORT` automatically. A hosted browser cannot access files on the
 viewer’s computer, so PARA Files is available only through the local Linux
-gateway.
+PARA API.
 
 PARA does not modify the bootloader, partitions, firmware, kernel modules,
 graphics drivers, desktop environment, or systemd configuration. Read

@@ -26,13 +26,13 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(all(item.get("status") for item in services))
         self.assertTrue(all(isinstance(item.get("privileged"), bool) for item in services))
 
-    def test_render_blueprint_uses_gateway(self):
+    def test_render_blueprint_uses_real_api(self):
         blueprint = (ROOT / "render.yaml").read_text(encoding="utf-8")
         self.assertIn("buildCommand: ./scripts/check.sh", blueprint)
         self.assertIn("startCommand: ./scripts/render-start.sh", blueprint)
         self.assertIn("healthCheckPath: /api/v1/health", blueprint)
         launcher = (ROOT / "scripts/render-start.sh").read_text(encoding="utf-8")
-        self.assertIn("services/gateway/server.py", launcher)
+        self.assertIn("services/api/server.py", launcher)
         self.assertIn("--allow-nonlocal", launcher)
         self.assertIn('${PORT:-10000}', launcher)
 
@@ -53,7 +53,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_para_files_replaces_bear_home_as_the_file_manager(self):
         files = (ROOT / "apps/para-home/src/screens/files.js").read_text(encoding="utf-8")
-        gateway = (ROOT / "services/gateway/system_layer.py").read_text(encoding="utf-8")
+        gateway = (ROOT / "services/api/system_layer.py").read_text(encoding="utf-8")
         launcher = (ROOT / "scripts/dev.sh").read_text(encoding="utf-8")
         hosted = (ROOT / "scripts/render-start.sh").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
@@ -221,7 +221,7 @@ class RepositoryTests(unittest.TestCase):
         experience = (ROOT / "apps/para-home/src/ui/power-experience.js").read_text(encoding="utf-8")
         adapter = (ROOT / "apps/para-home/src/services/power-adapter.js").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
-        gateway = (ROOT / "services/gateway/system_layer.py").read_text(encoding="utf-8")
+        gateway = (ROOT / "services/api/system_layer.py").read_text(encoding="utf-8")
         for title in ["Return Home", "Sleep", "Restart PARA", "Turn Off PARA", "Sign Out", "Recovery"]:
             self.assertEqual(screen.count(f'title: "{title}"'), 1)
         self.assertIn("Turn off PARA?", screen)
@@ -257,7 +257,9 @@ class RepositoryTests(unittest.TestCase):
 
     def test_legacy_data_and_routes_are_gone(self):
         self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
-        self.assertFalse((ROOT / "services/mock-api/server.py").exists())
+        self.assertTrue((ROOT / "services/api/server.py").exists())
+        self.assertTrue((ROOT / "services/api/system_layer.py").exists())
+        self.assertFalse((ROOT / "services/mock-api").exists())
         manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
         for route in ["store", "social", "calls", "updates", "subscription"]:
             self.assertNotRegex(manifest, rf'id:\s*"{route}"')
