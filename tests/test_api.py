@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -49,6 +49,18 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(system_layer._application_roles("Development;IDE;", "Code Studio"), ["creator"])
         self.assertEqual(system_layer._application_roles("Game;", "Installed Game"), ["game"])
         self.assertEqual(system_layer._application_roles("Utility;", "Calculator"), [])
+
+    def test_store_build_storage_prefix_targets_physical_files_directory(self):
+        item = {"download_reference": "developers/dev/projects/project/builds/build/index.html"}
+        self.assertEqual(
+            _store_build_storage_prefix(item),
+            "developers/dev/projects/project/builds/build/files",
+        )
+        already_physical = {"download_reference": "developers/dev/projects/project/builds/build/files/index.html"}
+        self.assertEqual(
+            _store_build_storage_prefix(already_physical),
+            "developers/dev/projects/project/builds/build/files",
+        )
 
     def test_windows_steam_games_are_discovered_and_launchable(self):
         with tempfile.TemporaryDirectory() as temporary:

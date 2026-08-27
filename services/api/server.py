@@ -154,6 +154,25 @@ def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:
         return 502, b"", "application/octet-stream"
 
 
+
+
+def _store_build_storage_prefix(item: dict) -> str:
+    """Return the physical Storage prefix for a published developer build.
+
+    Developer Portal build artifacts live under ``.../builds/<id>/files/``.
+    Older catalog rows may store a virtual entry reference ending directly in
+    ``/index.html``. Normalize both shapes so Play and Download resolve the
+    actual object path.
+    """
+    reference = str(item.get("download_reference") or "").strip("/")
+    if not reference:
+        return ""
+    if reference.endswith("/index.html"):
+        reference = reference[:-len("/index.html")]
+    if not reference.endswith("/files"):
+        reference = f"{reference}/files"
+    return reference
+
 def store_download(item_id: str) -> tuple[int, bytes, str, str]:
     status, item = store_product(item_id)
     if status != 200:
@@ -168,9 +187,9 @@ def store_download(item_id: str) -> tuple[int, bytes, str, str]:
     status, files = _supabase_get_json(f"/rest/v1/build_files?select=path,byte_size,checksum_sha256&build_id=eq.{urllib.parse.quote(build_id, safe='')}&order=path.asc")
     if status >= 400 or not isinstance(files, list) or not files:
         return 409, b'{"error":"build_files_missing"}', "application/json", "parastore-error.json"
-    prefix = str(item.get("download_reference") or "")
-    if prefix.endswith("/index.html"):
-        prefix = prefix[:-len("/index.html")]
+    prefix = _store_build_storage_prefix(item)
+    if not prefix:
+        return 409, b'{"error":"download_reference_missing"}', "application/json", "parastore-error.json"
     memory = io.BytesIO()
     with zipfile.ZipFile(memory, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for entry in files:
@@ -206,9 +225,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     status, files = _supabase_get_json(f"/rest/v1/build_files?select=path&build_id=eq.{urllib.parse.quote(build_id, safe='')}&path=eq.{encoded}&limit=1")
     if status >= 400 or not isinstance(files, list) or not files:
         return 404, b'{"error":"file_not_found"}', "application/json"
-    prefix = str(item.get("download_reference") or "")
-    if prefix.endswith("/index.html"):
-        prefix = prefix[:-len("/index.html")]
+    prefix = _store_build_storage_prefix(item)
+    if not prefix:
+        return 409, b'{"error":"download_reference_missing"}', "application/json"
     file_status, body, storage_type = _storage_fetch("developer-builds", f"{prefix}/{relative}")
     if file_status != 200:
         return file_status, body or b'{"error":"file_unavailable"}', storage_type or "application/octet-stream"
