@@ -308,11 +308,12 @@ class RepositoryTests(unittest.TestCase):
 
     def test_game_capture_uses_canvas_without_display_picker(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
-        self.assertIn('canvas.captureStream(60)', server)
+        self.assertIn('captureCanvas.captureStream(30)', server)
         self.assertIn('function requestGameStream(audio = false)', server)
         self.assertNotIn('getDisplayMedia', server)
         self.assertIn('createMediaStreamDestination()', server)
-        self.assertIn("PARA did not receive gameplay frames", server)
+        self.assertIn('async function verifyRecordedBlob(blob)', server)
+        self.assertIn('The gameplay recording could not be decoded.', server)
 
     def test_game_control_center_uses_m_and_avoids_fullscreen_blur(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")

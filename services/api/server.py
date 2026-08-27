@@ -430,7 +430,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const item = {
       id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type, blob, mimeType: blob.type, width, height, durationMs,
-      createdAt: Date.now(), source: 'PARA'
+      createdAt: Date.now(), source: 'PARA', captureVersion: 2
     };
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB_STORE, 'readwrite');
@@ -444,7 +444,10 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   function stopStream(stream) {
-    stream?.getTracks?.().forEach((track) => track.stop());
+    try { stream?.__paraCleanup?.(); } catch (_) {}
+    stream?.getTracks?.().forEach((track) => {
+      try { track.stop(); } catch (_) {}
+    });
   }
 
   function captureCanvasCandidates() {
@@ -476,19 +479,80 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   function requestGameStream(audio = false) {
-    const canvas = primaryGameCanvas();
-    if (!canvas?.captureStream) {
+    const source = primaryGameCanvas();
+    if (!source) {
       throw new Error('This WEB game does not expose a capturable game canvas. PARA did not open a browser screen-share popup.');
     }
-    let canvasStream;
-    try { canvasStream = canvas.captureStream(60); }
-    catch (_) { throw new Error('This game canvas cannot be captured by the browser.'); }
-    const videoTrack = canvasStream.getVideoTracks()[0];
-    if (!videoTrack) throw new Error('PARA could not get gameplay video from this game.');
+
+    // Do not feed the game's raw canvas straight into MediaRecorder. Some
+    // WebGL/game canvases produce a MediaStream that has a track but no
+    // decodable frames. PARA composites the visible game into its own canvas
+    // every animation frame, then records that stable canvas stream.
+    const sourceRect = source.getBoundingClientRect();
+    const nativeWidth = Math.max(1, Number(source.width) || Math.round(sourceRect.width) || innerWidth);
+    const nativeHeight = Math.max(1, Number(source.height) || Math.round(sourceRect.height) || innerHeight);
+    const maxWidth = 1920;
+    const maxHeight = 1080;
+    const scale = Math.min(1, maxWidth / nativeWidth, maxHeight / nativeHeight);
+    const captureCanvas = document.createElement('canvas');
+    captureCanvas.width = Math.max(2, Math.round(nativeWidth * scale));
+    captureCanvas.height = Math.max(2, Math.round(nativeHeight * scale));
+    const context2d = captureCanvas.getContext('2d', { alpha: false, desynchronized: true });
+    if (!context2d || !captureCanvas.captureStream) {
+      throw new Error('PARA could not create the gameplay encoder surface.');
+    }
+
+    let frameHandle = 0;
+    let stopped = false;
+    const paintFrame = () => {
+      if (stopped) return;
+      try {
+        context2d.fillStyle = '#000';
+        context2d.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
+        context2d.drawImage(source, 0, 0, captureCanvas.width, captureCanvas.height);
+      } catch (_) {}
+      frameHandle = requestAnimationFrame(paintFrame);
+    };
+    paintFrame();
+
+    let rawStream;
+    try { rawStream = captureCanvas.captureStream(30); }
+    catch (_) {
+      stopped = true;
+      cancelAnimationFrame(frameHandle);
+      throw new Error('This game canvas cannot be captured by the browser.');
+    }
+
+    const videoTrack = rawStream.getVideoTracks()[0];
+    if (!videoTrack) {
+      stopped = true;
+      cancelAnimationFrame(frameHandle);
+      throw new Error('PARA could not get gameplay video from this game.');
+    }
     try { videoTrack.contentHint = 'motion'; } catch (_) {}
+
     const tracks = [videoTrack];
-    if (audio) tracks.push(...capturedGameAudioTracks());
-    return new MediaStream(tracks);
+    if (audio) {
+      // MediaRecorder is much more reliable with one audio track. Clone it so
+      // stopping a recording never kills the game's audio capture source.
+      const audioTrack = capturedGameAudioTracks()[0];
+      if (audioTrack) {
+        try { tracks.push(audioTrack.clone()); } catch (_) {}
+      }
+    }
+    const stream = new MediaStream(tracks);
+    stream.__paraCaptureWidth = captureCanvas.width;
+    stream.__paraCaptureHeight = captureCanvas.height;
+    stream.__paraCleanup = () => {
+      stopped = true;
+      cancelAnimationFrame(frameHandle);
+      rawStream.getTracks().forEach((track) => {
+        if (!tracks.includes(track)) {
+          try { track.stop(); } catch (_) {}
+        }
+      });
+    };
+    return stream;
   }
 
   function recorderMimeType(hasAudio = false) {
@@ -497,6 +561,37 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
       : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
     return types.find((type) => MediaRecorder.isTypeSupported?.(type) && probe.canPlayType(type) !== '') || '';
+  }
+
+  async function verifyRecordedBlob(blob) {
+    if (!blob?.size || blob.size < 1024) throw new Error('PARA did not receive enough gameplay video data.');
+    const url = URL.createObjectURL(blob);
+    try {
+      await new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        const timer = setTimeout(() => reject(new Error('The gameplay recording could not be decoded.')), 7000);
+        const done = () => {
+          clearTimeout(timer);
+          if (!video.videoWidth || !video.videoHeight) {
+            reject(new Error('The gameplay recording contains no visible video frames.'));
+            return;
+          }
+          resolve();
+        };
+        video.preload = 'auto';
+        video.muted = true;
+        video.playsInline = true;
+        video.addEventListener('loadeddata', done, { once: true });
+        video.addEventListener('error', () => {
+          clearTimeout(timer);
+          reject(new Error('Chrome could not decode the gameplay recording.'));
+        }, { once: true });
+        video.src = url;
+        video.load();
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   const host = document.createElement('div');
@@ -673,8 +768,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const startedAt = Date.now();
       recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
       recorder.onerror = () => toast('PARA recording encountered an encoder error');
-      recorder.start(250);
-      manualRecording = { stream, recorder, chunks, startedAt, stopping: false };
+      recorder.start(1000);
+      manualRecording = {
+        stream, recorder, chunks, startedAt, stopping: false,
+        width: stream.__paraCaptureWidth || 0,
+        height: stream.__paraCaptureHeight || 0
+      };
       recordingPill.classList.add('show');
       toast(hasAudio ? 'Gameplay recording started' : 'Gameplay recording started · video only');
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
@@ -690,15 +789,26 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     recordingPill.classList.remove('show');
     try {
       if (active.recorder.state !== 'inactive') {
-        const stopped = new Promise((resolve) => active.recorder.addEventListener('stop', resolve, { once: true }));
+        const stopped = new Promise((resolve, reject) => {
+          active.recorder.addEventListener('stop', resolve, { once: true });
+          active.recorder.addEventListener('error', () => reject(active.recorder.error || new Error('Video encoder failed.')), { once: true });
+        });
+        try { active.recorder.requestData(); } catch (_) {}
         active.recorder.stop();
         await stopped;
       }
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      // Let Chromium deliver the final dataavailable event before assembling.
+      await new Promise((resolve) => setTimeout(resolve, 150));
       const blob = new Blob(active.chunks, { type: active.recorder.mimeType || 'video/webm' });
-      if (blob.size < 256) throw new Error('PARA did not receive gameplay frames from this title.');
-      await saveCapture({ type: 'clip', blob, durationMs: Date.now() - active.startedAt });
-      toast('Video saved to PARA Media');
+      await verifyRecordedBlob(blob);
+      await saveCapture({
+        type: 'clip',
+        blob,
+        width: active.width || 0,
+        height: active.height || 0,
+        durationMs: Date.now() - active.startedAt
+      });
+      toast('Video verified and saved to PARA Media');
     } catch (error) {
       toast(error?.message || 'Recording could not be saved');
     } finally {
@@ -724,8 +834,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         const cutoff = Date.now() - 30 * 60 * 1000;
         while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
       };
-      recorder.start(500);
-      replay = { stream, recorder, chunks, startedAt: Date.now() };
+      recorder.start(1000);
+      replay = {
+        stream, recorder, chunks, startedAt: Date.now(),
+        width: stream.__paraCaptureWidth || 0,
+        height: stream.__paraCaptureHeight || 0
+      };
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
         if (replay?.recorder.state !== 'inactive') replay.recorder.stop();
         replay = null;
@@ -745,9 +859,15 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const cutoff = Date.now() - durationMs;
       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
       const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
-      if (blob.size < 256) throw new Error('Replay has not buffered gameplay frames yet.');
-      await saveCapture({ type: 'clip', blob, durationMs: Math.min(durationMs, Date.now() - replay.startedAt) });
-      toast('Recent gameplay saved to PARA Media');
+      await verifyRecordedBlob(blob);
+      await saveCapture({
+        type: 'clip',
+        blob,
+        width: replay.width || 0,
+        height: replay.height || 0,
+        durationMs: Math.min(durationMs, Date.now() - replay.startedAt)
+      });
+      toast('Recent gameplay verified and saved to PARA Media');
     } catch (error) {
       toast(error?.message || 'Replay could not be saved');
     }

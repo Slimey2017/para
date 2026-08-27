@@ -443,7 +443,7 @@ async function openCaptureViewer(captureId) {
   clearTimeout(overlayCloseTimer);
   if (overlay.hidden) overlayReturnFocus = focus.current;
   const media = item.type === "clip"
-    ? `<video controls playsinline preload="metadata"><source src="${captureViewerUrl}" type="${item.mimeType || "video/webm"}">Your browser could not play this PARA recording.</video>`
+    ? `<video controls playsinline preload="auto" src="${captureViewerUrl}" data-recorded-duration-ms="${Number(item.durationMs || 0)}">Your browser could not play this PARA recording.</video>`
     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
@@ -463,8 +463,30 @@ async function openCaptureViewer(captureId) {
   overlay.classList.remove("is-closing");
   const viewerVideo = overlay.querySelector("[data-capture-viewer] video");
   if (viewerVideo) {
-    viewerVideo.addEventListener("error", () => toast("Video could not play", "This capture was not finalized correctly."), { once: true });
+    const expectedDuration = Math.max(0, Number(viewerVideo.dataset.recordedDurationMs || 0) / 1000);
+    let repairedDuration = false;
+    const repairWebmDuration = () => {
+      if (repairedDuration || !expectedDuration) return;
+      if (Number.isFinite(viewerVideo.duration) && viewerVideo.duration > 0.05) return;
+      repairedDuration = true;
+      // MediaRecorder WebM files can omit duration metadata. Chromium can
+      // discover the real end time by seeking past the end, then rewinding.
+      const rewind = () => {
+        try { viewerVideo.currentTime = 0; } catch {}
+      };
+      viewerVideo.addEventListener("durationchange", rewind, { once: true });
+      viewerVideo.addEventListener("timeupdate", rewind, { once: true });
+      try { viewerVideo.currentTime = 1e10; } catch {}
+    };
+    viewerVideo.addEventListener("loadedmetadata", repairWebmDuration);
+    viewerVideo.addEventListener("loadeddata", () => {
+      if (!viewerVideo.videoWidth || !viewerVideo.videoHeight) {
+        toast("Video has no picture", "This capture came from an older broken recording runtime. Record a new clip with PARA v13.");
+      }
+    }, { once: true });
+    viewerVideo.addEventListener("error", () => toast("Video could not play", "This capture is damaged. New v13 recordings are decoded before PARA saves them."), { once: true });
     viewerVideo.load();
+    if (viewerVideo.readyState >= 1) repairWebmDuration();
   }
   updateControllerPrompts();
   requestAnimationFrame(() => focus.focusFirst());

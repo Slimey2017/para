@@ -53,6 +53,7 @@ async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0 }
     durationMs,
     createdAt: Date.now(),
     source: "PARA",
+    captureVersion: 2,
   };
   await transact("readwrite", (store) => store.put(item));
   return item;
@@ -170,16 +171,24 @@ function recorderMimeType() {
 }
 
 async function assertPlayableVideo(blob) {
-  if (!blob?.size) throw new Error("The recording was empty.");
+  if (!blob?.size || blob.size < 1024) throw new Error("The recording was empty.");
   const url = URL.createObjectURL(blob);
   try {
     await new Promise((resolve, reject) => {
       const video = document.createElement("video");
-      const timer = setTimeout(() => reject(new Error("The video file could not be finalized.")), 5000);
-      video.preload = "metadata";
+      const timer = setTimeout(() => reject(new Error("The video file could not be decoded.")), 7000);
+      video.preload = "auto";
       video.muted = true;
-      video.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
-      video.onerror = () => { clearTimeout(timer); reject(new Error("Chrome could not play the recorded video.")); };
+      video.playsInline = true;
+      video.onloadeddata = () => {
+        clearTimeout(timer);
+        if (!video.videoWidth || !video.videoHeight) {
+          reject(new Error("The recording contains no visible video frames."));
+          return;
+        }
+        resolve();
+      };
+      video.onerror = () => { clearTimeout(timer); reject(new Error("Chrome could not decode the recorded video.")); };
       video.src = url;
       video.load();
     });
@@ -332,7 +341,7 @@ export async function getCapture(id) {
 export async function shareCapture(id, target = "system") {
   const item = await getCapture(id);
   if (!item) throw new Error("Capture not found.");
-  const extension = item.type === "clip" ? "webm" : "webp";
+  const extension = item.type === "clip" ? ((item.mimeType || item.blob.type || "").includes("mp4") ? "mp4" : "webm") : "webp";
   const file = new File([item.blob], `PARA-${item.id}.${extension}`, { type: item.mimeType || item.blob.type });
   if (target === "system" && navigator.share && navigator.canShare?.({ files: [file] })) {
     await navigator.share({ title: "Shared from PARA", text: "Captured on PARA", files: [file] });
