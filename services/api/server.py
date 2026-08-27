@@ -275,6 +275,22 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
                 "    if (raw && raw.startsWith('/') && !raw.startsWith('/api/')) form.setAttribute('action', map(raw));\n"
                 '  }, true);\n'
                 f"  try {{ parent.postMessage({{ type: 'para-game-runtime-ready', id: {runtime_id} }}, location.origin); }} catch (_) {{}}\n"
+                "  if (window.top === window.self) {\n"
+                "    const mountParaExit = () => {\n"
+                "      if (document.getElementById('para-game-exit')) return;\n"
+                "      const button = document.createElement('button');\n"
+                "      button.id = 'para-game-exit';\n"
+                "      button.type = 'button';\n"
+                "      button.textContent = 'PARA  •  Return to Library';\n"
+                "      button.setAttribute('aria-label', 'Return to PARA game library');\n"
+                "      button.style.cssText = 'position:fixed;z-index:2147483647;top:14px;left:14px;padding:9px 13px;border:1px solid rgba(255,255,255,.22);border-radius:12px;background:rgba(8,5,15,.82);color:#fff;font:700 12px/1.2 system-ui,sans-serif;letter-spacing:.03em;backdrop-filter:blur(14px);cursor:pointer;opacity:.72;transition:opacity .15s ease';\n"
+                "      button.addEventListener('mouseenter', () => button.style.opacity = '1');\n"
+                "      button.addEventListener('mouseleave', () => button.style.opacity = '.72');\n"
+                "      button.addEventListener('click', () => { window.location.href = '/#/games'; });\n"
+                "      document.body.appendChild(button);\n"
+                "    };\n"
+                "    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountParaExit, { once: true }); else mountParaExit();\n"
+                "  }\n"
                 '})();\n'
                 '</script>'
             )
