@@ -294,6 +294,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   let contextName = '';
   let manualRecording = null;
   let replay = null;
+  let sessionSelfCapture = null;
   let gamepadPrevious = [];
   let paraPressedAt = 0;
   let paraHeld = false;
@@ -346,7 +347,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   recordGameActivity();
   const activityTimer = setInterval(recordGameActivity, 30000);
-  addEventListener('pagehide', () => { recordGameActivity(); clearInterval(activityTimer); }, { once: true });
+  addEventListener('pagehide', () => {
+    recordGameActivity();
+    clearInterval(activityTimer);
+    try { sessionSelfCapture?.getTracks?.().forEach((track) => track.stop()); } catch (_) {}
+    sessionSelfCapture = null;
+  }, { once: true });
 
   // Mirror WebAudio into a capture stream before the game scripts initialize.
   try {
@@ -425,12 +431,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     });
   }
 
-  async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0 }) {
+  async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0, captureMode = '' }) {
     const db = await openDb();
     const item = {
       id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      type, blob, mimeType: blob.type, width, height, durationMs,
-      createdAt: Date.now(), source: 'PARA', captureVersion: 2
+      type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
+      createdAt: Date.now(), source: 'PARA', captureVersion: 3
     };
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB_STORE, 'readwrite');
@@ -445,18 +451,35 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   function stopStream(stream) {
     try { stream?.__paraCleanup?.(); } catch (_) {}
+    if (stream?.__paraKeepAlive) return;
     stream?.getTracks?.().forEach((track) => {
       try { track.stop(); } catch (_) {}
     });
   }
 
-  function captureCanvasCandidates() {
-    return [...document.querySelectorAll('canvas')]
-      .map((canvas) => ({ canvas, rect: canvas.getBoundingClientRect() }))
-      .filter(({ canvas, rect }) => {
-        const style = getComputedStyle(canvas);
-        return rect.width >= 64 && rect.height >= 64 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
+  function captureVisualCandidates() {
+    return [...document.querySelectorAll('canvas,video')]
+      .map((element, order) => ({ element, order, rect: element.getBoundingClientRect(), style: getComputedStyle(element) }))
+      .filter(({ element, rect, style }) => {
+        if (rect.width < 32 || rect.height < 32) return false;
+        if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) return false;
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0) return false;
+        if (element instanceof HTMLVideoElement && element.readyState < 2) return false;
+        return true;
       })
+      .sort((a, b) => {
+        const za = Number.parseInt(a.style.zIndex, 10);
+        const zb = Number.parseInt(b.style.zIndex, 10);
+        const safeZa = Number.isFinite(za) ? za : 0;
+        const safeZb = Number.isFinite(zb) ? zb : 0;
+        return safeZa === safeZb ? a.order - b.order : safeZa - safeZb;
+      });
+  }
+
+  function captureCanvasCandidates() {
+    return captureVisualCandidates()
+      .filter(({ element }) => element instanceof HTMLCanvasElement)
+      .map(({ element: canvas, rect }) => ({ canvas, rect }))
       .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
   }
 
@@ -478,63 +501,104 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return [...new Map(tracks.map((track) => [track.id, track])).values()];
   }
 
-  function requestGameStream(audio = false) {
-    const source = primaryGameCanvas();
-    if (!source) {
-      throw new Error('This WEB game does not expose a capturable game canvas. PARA did not open a browser screen-share popup.');
+  function canvasHasVisualVariation(canvas) {
+    const probe = document.createElement('canvas');
+    probe.width = 64;
+    probe.height = 36;
+    const ctx = probe.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return true;
+    ctx.drawImage(canvas, 0, 0, probe.width, probe.height);
+    const data = ctx.getImageData(0, 0, probe.width, probe.height).data;
+    let min = 255;
+    let max = 0;
+    let sum = 0;
+    let samples = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      const luma = Math.round(data[i] * .2126 + data[i + 1] * .7152 + data[i + 2] * .0722);
+      min = Math.min(min, luma);
+      max = Math.max(max, luma);
+      sum += luma;
+      samples += 1;
     }
+    return { range: max - min, mean: samples ? sum / samples : 0 };
+  }
 
-    // Do not feed the game's raw canvas straight into MediaRecorder. Some
-    // WebGL/game canvases produce a MediaStream that has a track but no
-    // decodable frames. PARA composites the visible game into its own canvas
-    // every animation frame, then records that stable canvas stream.
-    const sourceRect = source.getBoundingClientRect();
-    const nativeWidth = Math.max(1, Number(source.width) || Math.round(sourceRect.width) || innerWidth);
-    const nativeHeight = Math.max(1, Number(source.height) || Math.round(sourceRect.height) || innerHeight);
+  async function requestCompositedGameStream(audio = false) {
+    const layers = captureVisualCandidates();
+    if (!layers.length) throw new Error('PARA found no directly capturable game surfaces.');
+
+    const viewportWidth = Math.max(2, innerWidth || document.documentElement.clientWidth || 1280);
+    const viewportHeight = Math.max(2, innerHeight || document.documentElement.clientHeight || 720);
     const maxWidth = 1920;
     const maxHeight = 1080;
-    const scale = Math.min(1, maxWidth / nativeWidth, maxHeight / nativeHeight);
+    const scale = Math.min(1, maxWidth / viewportWidth, maxHeight / viewportHeight);
     const captureCanvas = document.createElement('canvas');
-    captureCanvas.width = Math.max(2, Math.round(nativeWidth * scale));
-    captureCanvas.height = Math.max(2, Math.round(nativeHeight * scale));
+    captureCanvas.width = Math.max(2, Math.round(viewportWidth * scale));
+    captureCanvas.height = Math.max(2, Math.round(viewportHeight * scale));
     const context2d = captureCanvas.getContext('2d', { alpha: false, desynchronized: true });
-    if (!context2d || !captureCanvas.captureStream) {
-      throw new Error('PARA could not create the gameplay encoder surface.');
-    }
+    if (!context2d || !captureCanvas.captureStream) throw new Error('PARA could not create the gameplay encoder surface.');
 
     let frameHandle = 0;
     let stopped = false;
     const paintFrame = () => {
       if (stopped) return;
+      const currentLayers = captureVisualCandidates();
       try {
-        context2d.fillStyle = '#000';
+        const bodyBackground = getComputedStyle(document.body || document.documentElement).backgroundColor;
+        context2d.fillStyle = bodyBackground && bodyBackground !== 'rgba(0, 0, 0, 0)' ? bodyBackground : '#000';
         context2d.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
-        context2d.drawImage(source, 0, 0, captureCanvas.width, captureCanvas.height);
+        const sx = captureCanvas.width / viewportWidth;
+        const sy = captureCanvas.height / viewportHeight;
+        for (const { element, rect } of currentLayers) {
+          const left = Math.max(0, rect.left);
+          const top = Math.max(0, rect.top);
+          const right = Math.min(viewportWidth, rect.right);
+          const bottom = Math.min(viewportHeight, rect.bottom);
+          if (right <= left || bottom <= top) continue;
+          const sourceWidth = Number(element.videoWidth || element.width || rect.width) || rect.width;
+          const sourceHeight = Number(element.videoHeight || element.height || rect.height) || rect.height;
+          const cropLeft = Math.max(0, left - rect.left) / Math.max(1, rect.width) * sourceWidth;
+          const cropTop = Math.max(0, top - rect.top) / Math.max(1, rect.height) * sourceHeight;
+          const cropWidth = (right - left) / Math.max(1, rect.width) * sourceWidth;
+          const cropHeight = (bottom - top) / Math.max(1, rect.height) * sourceHeight;
+          context2d.drawImage(element, cropLeft, cropTop, cropWidth, cropHeight, left * sx, top * sy, (right - left) * sx, (bottom - top) * sy);
+        }
       } catch (_) {}
       frameHandle = requestAnimationFrame(paintFrame);
     };
     paintFrame();
+
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let variation;
+    try { variation = canvasHasVisualVariation(captureCanvas); }
+    catch (_) {
+      stopped = true;
+      cancelAnimationFrame(frameHandle);
+      throw new Error('The game renderer blocks direct frame capture.');
+    }
+    if (variation && variation.range < 6) {
+      stopped = true;
+      cancelAnimationFrame(frameHandle);
+      throw new Error('The game renderer returned a blank direct-capture surface.');
+    }
 
     let rawStream;
     try { rawStream = captureCanvas.captureStream(30); }
     catch (_) {
       stopped = true;
       cancelAnimationFrame(frameHandle);
-      throw new Error('This game canvas cannot be captured by the browser.');
+      throw new Error('The game compositor cannot be captured by this browser.');
     }
-
     const videoTrack = rawStream.getVideoTracks()[0];
     if (!videoTrack) {
       stopped = true;
       cancelAnimationFrame(frameHandle);
-      throw new Error('PARA could not get gameplay video from this game.');
+      throw new Error('PARA could not get gameplay video from the compositor.');
     }
     try { videoTrack.contentHint = 'motion'; } catch (_) {}
 
     const tracks = [videoTrack];
     if (audio) {
-      // MediaRecorder is much more reliable with one audio track. Clone it so
-      // stopping a recording never kills the game's audio capture source.
       const audioTrack = capturedGameAudioTracks()[0];
       if (audioTrack) {
         try { tracks.push(audioTrack.clone()); } catch (_) {}
@@ -543,6 +607,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const stream = new MediaStream(tracks);
     stream.__paraCaptureWidth = captureCanvas.width;
     stream.__paraCaptureHeight = captureCanvas.height;
+    stream.__paraCaptureMode = layers.length > 1 ? 'layer-compositor' : 'direct-game-surface';
     stream.__paraCleanup = () => {
       stopped = true;
       cancelAnimationFrame(frameHandle);
@@ -553,6 +618,85 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       });
     };
     return stream;
+  }
+
+  function liveSessionSelfCapture() {
+    if (!sessionSelfCapture) return null;
+    if (sessionSelfCapture.getVideoTracks().some((track) => track.readyState === 'live')) return sessionSelfCapture;
+    sessionSelfCapture = null;
+    return null;
+  }
+
+  async function requestSessionSelfCapture(audio = false) {
+    const existing = liveSessionSelfCapture();
+    if (existing) {
+      const stream = new MediaStream([
+        ...existing.getVideoTracks(),
+        ...(audio ? existing.getAudioTracks() : [])
+      ]);
+      stream.__paraCaptureWidth = Number(existing.getVideoTracks()[0]?.getSettings?.().width || innerWidth || 0);
+      stream.__paraCaptureHeight = Number(existing.getVideoTracks()[0]?.getSettings?.().height || innerHeight || 0);
+      stream.__paraCaptureMode = 'self-tab-element';
+      stream.__paraKeepAlive = true;
+      return stream;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('This game needs browser self-tab capture, which is unavailable here.');
+    toast('This renderer needs one Chrome permission once. Choose This Tab.');
+    const display = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true,
+      preferCurrentTab: true,
+      selfBrowserSurface: 'include',
+      surfaceSwitching: 'exclude',
+      monitorTypeSurfaces: 'exclude'
+    });
+    const videoTrack = display.getVideoTracks()[0];
+    if (!videoTrack) {
+      display.getTracks().forEach((track) => track.stop());
+      throw new Error('Chrome did not provide a game video track.');
+    }
+    const captureHandle = videoTrack.getCaptureHandle?.();
+    if (captureHandle?.handle && captureHandle.handle !== PARA_CAPTURE_HANDLE) {
+      display.getTracks().forEach((track) => track.stop());
+      throw new Error('Choose This Tab so PARA records the game instead of another tab or window.');
+    }
+
+    // Chromium 132+ can remove PARA's system shell from the recording and
+    // capture only the game document body. This still needs the browser's
+    // one-time self-tab permission because a hosted web app cannot bypass it.
+    try {
+      if (globalThis.RestrictionTarget?.fromElement && typeof videoTrack.restrictTo === 'function' && document.body) {
+        document.body.style.isolation ||= 'isolate';
+        document.body.style.transformStyle = 'flat';
+        const target = await RestrictionTarget.fromElement(document.body);
+        await videoTrack.restrictTo(target);
+      }
+    } catch (_) {}
+    try { videoTrack.contentHint = 'motion'; } catch (_) {}
+    sessionSelfCapture = display;
+    videoTrack.addEventListener('ended', () => { if (sessionSelfCapture === display) sessionSelfCapture = null; }, { once: true });
+
+    const stream = new MediaStream([
+      videoTrack,
+      ...(audio ? display.getAudioTracks() : [])
+    ]);
+    const settings = videoTrack.getSettings?.() || {};
+    stream.__paraCaptureWidth = Number(settings.width || innerWidth || 0);
+    stream.__paraCaptureHeight = Number(settings.height || innerHeight || 0);
+    stream.__paraCaptureMode = 'self-tab-element';
+    stream.__paraKeepAlive = true;
+    return stream;
+  }
+
+  async function requestGameStream(audio = false) {
+    try {
+      return await requestCompositedGameStream(audio);
+    } catch (directError) {
+      const stream = await requestSessionSelfCapture(audio);
+      stream.__paraFallbackReason = directError?.message || 'Direct game capture was blank.';
+      return stream;
+    }
   }
 
   function recorderMimeType(hasAudio = false) {
@@ -759,7 +903,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeShell();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
-      const stream = requestGameStream(true);
+      const stream = await requestGameStream(true);
       const hasAudio = stream.getAudioTracks().length > 0;
       const type = recorderMimeType(hasAudio);
       const options = type ? { mimeType: type, videoBitsPerSecond: 8_000_000 } : { videoBitsPerSecond: 8_000_000 };
@@ -772,10 +916,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       manualRecording = {
         stream, recorder, chunks, startedAt, stopping: false,
         width: stream.__paraCaptureWidth || 0,
-        height: stream.__paraCaptureHeight || 0
+        height: stream.__paraCaptureHeight || 0,
+        captureMode: stream.__paraCaptureMode || ''
       };
       recordingPill.classList.add('show');
-      toast(hasAudio ? 'Gameplay recording started' : 'Gameplay recording started · video only');
+      const modeLabel = stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames';
+      toast(`${hasAudio ? 'Gameplay recording started' : 'Gameplay recording started · video only'} · ${modeLabel}`);
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
     } catch (error) {
       toast(error?.message || 'Recording could not start');
@@ -806,7 +952,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         blob,
         width: active.width || 0,
         height: active.height || 0,
-        durationMs: Date.now() - active.startedAt
+        durationMs: Date.now() - active.startedAt,
+        captureMode: active.captureMode || ''
       });
       toast('Video verified and saved to PARA Media');
     } catch (error) {
@@ -822,7 +969,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       if (replay) { toast('PARA Replay is already running'); return; }
-      const stream = requestGameStream(true);
+      const stream = await requestGameStream(true);
       const hasAudio = stream.getAudioTracks().length > 0;
       const type = recorderMimeType(hasAudio);
       const options = type ? { mimeType: type, videoBitsPerSecond: 7_000_000 } : { videoBitsPerSecond: 7_000_000 };
@@ -838,14 +985,16 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       replay = {
         stream, recorder, chunks, startedAt: Date.now(),
         width: stream.__paraCaptureWidth || 0,
-        height: stream.__paraCaptureHeight || 0
+        height: stream.__paraCaptureHeight || 0,
+        captureMode: stream.__paraCaptureMode || ''
       };
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
         if (replay?.recorder.state !== 'inactive') replay.recorder.stop();
         replay = null;
         toast('PARA Replay stopped');
       }, { once: true });
-      toast(hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only');
+      const modeLabel = stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames';
+      toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · ${modeLabel}`);
     } catch (error) {
       toast(error?.message || 'Replay could not start');
     }
@@ -865,7 +1014,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         blob,
         width: replay.width || 0,
         height: replay.height || 0,
-        durationMs: Math.min(durationMs, Date.now() - replay.startedAt)
+        durationMs: Math.min(durationMs, Date.now() - replay.startedAt),
+        captureMode: replay.captureMode || ''
       });
       toast('Recent gameplay verified and saved to PARA Media');
     } catch (error) {

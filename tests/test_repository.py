@@ -306,11 +306,16 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("const GAME_ACTIVITY_ID = `store:${RUNTIME_ID}`", server)
         self.assertIn("localStorage.setItem(HOME_STATE_KEY", server)
 
-    def test_game_capture_uses_canvas_without_display_picker(self):
+    def test_game_capture_prefers_direct_frames_then_reuses_self_tab_fallback(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         self.assertIn('captureCanvas.captureStream(30)', server)
-        self.assertIn('function requestGameStream(audio = false)', server)
-        self.assertNotIn('getDisplayMedia', server)
+        self.assertIn('async function requestGameStream(audio = false)', server)
+        self.assertIn('requestCompositedGameStream(audio)', server)
+        self.assertIn('requestSessionSelfCapture(audio)', server)
+        self.assertIn('navigator.mediaDevices.getDisplayMedia', server)
+        self.assertIn("preferCurrentTab: true", server)
+        self.assertIn("sessionSelfCapture", server)
+        self.assertIn("RestrictionTarget.fromElement(document.body)", server)
         self.assertIn('createMediaStreamDestination()', server)
         self.assertIn('async function verifyRecordedBlob(blob)', server)
         self.assertIn('The gameplay recording could not be decoded.', server)
