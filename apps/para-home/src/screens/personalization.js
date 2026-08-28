@@ -250,10 +250,8 @@ export async function activateControlCenterSettings({ focus, controller }) {
   if (!container) return;
   let capabilities = {};
   try { capabilities = await paraApi.capabilities(); } catch { capabilities = {}; }
-  const allowed = ["home", "switcher", "downloads", "audio"];
+  const allowed = ["home", "switcher", "downloads", "captures", "music", "audio"];
   if (capabilities.notifications) allowed.push("notifications");
-  if (capabilities.friends) allowed.push("friends");
-  if (capabilities.music) allowed.push("music");
   if (capabilities.network) allowed.push("network");
   if (capabilities.microphone || navigator.mediaDevices?.getUserMedia) allowed.push("microphone");
   if (controller.connected) allowed.push("controllers");

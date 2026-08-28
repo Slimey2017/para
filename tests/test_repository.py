@@ -202,7 +202,7 @@ class RepositoryTests(unittest.TestCase):
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
-        for title in ["Home", "Switcher", "Notifications", "Friends", "Downloads", "Music", "Network", "Sound", "Microphone", "Controller", "Profile", "Power"]:
+        for title in ["Home", "Switcher", "Notifications", "Downloads", "Captures", "Music", "Network", "Sound", "Microphone", "Controller", "Profile", "Power"]:
             self.assertIn(f'title: "{title}"', control)
         self.assertIn("control-center-strip", control)
         self.assertIn("control-center-context", control)
@@ -214,6 +214,21 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn(">Customize<", control)
         self.assertNotIn("control-center-close", control)
         self.assertNotIn("control-center-item", css)
+
+
+    def test_control_center_v15_removes_dead_controls_and_hold_returns_home(self):
+        control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+        state = (ROOT / "apps/para-home/src/state.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        gamepad = (ROOT / "apps/para-home/src/gamepad.js").read_text(encoding="utf-8")
+        self.assertNotIn('friends: { title: "Friends"', control)
+        self.assertNotIn('settings: { title: "Quick Settings"', control)
+        self.assertNotIn('"friends"', state.split("DEFAULT_CONTROL_CENTER_ORDER", 1)[1].split(");", 1)[0])
+        hold = app.split("function paraHold()", 1)[1].split("function openSwitcher()", 1)[0]
+        self.assertIn('navigate("home")', hold)
+        self.assertNotIn('openSwitcher()', hold)
+        self.assertIn('const shellOverlayActive = Boolean(document.querySelector("#para-overlay:not([hidden])"))', gamepad)
+        self.assertIn('const shellOwnsInput = shellOverlayActive || !gameRuntimeActive', gamepad)
 
     def test_power_screen_has_real_routes_and_exact_shutdown_timeline(self):
         system_screen = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
@@ -293,7 +308,8 @@ class RepositoryTests(unittest.TestCase):
 
     def test_para_keyboard_button_supports_p(self):
         focus = (ROOT / "apps/para-home/src/focus-manager.js").read_text(encoding="utf-8")
-        self.assertIn('["p", "m"]', focus)
+        self.assertIn('event.key.toLowerCase() === "p"', focus)
+        self.assertNotIn('["p", "m"]', focus)
 
     def test_store_games_persist_into_continue_and_resume_directly(self):
         runtime = (ROOT / "apps/para-home/src/services/experience-runtime.js").read_text(encoding="utf-8")
@@ -320,10 +336,13 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('async function verifyRecordedBlob(blob)', server)
         self.assertIn('The gameplay recording could not be decoded.', server)
 
-    def test_game_control_center_uses_m_and_avoids_fullscreen_blur(self):
+    def test_game_control_center_matches_home_button_contract_and_avoids_fullscreen_blur(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
-        self.assertIn("event.key?.toLowerCase() === 'm'", server)
+        self.assertIn("event.key?.toLowerCase() === 'p'", server)
+        self.assertNotIn("event.key?.toLowerCase() === 'm'", server)
+        self.assertIn('data-action="controller"', server)
         self.assertIn('maskedPadCache', server)
+        self.assertIn("location.href = '/#/home'", server)
         self.assertNotIn('backdrop-filter:', server)
 
 

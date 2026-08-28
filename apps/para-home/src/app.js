@@ -390,14 +390,14 @@ function paraTap() {
 
 function paraHold() {
   if (consumePowerInput()) return;
-  openSwitcher();
+  navigate("home");
 }
 
 function openSwitcher() {
   clearTimeout(overlayCloseTimer);
   overlayReturnFocus = focus.current;
   const running = runningExperiences().slice(0, 5);
-  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Jump back in" : "Nothing suspended"}</h2><small>Hold PARA from anywhere to open Switcher</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>`<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button type="button" data-action="resume-experience" data-experience-id="${item.id}" data-experience-route="${item.route}" data-store-id="${item.storeId || ''}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${item.mark || '◉'}</span><small>${item.kind || 'App'}</small><strong>${item.title}</strong><em>${item.queueStatus || 'Suspended'}</em></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${item.id}" aria-label="Close ${item.title}">×</button></article>`).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close app</span></footer></section>`;
+  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Jump back in" : "Nothing suspended"}</h2><small>Open Switcher from the Control Center</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>`<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button type="button" data-action="resume-experience" data-experience-id="${item.id}" data-experience-route="${item.route}" data-store-id="${item.storeId || ''}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${item.mark || '◉'}</span><small>${item.kind || 'App'}</small><strong>${item.title}</strong><em>${item.queueStatus || 'Suspended'}</em></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${item.id}" aria-label="Close ${item.title}">×</button></article>`).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close app</span></footer></section>`;
   overlay.hidden = false;
   overlay.classList.remove("is-closing");
   updateControllerPrompts();
@@ -650,7 +650,7 @@ function launchStoreGameDirect(storeId) {
   if (!id) return false;
   sessionStorage.setItem("para.store.launch", id);
   sessionStorage.setItem("para.store.lastLibraryRoute", "games");
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v12`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v15`;
   window.location.assign(source);
   return true;
 }

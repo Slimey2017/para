@@ -9,7 +9,6 @@ const definitions = {
   home: { title: "Home", icon: "home" },
   switcher: { title: "Switcher", icon: "switcher" },
   notifications: { title: "Notifications", icon: "notifications" },
-  friends: { title: "Friends", icon: "friends" },
   downloads: { title: "Downloads", icon: "downloads" },
   captures: { title: "Captures", icon: "captures" },
   music: { title: "Music", icon: "music" },
@@ -18,7 +17,6 @@ const definitions = {
   microphone: { title: "Microphone", icon: "microphone" },
   controllers: { title: "Controller", icon: "controller" },
   profile: { title: "Profile", icon: "profile" },
-  settings: { title: "Quick Settings", icon: "settings" },
   power: { title: "Power", icon: "power" },
 };
 
@@ -30,7 +28,6 @@ function icon(name) {
     home: `<path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.5V21h13V9.5M9.5 21v-7h5v7"/>`,
     switcher: `<rect x="3" y="5" width="14" height="11" rx="2"/><path d="M7 19h12a2 2 0 0 0 2-2V9"/>`,
     notifications: `<path d="M6 9a6 6 0 0 1 12 0c0 7 3 6 3 8H3c0-2 3-1 3-8Z"/><path d="M10 21h4"/>`,
-    friends: `<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.5-5 3-7 6-7s5.5 2 6 7M14 14c3.5 0 6 2 6.5 6"/>`,
     downloads: `<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>`,
     captures: `<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M8 5l1.5-2h5L16 5"/>`,
     music: `<path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>`,
@@ -39,10 +36,9 @@ function icon(name) {
     microphone: `<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 12a6.5 6.5 0 0 0 13 0M12 18.5V22M8.5 22h7"/>`,
     controller: `<path d="M6.5 8h11c3 0 5.5 7.5 4 10-1 1.8-3.4-.3-5.2-2.5H7.7C5.9 17.7 3.5 19.8 2.5 18c-1.5-2.5 1-10 4-10Z"/><path d="M7 10v5M4.5 12.5h5M16.5 11.5h.01M19 14h.01"/>`,
     profile: `<circle cx="12" cy="8" r="4"/><path d="M4.5 21c.7-5 3.2-7 7.5-7s6.8 2 7.5 7"/>`,
-    settings: `<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>`,
     power: `<path d="M12 2v10"/><path d="M6.3 5.4a9 9 0 1 0 11.4 0"/>`,
   };
-  return `<svg class="control-center-icon" viewBox="0 0 24 24" aria-hidden="true">${shapes[name] || shapes.settings}</svg>`;
+  return `<svg class="control-center-icon" viewBox="0 0 24 24" aria-hidden="true">${shapes[name] || shapes.home}</svg>`;
 }
 
 function stripButton(id, autofocus = false) {
@@ -113,7 +109,6 @@ function contextMarkup(id) {
 function availableIds({ capabilities, network, audio, microphone, controller, profile, runtime, media }) {
   const ids = ["home", "switcher"];
   if (runtime.notifications.length) ids.push("notifications");
-  if (capabilities.friends) ids.push("friends");
   ids.push("downloads");
   ids.push("captures");
   ids.push("music");

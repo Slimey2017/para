@@ -298,6 +298,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   let gamepadPrevious = [];
   let paraPressedAt = 0;
   let paraHeld = false;
+  let keyboardParaDown = false;
+  let keyboardParaHeld = false;
+  let keyboardParaTimer = 0;
   let focusedIndex = 0;
   let inputMaskInstalled = false;
   const HOME_STATE_KEY = 'para.home.state.v5';
@@ -306,6 +309,20 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const mirroredAudioNodes = new WeakSet();
   const audioCaptureDestinations = new Set();
   const maskedPadCache = new Map();
+
+  function escapeMarkup(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
+  }
+
+  function readHomeState() {
+    try { return JSON.parse(localStorage.getItem(HOME_STATE_KEY) || '{}'); } catch (_) { return {}; }
+  }
+
+  function readProfileRuntime() {
+    const state = readHomeState();
+    const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
+    return { recent: [], running: [], installedDemos: [], downloads: [], notifications: [], marks: [], ...(state.profileRuntime?.[profile] || {}) };
+  }
 
   function recordGameActivity() {
     try {
@@ -795,10 +812,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
           <button class="tile" data-action="network"><span><svg viewBox="0 0 24 24"><path d="M4 10a12 12 0 0 1 16 0M7 14a8 8 0 0 1 10 0M10 18a3 3 0 0 1 4 0"/><circle cx="12" cy="21" r=".5" class="icon-fill"/></svg></span><strong>Network</strong></button>
           <button class="tile" data-action="sound"><span><svg viewBox="0 0 24 24"><path d="M4 10h4l5-4v12l-5-4H4zM16 9a5 5 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></span><strong>Sound</strong></button>
           <button class="tile" data-action="microphone"><span><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 12a6.5 6.5 0 0 0 13 0M12 18.5V22M8.5 22h7"/></svg></span><strong>Microphone</strong></button>
+          <button class="tile" data-action="controller"><span><svg viewBox="0 0 24 24"><path d="M6.5 8h11c3 0 5.5 7.5 4 10-1 1.8-3.4-.3-5.2-2.5H7.7C5.9 17.7 3.5 19.8 2.5 18c-1.5-2.5 1-10 4-10Z"/><path d="M7 10v5M4.5 12.5h5M16.5 11.5h.01M19 14h.01"/></svg></span><strong>Controller</strong></button>
           <button class="tile" data-action="profile"><span><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.7-5 3.2-7 7.5-7s6.8 2 7.5 7"/></svg></span><strong>Profile</strong></button>
           <button class="tile" data-action="power"><span><svg viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M6.3 5.4a9 9 0 1 0 11.4 0"/></svg></span><strong>Power</strong></button>
         </nav>
-        <div class="prompt"><b>M</b><span>Close</span></div>
+        <div class="prompt"><b>P</b><span>Close</span></div>
       </div>
     </div>
     <div id="toast"></div>
@@ -820,29 +838,68 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     toastTimer = setTimeout(() => toastBox.classList.remove('show'), 2600);
   }
 
-  function focusables() {
-    const contextButtons = context.classList.contains('show') ? [...context.querySelectorAll('button')] : [];
-    return contextButtons.length ? contextButtons : [...shadow.querySelectorAll('#strip .tile')];
+  let contextFocusActive = false;
+
+  function stripTiles() {
+    return [...shadow.querySelectorAll('#strip .tile:not([hidden])')];
   }
 
-  function syncFocus(index = focusedIndex) {
+  function contextButtons() {
+    return context.classList.contains('show') ? [...context.querySelectorAll('button:not([disabled])')] : [];
+  }
+
+  function focusables() {
+    return contextFocusActive ? contextButtons() : stripTiles();
+  }
+
+  function syncFocus(index = focusedIndex, { refreshContext = true } = {}) {
     const items = focusables();
-    if (!items.length) return;
+    if (!items.length) {
+      if (contextFocusActive) {
+        contextFocusActive = false;
+        focusedIndex = Math.max(0, Math.min(focusedIndex, stripTiles().length - 1));
+        return syncFocus(focusedIndex, { refreshContext });
+      }
+      return;
+    }
     focusedIndex = Math.max(0, Math.min(index, items.length - 1));
     shadow.querySelectorAll('.focused').forEach((node) => node.classList.remove('focused'));
     const target = items[focusedIndex];
     target.classList.add('focused');
     target.focus({ preventScroll: true });
+    target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    if (!contextFocusActive && refreshContext) showContext(target.dataset.action || '', false);
+  }
+
+  function enterContext() {
+    const buttons = contextButtons();
+    if (!buttons.length) return false;
+    contextFocusActive = true;
+    focusedIndex = 0;
+    syncFocus(0, { refreshContext: false });
+    return true;
+  }
+
+  function leaveContext() {
+    if (!contextFocusActive) return false;
+    const selected = stripTiles().findIndex((tile) => tile.dataset.action === contextName);
+    contextFocusActive = false;
+    focusedIndex = selected >= 0 ? selected : 0;
+    syncFocus(focusedIndex, { refreshContext: false });
+    return true;
   }
 
   function openShell() {
     if (shellOpen) return;
     shellOpen = true;
+    const controllerTile = shadow.querySelector('[data-action="controller"]');
+    if (controllerTile) controllerTile.hidden = ![...(nativeGetGamepads?.() || [])].find(Boolean);
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
     context.classList.remove('show');
     context.innerHTML = '';
     contextName = '';
+    contextFocusActive = false;
     focusedIndex = 0;
     syncFocus(0);
   }
@@ -854,6 +911,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     context.classList.remove('show');
     context.innerHTML = '';
     contextName = '';
+    contextFocusActive = false;
     systemButton.focus({ preventScroll: true });
   }
 
@@ -861,8 +919,15 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     shellOpen ? closeShell() : openShell();
   }
 
-  function showContext(name) {
+  function showContext(name, focusContext = true) {
     contextName = name;
+    if (!name || name === 'home') {
+      context.classList.remove('show');
+      context.innerHTML = '';
+      contextName = '';
+      contextFocusActive = false;
+      return false;
+    }
     if (name === 'capture') {
       const replayActive = Boolean(replay);
       context.innerHTML = `
@@ -875,11 +940,59 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     } else if (name === 'sound') {
       const media = [...document.querySelectorAll('audio,video')];
       const muted = media.length && media.every((el) => el.muted);
-      context.innerHTML = `<div class="contextCopy"><span>Game Audio</span><strong>${muted ? 'Muted' : 'Playing'}</strong><small>Controls HTML audio and video used by this game.</small></div><div class="contextActions"><button data-context-action="toggle-mute">${muted ? 'Unmute' : 'Mute'}</button></div>`;
+      context.innerHTML = `<div class="contextCopy"><span>Sound</span><strong>${muted ? 'Muted' : 'Playing'}</strong><small>${media.length ? 'Game audio output' : 'No HTML media output detected'}</small></div><div class="contextActions"><button data-context-action="toggle-mute">${muted ? 'Unmute' : 'Mute'}</button></div>`;
+    } else if (name === 'controller') {
+      const pad = [...(nativeGetGamepads?.() || [])].find(Boolean);
+      context.innerHTML = pad
+        ? `<div class="contextCopy"><span>Controller</span><strong>${escapeMarkup(pad.id || 'Controller')}</strong><small>Connected</small></div><div class="contextActions"><button data-context-action="controller-settings">Controller Settings</button></div>`
+        : `<div class="contextCopy"><span>Controller</span><strong>No controller connected</strong><small>Keyboard controls remain available.</small></div>`;
+    } else if (name === 'profile') {
+      const state = readHomeState();
+      const profile = state.activeProfile || state.setupChoices?.profileName || '';
+      context.innerHTML = profile
+        ? `<div class="contextCopy"><span>Profile</span><strong>${escapeMarkup(profile)}</strong></div><div class="contextActions"><button data-context-action="account-settings">Account Settings</button></div>`
+        : `<div class="contextCopy"><span>Profile</span><strong>Profile unavailable</strong></div>`;
+    } else if (name === 'downloads') {
+      const runtime = readProfileRuntime();
+      const downloads = (runtime.downloads || []).filter((item) => ['Queued','Downloading','Paused'].includes(item.queueStatus));
+      context.innerHTML = downloads.length
+        ? `<div class="contextCopy"><span>Downloading</span><strong>${escapeMarkup(downloads[0].title || 'Download')}</strong><small>${Number(downloads[0].progress || 0)}%</small></div><div class="contextActions"><button data-context-action="downloads-open">Open Downloads</button></div>`
+        : `<div class="contextCopy"><span>Downloads</span><strong>No active downloads</strong></div>`;
+    } else if (name === 'notifications') {
+      const runtime = readProfileRuntime();
+      const notifications = runtime.notifications || [];
+      context.innerHTML = `<div class="contextCopy"><span>Notifications</span><strong>${notifications.length ? `${notifications.length} new` : 'You’re all caught up'}</strong></div>${notifications.length ? '<div class="contextActions"><button data-context-action="notifications-open">View Notifications</button></div>' : ''}`;
+    } else if (name === 'switcher') {
+      const runtime = readProfileRuntime();
+      const running = (runtime.running || []).filter((item) => item.id !== GAME_ACTIVITY_ID);
+      context.innerHTML = running.length
+        ? `<div class="contextCopy"><span>Running</span><strong>${running.length} other ${running.length === 1 ? 'experience' : 'experiences'}</strong><small>Open Switcher to change experiences.</small></div><div class="contextActions"><button data-context-action="switcher-open">Open Switcher</button></div>`
+        : `<div class="contextCopy"><span>Switcher</span><strong>No other apps running</strong></div>`;
+    } else if (name === 'network') {
+      context.innerHTML = `<div class="contextCopy"><span>Network</span><strong>Checking connection…</strong></div>`;
+      fetch('/api/v1/network', { headers: { Accept: 'application/json' } }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => {
+        if (contextName !== 'network') return;
+        const active = data?.interfaces?.find((item) => item.connected);
+        const available = active || data?.interfaces?.[0];
+        context.innerHTML = `<div class="contextCopy"><span>Network</span><strong>${active ? 'Connected' : available ? 'Available connections' : 'Unavailable'}</strong>${available ? `<small>${escapeMarkup(available.name || 'Network')}</small>` : ''}</div><div class="contextActions"><button data-context-action="network-settings">Network Settings</button></div>`;
+        if (contextFocusActive) syncFocus(focusedIndex, { refreshContext: false });
+      }).catch(() => {
+        if (contextName !== 'network') return;
+        context.innerHTML = `<div class="contextCopy"><span>Network</span><strong>Network status unavailable</strong></div><div class="contextActions"><button data-context-action="network-settings">Network Settings</button></div>`;
+        if (contextFocusActive) syncFocus(focusedIndex, { refreshContext: false });
+      });
+    } else if (name === 'music') {
+      context.innerHTML = `<div class="contextCopy"><span>Now Playing</span><strong>No separate media session</strong><small>Game audio remains under Sound.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
+    } else if (name === 'microphone') {
+      context.innerHTML = `<div class="contextCopy"><span>Microphone</span><strong>Open microphone controls</strong><small>PARA does not invent microphone state when host data is unavailable.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
+    } else if (name === 'power') {
+      context.innerHTML = `<div class="contextCopy"><span>Power</span><strong>Power options</strong><small>Sleep, restart, and shut down remain confirmation-protected.</small></div><div class="contextActions"><button data-context-action="power-menu">Open Power Menu</button></div>`;
     }
     context.classList.add('show');
-    focusedIndex = 0;
-    syncFocus(0);
+    if (focusContext && contextButtons().length) {
+      enterContext();
+    }
+    return true;
   }
 
   async function screenshot() {
@@ -1024,18 +1137,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   async function action(name, button) {
+    const contextAction = button?.dataset?.contextAction;
     if (name === 'resume') return closeShell();
     if (name === 'home') return location.href = '/#/home';
-    if (name === 'switcher') { sessionStorage.setItem('para-open-switcher', '1'); return location.href = '/#/home'; }
-    if (name === 'notifications') return location.href = '/#/notifications';
-    if (name === 'downloads') return location.href = '/#/downloads';
-    if (name === 'capture') return showContext('capture');
-    if (name === 'music') return location.href = '/#/audio-settings';
-    if (name === 'network') return location.href = '/#/network';
-    if (name === 'sound') return showContext('sound');
-    if (name === 'microphone') return location.href = '/#/audio-settings';
-    if (name === 'profile') return location.href = '/#/account';
-    if (name === 'power') return location.href = '/#/power';
+    if (['switcher','notifications','downloads','capture','music','network','sound','microphone','controller','profile','power'].includes(name)) return showContext(name, true);
+    if (contextAction === 'switcher-open') { sessionStorage.setItem('para-open-switcher', '1'); return location.href = '/#/home'; }
+    if (contextAction === 'notifications-open') return location.href = '/#/notifications';
+    if (contextAction === 'downloads-open') return location.href = '/#/downloads';
+    if (contextAction === 'network-settings') return location.href = '/#/network';
+    if (contextAction === 'audio-settings') return location.href = '/#/audio-settings';
+    if (contextAction === 'controller-settings') return location.href = '/#/controller';
+    if (contextAction === 'account-settings') return location.href = '/#/account';
+    if (contextAction === 'power-menu') return location.href = '/#/power';
     if (name === 'fullscreen') {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
@@ -1044,7 +1157,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       } catch (_) { toast('Fullscreen is unavailable'); }
       return;
     }
-    const contextAction = button?.dataset?.contextAction;
     if (contextAction === 'screenshot') return screenshot();
     if (contextAction === 'start-recording') return startRecording();
     if (contextAction === 'stop-recording') { closeShell(); return stopRecording(); }
@@ -1070,23 +1182,47 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   });
 
   window.addEventListener('keydown', (event) => {
-    if (event.key?.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      event.preventDefault(); event.stopImmediatePropagation(); toggleShell(); return;
+    if (event.key?.toLowerCase() === 'p' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (!keyboardParaDown) {
+        keyboardParaDown = true;
+        keyboardParaHeld = false;
+        keyboardParaTimer = setTimeout(() => {
+          keyboardParaTimer = 0;
+          if (!keyboardParaDown) return;
+          keyboardParaHeld = true;
+          location.href = '/#/home';
+        }, 650);
+      }
+      return;
     }
     if (!shellOpen) return;
     if (['Escape','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) {
       event.preventDefault(); event.stopImmediatePropagation();
     }
     if (event.key === 'Escape') {
-      if (contextName) { context.classList.remove('show'); context.innerHTML = ''; contextName = ''; focusedIndex = 0; syncFocus(0); }
-      else closeShell();
+      if (!leaveContext()) closeShell();
     } else if (event.key === 'Enter') {
       focusables()[focusedIndex]?.click();
-    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-      syncFocus(focusedIndex - 1);
-    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-      syncFocus(focusedIndex + 1);
+    } else if (event.key === 'ArrowUp') {
+      if (!contextFocusActive) enterContext();
+      else syncFocus(focusedIndex - 1, { refreshContext: false });
+    } else if (event.key === 'ArrowDown') {
+      if (!leaveContext()) syncFocus(focusedIndex + 1);
+    } else if (event.key === 'ArrowLeft') {
+      syncFocus(focusedIndex - 1, { refreshContext: !contextFocusActive });
+    } else if (event.key === 'ArrowRight') {
+      syncFocus(focusedIndex + 1, { refreshContext: !contextFocusActive });
     }
+  }, true);
+
+  window.addEventListener('keyup', (event) => {
+    if (event.key?.toLowerCase() !== 'p' || !keyboardParaDown) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    keyboardParaDown = false;
+    if (keyboardParaTimer) { clearTimeout(keyboardParaTimer); keyboardParaTimer = 0; }
+    if (!keyboardParaHeld) toggleShell();
+    keyboardParaHeld = false;
   }, true);
 
   function gamepadLoop() {
@@ -1108,16 +1244,24 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
       if (shellOpen) {
         if (edge(0)) focusables()[focusedIndex]?.click();
-        if (edge(1)) {
-          if (contextName) { context.classList.remove('show'); context.innerHTML = ''; contextName = ''; focusedIndex = 0; syncFocus(0); }
-          else closeShell();
-        }
+        if (edge(1) && !leaveContext()) closeShell();
         const x = pad.axes?.[0] || 0;
         const y = pad.axes?.[1] || 0;
         const prevX = window.__paraShellPrevX || 0;
         const prevY = window.__paraShellPrevY || 0;
-        if (edge(14) || (x < -.55 && prevX >= -.55) || edge(12) || (y < -.55 && prevY >= -.55)) syncFocus(focusedIndex - 1);
-        if (edge(15) || (x > .55 && prevX <= .55) || edge(13) || (y > .55 && prevY <= .55)) syncFocus(focusedIndex + 1);
+        const moveLeft = edge(14) || (x < -.55 && prevX >= -.55);
+        const moveRight = edge(15) || (x > .55 && prevX <= .55);
+        const moveUp = edge(12) || (y < -.55 && prevY >= -.55);
+        const moveDown = edge(13) || (y > .55 && prevY <= .55);
+        if (moveUp) {
+          if (!contextFocusActive) enterContext();
+          else syncFocus(focusedIndex - 1, { refreshContext: false });
+        }
+        if (moveDown) {
+          if (!leaveContext()) syncFocus(focusedIndex + 1);
+        }
+        if (moveLeft) syncFocus(focusedIndex - 1, { refreshContext: !contextFocusActive });
+        if (moveRight) syncFocus(focusedIndex + 1, { refreshContext: !contextFocusActive });
         window.__paraShellPrevX = x; window.__paraShellPrevY = y;
       }
       gamepadPrevious = pressed;

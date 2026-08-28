@@ -122,9 +122,11 @@ export class GamepadNavigation {
     // system button so gameplay cannot accidentally move Home focus or leave
     // the runtime.
     const gameRuntimeActive = Boolean(document.querySelector(".store-game-frame"));
+    const shellOverlayActive = Boolean(document.querySelector("#para-overlay:not([hidden])"));
     const paraPointActive = document.documentElement.dataset.parapoint === "active";
+    const shellOwnsInput = shellOverlayActive || !gameRuntimeActive;
 
-    if (!gameRuntimeActive && !paraPointActive) {
+    if (shellOwnsInput && !paraPointActive) {
       if (edge(0)) this.handlers.confirm();
       if (edge(1)) this.handlers.back();
       if (edge(2)) this.handlers.secondary();
@@ -150,7 +152,7 @@ export class GamepadNavigation {
     const right = Boolean(pressed[15] || (preferHorizontal && axisX >= DEADZONE));
     const up = Boolean(pressed[12] || (!preferHorizontal && axisY <= -DEADZONE));
     const down = Boolean(pressed[13] || (!preferHorizontal && axisY >= DEADZONE));
-    if (!gameRuntimeActive && !paraPointActive) {
+    if (shellOwnsInput && !paraPointActive) {
       this.repeatDirection("left", left, now);
       this.repeatDirection("right", right, now);
       this.repeatDirection("up", up, now);

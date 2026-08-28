@@ -239,7 +239,7 @@ export class FocusManager {
       event.preventDefault();
       this.setInputDevice("keyboard");
       this.handlers.back();
-    } else if (["p", "m"].includes(event.key.toLowerCase()) && !this.paraKeyDown) {
+    } else if (event.key.toLowerCase() === "p" && !this.paraKeyDown) {
       event.preventDefault();
       this.setInputDevice("keyboard");
       this.paraKeyDown = true;
@@ -269,7 +269,7 @@ export class FocusManager {
   onKeyUp(event) {
     const direction = DIRECTION_KEYS[event.key];
     if (direction) this.stopDirection(direction);
-    if (!["p", "m"].includes(event.key.toLowerCase()) || !this.paraKeyDown) return;
+    if (event.key.toLowerCase() !== "p" || !this.paraKeyDown) return;
     event.preventDefault();
     this.paraKeyDown = false;
     if (this.paraHoldTimer) {

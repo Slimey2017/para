@@ -63,7 +63,7 @@ These flags are never enabled by the Render launcher.
 - Escape / controller back: back
 - Shift+F10 / controller secondary: context menu in Files
 - Y / controller options: additional file options
-- Tap `P` (or legacy `M`) / PARA-mapped controller button: Control Center overlay
+- Tap `P` / PARA-mapped controller button: Control Center overlay
 - Hold `P` (or legacy `M`) / PARA-mapped controller button: return to PARA Home
 - Tab / Shift+Tab: focus cycle
 - Mouse: select, double-click, right-click, multi-select, and drag/drop
