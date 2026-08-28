@@ -252,6 +252,51 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const GAME_TITLE = __PARA_GAME_TITLE__;
   const GAME_RETURN_TRANSITION_KEY = 'para.game.transition.return';
   let paraGameTransitionLeaving = false;
+  let gameSuspended = false;
+  let gameClosing = false;
+  let suspendShellHost = null;
+  const suspendedMediaState = new Map();
+  const suspendedAudioContextState = new Map();
+  const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+  const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+  let paraFrameSequence = 1;
+  const paraFrameRecords = new Map();
+
+  // Keep the game JavaScript heap alive while PARA Home is open, but gate
+  // requestAnimationFrame callbacks so the normal browser game loop actually
+  // pauses instead of continuing behind Home. The queued frame is released
+  // when the user resumes the title.
+  window.requestAnimationFrame = (callback) => {
+    const id = paraFrameSequence++;
+    const record = { callback, nativeId: 0, waiting: false, cancelled: false, tick: null };
+    record.tick = (time) => {
+      if (record.cancelled) return;
+      if (gameSuspended) {
+        record.waiting = true;
+        record.nativeId = 0;
+        return;
+      }
+      paraFrameRecords.delete(id);
+      callback(time);
+    };
+    record.nativeId = nativeRequestAnimationFrame(record.tick);
+    paraFrameRecords.set(id, record);
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => {
+    const record = paraFrameRecords.get(id);
+    if (!record) return;
+    record.cancelled = true;
+    if (record.nativeId) nativeCancelAnimationFrame(record.nativeId);
+    paraFrameRecords.delete(id);
+  };
+  function releaseSuspendedFrames() {
+    for (const record of paraFrameRecords.values()) {
+      if (record.cancelled || !record.waiting || record.nativeId) continue;
+      record.waiting = false;
+      record.nativeId = nativeRequestAnimationFrame(record.tick);
+    }
+  }
 
   const transitionStyle = document.createElement('style');
   transitionStyle.dataset.paraGameTransition = 'true';
@@ -289,18 +334,161 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   function revealGameAfterLaunch() {
     const node = createGamePageTransition('Launching');
     node.classList.add('is-visible');
-    requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add('is-revealing')));
+    nativeRequestAnimationFrame(() => nativeRequestAnimationFrame(() => node.classList.add('is-revealing')));
     setTimeout(() => node.remove(), 620);
   }
 
-  function leaveGame(destination = '/#/home') {
+  function suspendedShellSource(destination = '/#/home') {
+    const hash = String(destination || '/#/home').startsWith('/#') ? String(destination).slice(1) : '#/home';
+    return `/?para_suspended_shell=1&para_suspended_game=${encodeURIComponent(RUNTIME_ID)}${hash}`;
+  }
+
+  function pauseGameMedia() {
+    suspendedMediaState.clear();
+    for (const media of document.querySelectorAll('audio,video')) {
+      try {
+        suspendedMediaState.set(media, { wasPlaying: !media.paused });
+        if (!media.paused) media.pause();
+      } catch (_) {}
+    }
+    suspendedAudioContextState.clear();
+    try {
+      for (const destination of audioCaptureDestinations) {
+        const context = destination?.context;
+        if (!context || suspendedAudioContextState.has(context)) continue;
+        suspendedAudioContextState.set(context, context.state);
+        if (context.state === 'running') void context.suspend?.();
+      }
+    } catch (_) {}
+  }
+
+  function resumeGameMedia() {
+    for (const [media, state] of suspendedMediaState) {
+      try { if (state.wasPlaying) void media.play(); } catch (_) {}
+    }
+    suspendedMediaState.clear();
+    for (const [context, state] of suspendedAudioContextState) {
+      try { if (state === 'running' && context.state === 'suspended') void context.resume?.(); } catch (_) {}
+    }
+    suspendedAudioContextState.clear();
+  }
+
+  function createSuspendShell(destination = '/#/home') {
+    suspendShellHost?.remove();
+    const host = document.createElement('div');
+    host.id = 'para-suspended-home-shell';
+    host.style.cssText = 'position:fixed;inset:0;z-index:2147483645;background:#030207;opacity:0;transition:opacity .22s ease;';
+    const frame = document.createElement('iframe');
+    frame.title = 'PARA Home';
+    frame.src = suspendedShellSource(destination);
+    frame.allow = 'autoplay; fullscreen; clipboard-read; clipboard-write';
+    frame.style.cssText = 'display:block;width:100%;height:100%;border:0;background:#030207;';
+    host.append(frame);
+    document.documentElement.append(host);
+    suspendShellHost = host;
+    frame.addEventListener('load', () => {
+      nativeRequestAnimationFrame(() => {
+        if (suspendShellHost !== host) return;
+        host.style.opacity = '1';
+        try { frame.contentWindow?.focus(); } catch (_) {}
+      });
+    }, { once: true });
+    return host;
+  }
+
+  function suspendGame(destination = '/#/home') {
+    if (gameSuspended) {
+      const frame = suspendShellHost?.querySelector('iframe');
+      if (frame) frame.src = suspendedShellSource(destination);
+      return;
+    }
+    closeShell?.();
+    try { recordGameActivity(); } catch (_) {}
+    gameSuspended = true;
+    try { document.body && (document.body.inert = true); } catch (_) {}
+    pauseGameMedia();
+    try { recordGameActivity(); } catch (_) {}
+    const node = createGamePageTransition('Suspending');
+    nativeRequestAnimationFrame(() => node.classList.add('is-visible'));
+    const host = createSuspendShell(destination);
+    setTimeout(() => {
+      if (suspendShellHost !== host) return;
+      host.style.opacity = '1';
+      node.classList.add('is-revealing');
+      setTimeout(() => node.remove(), 360);
+    }, 360);
+  }
+
+  function resumeSuspendedGame() {
+    if (!gameSuspended) return;
+    const node = createGamePageTransition('Resuming');
+    node.classList.add('is-visible');
+    nativeRequestAnimationFrame(() => nativeRequestAnimationFrame(() => {
+      suspendShellHost?.remove();
+      suspendShellHost = null;
+      try { document.body && (document.body.inert = false); } catch (_) {}
+      try { recordGameActivity(); } catch (_) {}
+      gameSuspended = false;
+      releaseSuspendedFrames();
+      resumeGameMedia();
+      try { recordGameActivity(); } catch (_) {}
+      try { window.focus(); } catch (_) {}
+      node.classList.add('is-revealing');
+      setTimeout(() => node.remove(), 520);
+    }));
+  }
+
+  function closeGameRuntime() {
+    try {
+      const state = JSON.parse(localStorage.getItem('para.home.state.v5') || '{}');
+      const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
+      const profileRuntime = { ...(state.profileRuntime || {}) };
+      const runtime = { recent: [], running: [], ...(profileRuntime[profile] || {}) };
+      runtime.running = (runtime.running || []).filter((item) => item.id !== `store:${RUNTIME_ID}`);
+      runtime.recent = (runtime.recent || []).map((item) => item.id === `store:${RUNTIME_ID}` ? { ...item, queueStatus: 'Closed', suspendedAt: null } : item);
+      profileRuntime[profile] = runtime;
+      state.profileRuntime = profileRuntime;
+      localStorage.setItem('para.home.state.v5', JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  function closeSuspendedGame(destination = '/#/home') {
     if (paraGameTransitionLeaving) return;
     paraGameTransitionLeaving = true;
+    gameClosing = true;
+    closeGameRuntime();
     try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
-    const node = createGamePageTransition('Returning to PARA');
-    requestAnimationFrame(() => node.classList.add('is-visible'));
+    const node = createGamePageTransition('Closing Game');
+    node.classList.add('is-visible');
     setTimeout(() => { location.href = destination; }, 430);
   }
+
+  function switchSuspendedGame(storeId) {
+    const id = String(storeId || '').trim();
+    if (!id) return;
+    if (id === String(RUNTIME_ID)) return resumeSuspendedGame();
+    if (paraGameTransitionLeaving) return;
+    paraGameTransitionLeaving = true;
+    gameClosing = true;
+    closeGameRuntime();
+    const node = createGamePageTransition('Switching Games');
+    node.classList.add('is-visible');
+    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v17`;
+    setTimeout(() => { location.href = next; }, 430);
+  }
+
+  function leaveGame(destination = '/#/home') {
+    suspendGame(destination);
+  }
+
+  addEventListener('message', (event) => {
+    if (event.origin !== location.origin || event.source !== suspendShellHost?.querySelector('iframe')?.contentWindow) return;
+    const data = event.data || {};
+    if (data.type !== 'para-suspended-game-command') return;
+    if (data.command === 'resume') return resumeSuspendedGame();
+    if (data.command === 'close') return closeSuspendedGame('/#/home');
+    if (data.command === 'launch') return switchSuspendedGame(data.storeId);
+  });
 
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', revealGameAfterLaunch, { once: true });
   else revealGameAfterLaunch();
@@ -379,6 +567,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   function recordGameActivity() {
+    if (gameClosing) return;
     try {
       const state = JSON.parse(localStorage.getItem(HOME_STATE_KEY) || '{}');
       const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
@@ -390,6 +579,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       };
       const now = Date.now();
       const previous = (runtime.recent || []).find((item) => item.id === GAME_ACTIVITY_ID) || {};
+      const checkpoint = Number(previous.sessionStartedAt) === gameSessionStartedAt ? Number(previous.lastSessionCheckpoint || gameSessionStartedAt) : gameSessionStartedAt;
+      const activeDelta = gameSuspended ? 0 : Math.max(0, now - checkpoint);
       const entry = {
         ...previous,
         id: GAME_ACTIVITY_ID,
@@ -402,9 +593,10 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         mark: previous.mark || (GAME_TITLE.trim().slice(0, 1).toUpperCase() || 'P'),
         lastOpened: now,
         queuedAt: now,
-        queueStatus: '',
+        queueStatus: gameSuspended ? 'Suspended' : 'Running',
+        suspendedAt: gameSuspended ? (previous.suspendedAt || now) : null,
         sessionStartedAt: gameSessionStartedAt,
-        playTimeMs: Number(previous.playTimeMs || 0) + Math.max(0, now - (Number(previous.sessionStartedAt) === gameSessionStartedAt ? Number(previous.lastSessionCheckpoint || gameSessionStartedAt) : gameSessionStartedAt)),
+        playTimeMs: Number(previous.playTimeMs || 0) + activeDelta,
         lastSessionCheckpoint: now
       };
       runtime.recent = [entry, ...(runtime.recent || []).filter((item) => item.id !== GAME_ACTIVITY_ID)].slice(0, 10);
@@ -456,7 +648,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         configurable: true,
         value: () => {
           const pads = [...(nativeGetGamepads() || [])];
-          if (!shellOpen) return pads;
+          if (!shellOpen && !gameSuspended) return pads;
           return pads.map((pad) => {
             if (!pad) return pad;
             if (maskedPadCache.has(pad.index)) return maskedPadCache.get(pad.index);

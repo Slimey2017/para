@@ -27,7 +27,7 @@ _file_operations_enabled = False
 BACKGROUND_SELECTIONS = {"para-default", "para-aurora", "para-horizon", "para-midnight", "solid-black", "custom"}
 BACKGROUND_FITS = {"fill", "fit", "center", "stretch"}
 HOME_WIDGETS = {"network", "storage", "system"}
-CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "friends", "downloads", "music", "network", "audio", "microphone", "controllers", "profile", "settings", "power"}
+CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "downloads", "captures", "music", "network", "audio", "microphone", "controllers", "profile", "power"}
 
 
 def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False, file_operations_enabled: bool = False) -> None:
@@ -43,7 +43,7 @@ def health() -> dict[str, Any]:
         "name": "para-api",
         "status": "ok",
         "version": (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-        "build": "v16-game-transitions",
+        "build": "v17-true-game-suspension",
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -179,7 +179,7 @@ def _validated_preferences(value: Any) -> dict[str, Any] | None:
             "hidden": _string_list(home.get("hidden"), HOME_WIDGETS, []),
         },
         "controlCenter": {
-            "order": _string_list(control_center.get("order"), CONTROL_CENTER_ITEMS, ["home", "switcher", "notifications", "friends", "downloads", "music", "network", "audio", "microphone", "controllers", "profile", "power"]),
+            "order": _string_list(control_center.get("order"), CONTROL_CENTER_ITEMS, ["home", "switcher", "notifications", "downloads", "captures", "music", "network", "audio", "microphone", "controllers", "profile", "power"]),
             "hidden": _string_list(control_center.get("hidden"), CONTROL_CENTER_ITEMS, []),
         },
     }

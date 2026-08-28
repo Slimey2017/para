@@ -345,17 +345,25 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("leaveGame('/#/home')", server)
         self.assertNotIn('backdrop-filter:', server)
 
-    def test_v16_games_have_launch_and_return_transitions(self):
+    def test_v17_games_have_real_suspend_resume_session(self):
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         self.assertIn('function transitionIntoGame', app)
         self.assertIn('GAME_RETURN_TRANSITION_KEY', app)
+        self.assertIn('IS_SUSPENDED_GAME_SHELL', app)
         self.assertIn('para-game-transition', css)
         self.assertIn('function revealGameAfterLaunch()', server)
-        self.assertIn('function leaveGame(destination', server)
-        self.assertIn("createGamePageTransition('Returning to PARA')", server)
-        self.assertIn('para_build=v16', app)
+        self.assertIn('function suspendGame(destination', server)
+        self.assertIn('function resumeSuspendedGame()', server)
+        self.assertIn('function closeSuspendedGame(destination', server)
+        self.assertIn("createGamePageTransition('Suspending')", server)
+        self.assertIn("createGamePageTransition('Resuming')", server)
+        self.assertIn("createGamePageTransition('Closing Game')", server)
+        self.assertIn('para_suspended_shell=1', server)
+        self.assertIn("gameSuspended ? 'Suspended' : 'Running'", server)
+        self.assertIn('if (!shellOpen && !gameSuspended) return pads;', server)
+        self.assertIn('para_build=v17', app)
 
 
 if __name__ == "__main__":

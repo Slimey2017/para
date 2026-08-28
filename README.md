@@ -64,7 +64,7 @@ These flags are never enabled by the Render launcher.
 - Shift+F10 / controller secondary: context menu in Files
 - Y / controller options: additional file options
 - Tap `P` / PARA-mapped controller button: Control Center overlay
-- Hold `P` (or legacy `M`) / PARA-mapped controller button: return to PARA Home
+- Hold `P` / PARA-mapped controller button: suspend the current game and return to PARA Home
 - Tab / Shift+Tab: focus cycle
 - Mouse: select, double-click, right-click, multi-select, and drag/drop
 
@@ -77,6 +77,15 @@ Switcher reads the profile's running PARA experiences, Downloads reads actual
 demo-install tasks, Sound controls PipeWire when exposed and PARA interface
 audio otherwise, and Microphone uses the browser permission and media APIs.
 Focusing a control reveals only its useful live context above the strip.
+
+Published web games now use a persistent suspended-session path. Returning Home
+from a running game does not unload the game document. PARA keeps that game
+session alive, masks game input, pauses media, gates the normal animation-frame
+game loop, and places PARA Home above it. Switcher or Continue resumes the same
+JavaScript/DOM session instead of launching a fresh copy. Closing the game is a
+separate action and actually removes it from the running list. This browser
+prototype currently guarantees one persistent top-level web-game session at a
+time; native Linux process suspension remains a later host-runtime feature.
 
 ParaStore contains three included free demos: Pulse Pong, Neon Lane, and Violet
 Step. Installing a demo persists it for that profile, reports progress through

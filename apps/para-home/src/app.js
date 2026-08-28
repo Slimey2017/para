@@ -129,6 +129,19 @@ let captureViewerUrl = "";
 let activeInputDevice = "keyboard";
 let gameTransitionInFlight = false;
 const GAME_RETURN_TRANSITION_KEY = "para.game.transition.return";
+const SHELL_PARAMS = new URLSearchParams(location.search);
+const IS_SUSPENDED_GAME_SHELL = window.parent !== window && SHELL_PARAMS.get("para_suspended_shell") === "1";
+const SUSPENDED_GAME_ID = SHELL_PARAMS.get("para_suspended_game") || "";
+
+function sendSuspendedGameCommand(command, detail = {}) {
+  if (!IS_SUSPENDED_GAME_SHELL) return false;
+  try {
+    window.parent.postMessage({ type: "para-suspended-game-command", command, suspendedGameId: SUSPENDED_GAME_ID, ...detail }, location.origin);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function gameTransitionNode({ mode = "launch", title = "" } = {}) {
   const node = document.createElement("div");
@@ -167,6 +180,7 @@ function transitionIntoGame(destination, title = "PARA Game") {
 }
 
 function revealHomeAfterGame() {
+  if (IS_SUSPENDED_GAME_SHELL) return;
   let payload = null;
   try { payload = JSON.parse(sessionStorage.getItem(GAME_RETURN_TRANSITION_KEY) || "null"); } catch (_) {}
   if (!payload) return;
@@ -700,7 +714,10 @@ function launchStoreGameDirect(storeId) {
   if (!id) return false;
   sessionStorage.setItem("para.store.launch", id);
   sessionStorage.setItem("para.store.lastLibraryRoute", "games");
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v16`;
+  if (IS_SUSPENDED_GAME_SHELL) {
+    return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
+  }
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v17`;
   return transitionIntoGame(source, storeGameTitle(id));
 }
 
@@ -977,11 +994,17 @@ async function handleAction(action, target) {
       else navigate(target.dataset.experienceRoute || "home", {}, target);
       break;
     }
-    case "close-experience":
-      closeExperience(target.dataset.experienceId);
+    case "close-experience": {
+      const experienceId = target.dataset.experienceId || "";
+      if (IS_SUSPENDED_GAME_SHELL && experienceId === `store:${SUSPENDED_GAME_ID}`) {
+        sendSuspendedGameCommand("close", { experienceId });
+        break;
+      }
+      closeExperience(experienceId);
       toast("Experience closed");
       openSwitcher();
       break;
+    }
     case "game-option-play": {
       const storeId = target.dataset.storeId || "";
       closeControlCenter(false);
