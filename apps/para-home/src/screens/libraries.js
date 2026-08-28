@@ -38,7 +38,7 @@ export async function activateApps({ focus }) {
       return;
     }
     categories.hidden = false;
-    categories.innerHTML = payload.categories.map((category, index) => `<button data-action="filter-apps" data-app-filter="${escapeHtml(category)}" class="${index === 0 ? "is-active" : ""}">${escapeHtml(category)}</button>`).join("");
+    categories.innerHTML = payload.categories.map((category, index) => `<button data-action="filter-apps" data-app-filter="${escapeHtml(category)}" class="${index === 0 ? "is-active" : ""}" aria-pressed="${index === 0}">${escapeHtml(category)}</button>`).join("");
     container.innerHTML = applications.map(applicationCard).join("");
     focus.focusFirst();
   } catch {
@@ -49,7 +49,11 @@ export async function activateApps({ focus }) {
 
 export function filterApps(category) {
   document.querySelectorAll("[data-app-category]").forEach((card) => { card.hidden = category !== "All Apps" && card.dataset.appCategory !== category; });
-  document.querySelectorAll("[data-app-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.appFilter === category));
+  document.querySelectorAll("[data-app-filter]").forEach((button) => {
+    const selected = button.dataset.appFilter === category;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
 }
 
 export async function launchSystemApplication(id) {

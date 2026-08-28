@@ -143,3 +143,30 @@ policy, file inventory, and next milestones.
 ## Achievement runtime (v22)
 
 Published games can call `PARA.achievements.unlock(key)` or `PARA.achievements.setProgress(key, value)`. Definitions come from the Developer Portal/Supabase achievement catalog, and the hosted preview records progress in the active local PARA profile. See `PARA_ACHIEVEMENT_RUNTIME_V22.md`.
+
+## Live QA repairs (v23)
+
+The August 28 live-site QA pass is now guarded by v23 regressions. Hosted PARA
+runs as **PARA Web Edition** and never presents Render/container interfaces,
+mount names, or server identifiers as consumer hardware. Storage and network
+screens show browser-safe information while local/native sessions retain real
+Linux device data.
+
+The Game Library empty state now follows the combined installed ParaStore,
+demo, and discovered PC-game result. Larger Text overrides desk scaling so it
+actually changes computed type sizes. ParaStore remembers filters, search, and
+scroll position across product detail navigation and has a dedicated product
+Back action. Home retains a known-good published catalog while store refreshes
+are in flight or temporarily unavailable.
+
+Downloads now keeps completed install history with completion time and Play/View
+in Library actions. Privacy setup choices are real toggles. Filter/selection
+controls publish accessibility state. Notifications have persistent read state
+and Mark all as read. Settings summaries use the same live preference/device
+state as their detail pages. PARA Files is visible as a built-in app even on the
+Web Edition; the hosted preview opens a safe unavailable state instead of
+exposing the Render filesystem.
+
+Control Center customization includes Notifications, and the Home and in-game
+Power context both expose Return Home, Sleep, Restart PARA, Shut Down, Sign Out,
+and Recovery.

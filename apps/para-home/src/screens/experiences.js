@@ -12,6 +12,7 @@ function demoArt(demo) {
 
 const STORE_INSTALL_KEY = "para.store.installed.v1";
 const STORE_CART_KEY = "para.store.cart.v1";
+const STORE_VIEW_KEY = "para.store.view.v1";
 
 function storeCartIds() {
   const profile = getState().activeProfile || "P1";
@@ -64,12 +65,20 @@ function saveInstalledStoreItems(items) {
 export function installStoreItem(item) {
   if (!item?.id) return false;
   const items = installedStoreItems();
-  saveInstalledStoreItems([{ ...item, installedAt: Date.now() }, ...items.filter((entry) => entry.id !== item.id)]);
+  const installedAt = Date.now();
+  saveInstalledStoreItems([{ ...item, installedAt }, ...items.filter((entry) => entry.id !== item.id)]);
+  const runtime = getProfileRuntime();
+  const completedDownload = {
+    id: `store:${item.id}`, storeId: item.id, title: item.title || "ParaStore game", route: "store-game",
+    status: "complete", progress: 100, completedAt: installedAt, startedAt: installedAt,
+  };
+  setProfileRuntime({ downloads: [completedDownload, ...runtime.downloads.filter((entry) => entry.id !== completedDownload.id)].slice(0, 20) });
   recordExperience({
     id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game",
     kind: item.project_type === "APP" ? "App" : "Game", accent: "#8d43ff",
     mark: (item.title || "P").slice(0, 1).toUpperCase(), storeId: item.id, queueStatus: "Ready to play",
   });
+  document.dispatchEvent(new CustomEvent("para-downloadcomplete", { detail: { downloads: [completedDownload] } }));
   return true;
 }
 
@@ -129,8 +138,10 @@ export async function activateGames({ focus } = {}) {
   try {
     const payload = await paraApi.applications();
     const games = (payload.applications || []).filter((item) => item.roles?.includes("game"));
-    host.innerHTML = games.map((item, index) => nativeGameCard(item, !profileGames?.children.length && index === 0)).join("");
-    if (empty) empty.hidden = Boolean(games.length || profileGames?.children.length);
+    const profileCount = profileGames?.querySelectorAll(".demo-card").length || 0;
+    host.innerHTML = games.map((item, index) => nativeGameCard(item, profileCount === 0 && index === 0)).join("");
+    const totalInstalled = games.length + profileCount;
+    if (empty) empty.toggleAttribute("hidden", totalInstalled > 0);
     if (!games.length) host.innerHTML = "";
     focus?.focusFirst?.();
   } catch {
@@ -159,7 +170,7 @@ export function paraStoreScreen() {
     className: "parastore-page",
     body: `<div class="parastore-environment" aria-hidden="true"></div>
       <section class="store-discovery-bar" aria-label="ParaStore tools">
-        <label class="store-search"><span>⌕</span><input type="search" placeholder="Search games, apps, developers, genres…" data-store-search autocomplete="off" /></label>
+        <label class="store-search"><span aria-hidden="true">⌕</span><span class="sr-only">Search ParaStore</span><input type="search" aria-label="Search ParaStore" placeholder="Search games, apps, developers, genres…" data-store-search autocomplete="off" /></label>
         <button type="button" data-store-tool="wishlist">♡ <span>Wishlist</span></button>
         <button type="button" class="store-cart-button" data-route="store-cart">🛒 <span>Cart</span><b data-store-cart-count>${storeCartCount()}</b></button>
         <button type="button" data-route="downloads">↓ <span>Downloads</span></button>
@@ -169,9 +180,9 @@ export function paraStoreScreen() {
         <div class="store-feature__mark">P</div>
       </section>
       <nav class="store-categories store-categories--primary" aria-label="Store categories">
-        <button class="is-active" data-store-type="ALL" data-autofocus="true">Featured</button><button data-store-type="GAME">Games</button><button data-store-type="APP">Apps</button><button data-store-sort="new">New Releases</button>
+        <button class="is-active" data-store-type="ALL" aria-pressed="true" data-autofocus="true">Featured</button><button data-store-type="GAME" aria-pressed="false">Games</button><button data-store-type="APP" aria-pressed="false">Apps</button><button data-store-sort="new" aria-pressed="false">New Releases</button>
       </nav>
-      <section class="store-filter-shell"><div class="store-filter-heading"><span>Browse by genre</span><button type="button" data-store-runtime="ALL">Runtime: All</button></div><div class="store-genre-track">${genres.map((genre, index) => `<button type="button" class="${index === 0 ? "is-active" : ""}" data-store-genre="${genre}">${genre}</button>`).join("")}</div><div class="store-runtime-track" data-store-runtime-menu hidden><button data-runtime-value="ALL">All runtimes</button><button data-runtime-value="WEB">Web</button><button data-runtime-value="NATIVE">Native PARA/Linux</button><button data-runtime-value="WINDOWS">Windows / Compatibility</button><button data-runtime-value="LEGACY">Legacy / Emulator</button></div></section>
+      <section class="store-filter-shell"><div class="store-filter-heading"><span>Browse by genre</span><button type="button" data-store-runtime="ALL" aria-expanded="false" aria-controls="store-runtime-menu">Runtime: All</button></div><div class="store-genre-track">${genres.map((genre, index) => `<button type="button" class="${index === 0 ? "is-active" : ""}" data-store-genre="${genre}" aria-pressed="${index === 0}">${genre}</button>`).join("")}</div><div class="store-runtime-track" id="store-runtime-menu" data-store-runtime-menu hidden><button data-runtime-value="ALL" aria-pressed="true">All runtimes</button><button data-runtime-value="WEB" aria-pressed="false">Web</button><button data-runtime-value="NATIVE" aria-pressed="false">Native PARA/Linux</button><button data-runtime-value="WINDOWS" aria-pressed="false">Windows / Compatibility</button><button data-runtime-value="LEGACY" aria-pressed="false">Legacy / Emulator</button></div></section>
       <section class="store-shelf"><div class="store-shelf__heading"><div><span>PARASTORE</span><h2 data-store-shelf-title>Featured</h2></div><small data-store-result-count>Loading catalog…</small></div><div class="store-live-grid" data-live-store><div class="library-empty"><span>◌</span><h2>Loading ParaStore…</h2><p>Checking the published catalog.</p></div></div></section>`,
   });
 }
@@ -197,7 +208,46 @@ export function activateParaStore() {
   const shelfTitle = document.querySelector("[data-store-shelf-title]");
   const runtimeButton = document.querySelector("[data-store-runtime]");
   const runtimeMenu = document.querySelector("[data-store-runtime-menu]");
-  let alive = true, catalog = [], type = "ALL", genre = "All", runtime = "ALL", newest = false;
+  const scroller = document.querySelector(".parastore-page .content-scroll");
+  let saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem(STORE_VIEW_KEY) || "{}"); } catch { saved = {}; }
+  let alive = true;
+  let catalog = [];
+  let type = ["ALL", "GAME", "APP"].includes(saved.type) ? saved.type : "ALL";
+  let genre = saved.genre || "All";
+  let runtime = saved.runtime || "ALL";
+  let newest = Boolean(saved.newest);
+  if (search) search.value = saved.query || "";
+
+  const saveView = () => {
+    try {
+      sessionStorage.setItem(STORE_VIEW_KEY, JSON.stringify({
+        type, genre, runtime, newest, query: search?.value || "", scrollTop: scroller?.scrollTop || 0,
+      }));
+    } catch { /* session persistence is optional */ }
+  };
+  const syncFilterA11y = () => {
+    document.querySelectorAll("[data-store-type]").forEach((button) => {
+      const active = !newest && button.dataset.storeType === type;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    document.querySelectorAll("[data-store-sort]").forEach((button) => {
+      button.classList.toggle("is-active", newest);
+      button.setAttribute("aria-pressed", String(newest));
+    });
+    document.querySelectorAll("[data-store-genre]").forEach((button) => {
+      const active = button.dataset.storeGenre === genre;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    document.querySelectorAll("[data-runtime-value]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.runtimeValue === runtime)));
+    if (runtimeButton) {
+      const selected = document.querySelector(`[data-runtime-value="${runtime}"]`);
+      runtimeButton.textContent = `Runtime: ${runtime === "ALL" ? "All" : selected?.textContent || runtime}`;
+      runtimeButton.dataset.storeRuntime = runtime;
+    }
+  };
   const runtimeMatch = (value) => {
     if (runtime === "ALL") return true;
     const r = String(value || "PARA").toUpperCase();
@@ -210,7 +260,7 @@ export function activateParaStore() {
     const q = (search?.value || "").trim().toLowerCase();
     let items = catalog.filter((item) => {
       const meta = item.store_metadata || {};
-      const hay = [item.title, item.developer_name, meta.developer, meta.genre, meta.short_description, item.runtime, item.project_type].filter(Boolean).join(" ").toLowerCase();
+      const hay = [item.title, item.developer_name, meta.developer, meta.developer_name, meta.genre, meta.short_description, item.runtime, item.project_type].filter(Boolean).join(" ").toLowerCase();
       return (type === "ALL" || (item.project_type || "GAME") === type) && (genre === "All" || String(meta.genre || "").toLowerCase().includes(genre.toLowerCase())) && runtimeMatch(item.runtime) && (!q || hay.includes(q));
     });
     if (newest) items = [...items].sort((a,b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
@@ -223,17 +273,29 @@ export function activateParaStore() {
       feature.style.setProperty("--store-feature-art", hero ? `url('${hero}')` : "none");
       feature.innerHTML = `<div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>${escapeHtml(featured.title || "Untitled")}</h2><p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p><div class="store-feature__meta"><span>${escapeHtml(meta.genre || featured.project_type || "Game")}</span><span>${escapeHtml(featured.runtime || "PARA")}</span><button type="button" data-action="open-store-product" data-store-id="${escapeHtml(featured.id)}">View game</button></div></div>`;
     }
+    syncFilterA11y();
+    saveView();
   };
   const listeners = [];
-  const on = (el, event, fn) => { if (el) { el.addEventListener(event, fn); listeners.push(() => el.removeEventListener(event, fn)); } };
-  on(search, "input", render);
-  document.querySelectorAll("[data-store-type]").forEach((button) => on(button, "click", () => { type = button.dataset.storeType; newest = false; document.querySelectorAll("[data-store-type]").forEach(b=>b.classList.toggle("is-active", b===button)); render(); }));
-  document.querySelectorAll("[data-store-sort]").forEach((button) => on(button, "click", () => { newest = true; type = "ALL"; document.querySelectorAll("[data-store-type]").forEach(b=>b.classList.remove("is-active")); render(); }));
-  document.querySelectorAll("[data-store-genre]").forEach((button) => on(button, "click", () => { genre = button.dataset.storeGenre; document.querySelectorAll("[data-store-genre]").forEach(b=>b.classList.toggle("is-active", b===button)); render(); }));
-  on(runtimeButton, "click", () => { runtimeMenu.hidden = !runtimeMenu.hidden; });
-  document.querySelectorAll("[data-runtime-value]").forEach((button) => on(button, "click", () => { runtime = button.dataset.runtimeValue; runtimeButton.textContent = `Runtime: ${button.textContent}`; runtimeMenu.hidden = true; render(); }));
-  paraApi.storeCatalog().then((payload) => { if (!alive) return; catalog = payload.items || []; render(); }).catch((error) => { if (!alive) return; host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`; });
-  return () => { alive = false; listeners.forEach(fn=>fn()); };
+  const on = (el, event, fn, options) => { if (el) { el.addEventListener(event, fn, options); listeners.push(() => el.removeEventListener(event, fn, options)); } };
+  on(search, "input", () => { render(); });
+  document.querySelectorAll("[data-store-type]").forEach((button) => on(button, "click", () => { type = button.dataset.storeType; newest = false; render(); }));
+  document.querySelectorAll("[data-store-sort]").forEach((button) => on(button, "click", () => { newest = true; type = "ALL"; render(); }));
+  document.querySelectorAll("[data-store-genre]").forEach((button) => on(button, "click", () => { genre = button.dataset.storeGenre; render(); }));
+  on(runtimeButton, "click", () => { runtimeMenu.hidden = !runtimeMenu.hidden; runtimeButton.setAttribute("aria-expanded", String(!runtimeMenu.hidden)); });
+  document.querySelectorAll("[data-runtime-value]").forEach((button) => on(button, "click", () => { runtime = button.dataset.runtimeValue; runtimeMenu.hidden = true; runtimeButton?.setAttribute("aria-expanded", "false"); render(); }));
+  on(scroller, "scroll", saveView, { passive: true });
+  syncFilterA11y();
+  paraApi.storeCatalog().then((payload) => {
+    if (!alive) return;
+    catalog = payload.items || [];
+    render();
+    requestAnimationFrame(() => { if (scroller && Number(saved.scrollTop) > 0) scroller.scrollTop = Number(saved.scrollTop); });
+  }).catch((error) => {
+    if (!alive) return;
+    host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`;
+  });
+  return () => { alive = false; saveView(); listeners.forEach(fn=>fn()); };
 }
 
 
@@ -305,7 +367,7 @@ export function activateStoreProduct() {
     host.innerHTML = `
       <section class="store-product-hero" ${hero ? `style="--product-hero:url('${hero}')"` : ""}>
         <div class="store-product-hero__shade"></div>
-        <button class="store-product-back" data-route="parastore">← Back</button>
+        <button class="store-product-back" data-action="store-product-back">← Back</button>
         <div class="store-product-hero__content">
           <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span>${escapeHtml((item.title || "P")[0])}</span>`}</div>
           <div class="store-product-copy">
@@ -388,7 +450,7 @@ export function activateStoreGame() {
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>No game selected</h2><button class="action-button" data-route="games">Back to Games</button></div>`;
     return () => {};
   }
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v16`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v23`;
   host.innerHTML = `<div class="store-game-boot"><span class="store-game-boot__spinner"></span><strong>Starting game…</strong><small>Opening direct PARA Game Mode…</small></div>`;
   window.location.replace(source);
   return () => {};

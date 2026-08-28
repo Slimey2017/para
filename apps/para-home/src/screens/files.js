@@ -657,9 +657,43 @@ export function activateFiles({ focus, initialLocation = "home" }) {
 export function downloadManagerScreen() {
   return `<section class="screen page downloads-manager-page"><header class="page-header"><span class="eyebrow">System</span><h1>Downloads & Updates</h1><p>Install queue, updates, and completed downloads.</p></header><div data-download-manager><div class="library-loading"><span></span><strong>Reading queue…</strong></div></div></section>`;
 }
-export async function activateDownloadManager({ focus }={}) {
-  const host=document.querySelector("[data-download-manager]"); if(!host) return ()=>{};
+export async function activateDownloadManager({ focus } = {}) {
+  const host = document.querySelector("[data-download-manager]");
+  if (!host) return () => {};
   const { profileRuntime } = await import("../services/experience-runtime.js");
-  const render=()=>{ const items=profileRuntime().downloads||[]; host.innerHTML=items.length?`<div class="saved-data-list">${items.map((x,i)=>`<article class="notification-row" ${i===0?'data-autofocus="true"':''}><span>↓</span><div><strong>${escapeHtml(x.title||x.id)}</strong><small>${x.status==='complete'?'Installed':x.status==='paused'?`Paused · ${x.progress||0}%`:`Downloading · ${x.progress||0}%`}</small></div><div class="download-actions">${x.status==='downloading'?`<button data-action="pause-download" data-download-id="${escapeHtml(x.id)}">Pause</button>`:''}${x.status==='paused'?`<button data-action="resume-download" data-download-id="${escapeHtml(x.id)}">Resume</button>`:''}${x.status!=='complete'?`<button data-action="cancel-download" data-download-id="${escapeHtml(x.id)}">Cancel</button>`:''}</div></article>`).join('')}</div>`:`<div class="library-empty"><span>↓</span><h2>Nothing downloading</h2><p>New games and updates will appear here.</p></div>`; focus?.focusFirst?.(); };
-  render(); const timer=setInterval(render,1000); document.addEventListener("para-runtimechange",render); return ()=>{clearInterval(timer);document.removeEventListener("para-runtimechange",render);};
+  const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+  const actions = (item) => {
+    if (item.status === "downloading") return `<button data-action="pause-download" data-download-id="${escapeHtml(item.id)}">Pause</button><button data-action="cancel-download" data-download-id="${escapeHtml(item.id)}">Cancel</button>`;
+    if (item.status === "paused") return `<button data-action="resume-download" data-download-id="${escapeHtml(item.id)}">Resume</button><button data-action="cancel-download" data-download-id="${escapeHtml(item.id)}">Cancel</button>`;
+    if (item.status === "complete" && item.storeId) return `<button data-action="play-store-game" data-store-id="${escapeHtml(item.storeId)}">Play</button><button data-route="games">View in Library</button>`;
+    if (item.status === "complete" && item.route) return `<button data-route="${escapeHtml(item.route)}">Open</button>`;
+    if (item.status === "complete") return `<button data-route="games">View in Library</button>`;
+    return "";
+  };
+
+  const row = (item, index) => {
+    const status = item.status === "complete"
+      ? `Installed${item.completedAt ? ` · ${date.format(item.completedAt)}` : ""}`
+      : item.status === "paused"
+        ? `Paused · ${item.progress || 0}%`
+        : `Downloading · ${item.progress || 0}%`;
+    return `<article class="notification-row" ${index === 0 ? 'data-autofocus="true"' : ""}><span>↓</span><div><strong>${escapeHtml(item.title || item.id)}</strong><small>${escapeHtml(status)}</small></div><div class="download-actions">${actions(item)}</div></article>`;
+  };
+
+  const render = () => {
+    const items = profileRuntime().downloads || [];
+    const active = items.filter((item) => ["downloading", "paused"].includes(item.status));
+    const completed = items.filter((item) => item.status === "complete").sort((a, b) => Number(b.completedAt || b.startedAt || 0) - Number(a.completedAt || a.startedAt || 0));
+    if (!active.length && !completed.length) {
+      host.innerHTML = `<div class="library-empty"><span>↓</span><h2>No downloads yet</h2><p>Games, updates, and completed installs will appear here.</p></div>`;
+    } else {
+      host.innerHTML = `<div class="saved-data-list">${active.length ? `<div class="download-section-heading"><strong>Active</strong><small>${active.length} ${active.length === 1 ? "download" : "downloads"}</small></div>${active.map(row).join("")}` : ""}${completed.length ? `<div class="download-section-heading"><strong>Completed</strong><small>Recent installs</small></div>${completed.map((item, index) => row(item, active.length ? index + active.length : index)).join("")}` : ""}</div>`;
+    }
+    focus?.focusFirst?.();
+  };
+  render();
+  const timer = setInterval(render, 1000);
+  document.addEventListener("para-runtimechange", render);
+  return () => { clearInterval(timer); document.removeEventListener("para-runtimechange", render); };
 }

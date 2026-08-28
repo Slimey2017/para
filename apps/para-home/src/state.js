@@ -34,6 +34,7 @@ function detectedSetupChoices() {
     gamingAccounts: {},
     otherAccounts: {},
     sleepMinutes: 30,
+    privacy: { diagnostics: false, personalization: false, location: false },
   };
 }
 
@@ -123,7 +124,7 @@ function load() {
       ...parsed,
       activeProfile: parsed.activeProfile === "Player One" ? "P1" : parsed.activeProfile,
       profiles,
-      setupChoices: { ...detectedSetupChoices(), ...(parsed.setupChoices || {}), profileName: parsed.setupChoices?.profileName === "Player One" ? "P1" : (parsed.setupChoices?.profileName || "P1") },
+      setupChoices: { ...detectedSetupChoices(), ...(parsed.setupChoices || {}), privacy: { ...detectedSetupChoices().privacy, ...(parsed.setupChoices?.privacy || {}) }, profileName: parsed.setupChoices?.profileName === "Player One" ? "P1" : (parsed.setupChoices?.profileName || "P1") },
       profilePreferences,
       profileRuntime,
     };
@@ -167,7 +168,7 @@ export function addProfile(name) {
 }
 
 export function setState(patch) {
-  state = { ...state, ...patch, ...(patch.setupChoices ? { setupChoices: { ...state.setupChoices, ...patch.setupChoices } } : {}) };
+  state = { ...state, ...patch, ...(patch.setupChoices ? { setupChoices: { ...state.setupChoices, ...patch.setupChoices, ...(patch.setupChoices.privacy ? { privacy: { ...(state.setupChoices.privacy || {}), ...patch.setupChoices.privacy } } : {}) } } : {}) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   applyPreferences();
   return getState();

@@ -11,6 +11,8 @@ const sections = [
 ];
 
 let rememberedHomeSection = "continue";
+let cachedStoreCatalog = [];
+let cachedStoreCatalogLoaded = false;
 
 function initials(profile) {
   return profile.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P";
@@ -127,6 +129,9 @@ function contextMarkup(section, model) {
   if (section === "community") return `<div class="home-community"><div class="home-community__head"><span>Community</span><h2>Stay connected.</h2></div><div class="home-community-grid">${communityTile("Messages", "Chat with friends", "messages", "✉", "home-route:messages")}${communityTile("Notifications", "Invites and activity", "notifications", "●", "home-route:notifications")}${communityTile("Profile", "Presence and account", "account", "◉", "home-route:account")}${communityTile("PARA Updates", "News, patches, and Lab notes", "community", "◎", "home-route:community")}</div></div>`;
   if (section === "explore") {
     const catalog = model.catalog || [];
+    if (!model.catalogLoaded) {
+      return `<div class="home-explore-dashboard"><div class="home-explore-hub">${exploreHubTile({ title: "Games", subtitle: "My games & apps", route: "games", mark: "◉", focusId: "home-route:games" })}${exploreHubTile({ title: "Apps", subtitle: model.applications.length ? `${model.applications.length} available` : "Your app library", route: "apps", mark: "▦", focusId: "home-route:apps" })}${exploreHubTile({ title: "ParaStore", subtitle: "Discover and install", route: "parastore", mark: "", icon: "/assets/parastore-icon.png", focusId: "home-route:parastore" })}</div><section class="home-store-shelf home-store-shelf--empty"><div class="home-store-shelf__head"><h3>Featured</h3></div><p>${model.catalogError ? "ParaStore is temporarily unavailable." : "Loading ParaStore…"}</p></section></div>`;
+    }
     const sponsored = catalog.filter((item) => item.store_metadata?.sponsored === true);
     const featured = catalog.filter((item) => item.store_metadata?.featured === true);
     const featuredItems = featured.length ? featured : catalog.slice(0, 6);
@@ -174,7 +179,7 @@ export function homeScreen() {
   const profile = getState().activeProfile || "P1";
   const runtime = profileRuntime();
   const activeDownloads = runtime.downloads.filter((item) => item.status === "downloading").length;
-  const unreadNotifications = runtime.notifications.length;
+  const unreadNotifications = runtime.notifications.filter((note) => !note.readAt).length;
   const selected = sections.some(({ id }) => id === rememberedHomeSection) ? rememberedHomeSection : "continue";
   return `<section class="home-ui" data-home-section="${selected}" data-focus-scope="home" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header" data-focus-zone="home-header" data-nav-down-zone="home-nav"><button class="home-wordmark" type="button" data-action="open-control-center" data-focus-id="home-header:para" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-header__activity" aria-label="System activity"><span><i aria-hidden="true"></i>${activeDownloads ? `${activeDownloads} download${activeDownloads === 1 ? "" : "s"}` : "Downloads clear"}</span><span>${unreadNotifications ? `${unreadNotifications} notification${unreadNotifications === 1 ? "" : "s"}` : "No new alerts"}</span></div><div class="home-status"><button class="home-settings home-chat" type="button" data-route="messages" data-focus-id="home-header:messages" aria-label="Open Messages"><span aria-hidden="true">✉</span><strong>Chat</strong></button><button class="home-settings" type="button" data-route="settings" data-focus-id="home-header:settings" aria-label="Open Settings"><span aria-hidden="true">⚙</span><strong>Settings</strong></button><time class="home-status__clock" data-clock>--:--</time>${accountQuickMenu(profile, { home: true })}</div></header><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home" data-focus-zone="home-nav" data-nav-up-zone="home-header" data-nav-down-zone="home-content">${mainNavigation(selected)}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-${selected}" aria-live="polite" data-focus-zone="home-content" data-focus-scope="home:${selected}" data-nav-up="home-nav:${selected}">${continueEmptyState()}</section></main><footer class="home-control-legend control-legend" aria-hidden="true"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span><span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span><span><b class="prompt-key" data-prompt="shoulderPrevious">PgUp</b><b class="prompt-key" data-prompt="shoulderNext">PgDn</b>Sections</span></footer></section>`;
 }
@@ -185,7 +190,7 @@ export function activateHome({ focus }) {
   const context = root?.querySelector(".home-context");
   if (!root || !context) return () => {};
 
-  const model = { applications: [], recent: recentExperiences(), runtime: profileRuntime(), catalog: [] };
+  const model = { applications: [], recent: recentExperiences(), runtime: profileRuntime(), catalog: [...cachedStoreCatalog], catalogLoaded: cachedStoreCatalogLoaded, catalogError: false };
   let selected = sections.some(({ id }) => id === root.dataset.homeSection) ? root.dataset.homeSection : "continue";
   let transitionTimer = null;
   let enterFrame = null;
@@ -343,8 +348,18 @@ export function activateHome({ focus }) {
   paraApi.storeCatalog().then((payload) => {
     if (!alive) return;
     model.catalog = payload.items || [];
+    model.catalogLoaded = true;
+    model.catalogError = false;
+    cachedStoreCatalog = [...model.catalog];
+    cachedStoreCatalogLoaded = true;
     if (selected === "explore") renderContext("explore", false);
-  }).catch(() => { model.catalog = []; });
+  }).catch(() => {
+    if (!alive) return;
+    model.catalogError = true;
+    model.catalogLoaded = cachedStoreCatalogLoaded;
+    model.catalog = [...cachedStoreCatalog];
+    if (selected === "explore") renderContext("explore", false);
+  });
 
   return () => {
     alive = false;

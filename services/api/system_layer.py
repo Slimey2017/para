@@ -23,6 +23,7 @@ _launch_enabled = False
 _controls_enabled = False
 _power_enabled = False
 _file_operations_enabled = False
+_web_edition = False
 
 BACKGROUND_SELECTIONS = {"para-default", "para-aurora", "para-horizon", "para-midnight", "solid-black", "custom"}
 BACKGROUND_FITS = {"fill", "fit", "center", "stretch"}
@@ -30,12 +31,13 @@ HOME_WIDGETS = {"network", "storage", "system"}
 CONTROL_CENTER_ITEMS = {"home", "switcher", "notifications", "downloads", "captures", "music", "network", "audio", "microphone", "controllers", "profile", "power"}
 
 
-def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False, file_operations_enabled: bool = False) -> None:
-    global _launch_enabled, _controls_enabled, _power_enabled, _file_operations_enabled
+def configure(*, launch_enabled: bool, controls_enabled: bool = False, power_enabled: bool = False, file_operations_enabled: bool = False, web_edition: bool = False) -> None:
+    global _launch_enabled, _controls_enabled, _power_enabled, _file_operations_enabled, _web_edition
     _launch_enabled = launch_enabled
     _controls_enabled = controls_enabled
     _power_enabled = power_enabled
     _file_operations_enabled = file_operations_enabled
+    _web_edition = web_edition
 
 
 def health() -> dict[str, Any]:
@@ -43,18 +45,28 @@ def health() -> dict[str, Any]:
         "name": "para-api",
         "status": "ok",
         "version": (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
-        "build": "v22-achievement-runtime",
+        "build": "v23-live-qa-repairs",
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def system_information() -> dict[str, Any]:
+    if _web_edition:
+        return {
+            "os": "PARA OS Web",
+            "release": (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
+            "machine": "Web Edition",
+            "hostname": "PARA Cloud Session",
+            "cpu_count": None,
+            "web_edition": True,
+        }
     return {
         "os": platform.system(),
         "release": platform.release(),
         "machine": platform.machine(),
         "hostname": platform.node(),
         "cpu_count": os.cpu_count(),
+        "web_edition": False,
     }
 
 
@@ -350,21 +362,42 @@ def _mounts() -> list[dict[str, Any]]:
 
 
 def storage() -> dict[str, Any]:
+    if _web_edition:
+        return {
+            "web_edition": True,
+            "primary": {
+                "name": "PARA Web Storage",
+                "total_gb": 0,
+                "used_gb": 0,
+                "free_gb": 0,
+                "used_percent": 0,
+                "capacity_known": False,
+            },
+            "mounts": [],
+        }
     target = Path.home()
     usage = shutil.disk_usage(target)
     return {
+        "web_edition": False,
         "primary": {
-            "name": target.name or "Home",
+            "name": "Internal Storage",
             "total_gb": _gb(usage.total),
             "used_gb": _gb(usage.used),
             "free_gb": _gb(usage.free),
             "used_percent": round((usage.used / usage.total) * 100) if usage.total else 0,
+            "capacity_known": True,
         },
         "mounts": _mounts(),
     }
 
 
 def network() -> dict[str, Any]:
+    if _web_edition:
+        return {
+            "web_edition": True,
+            "connected": True,
+            "interfaces": [{"name": "Browser connection", "kind": "web", "state": "online", "connected": True}],
+        }
     root = Path("/sys/class/net")
     interfaces: list[dict[str, Any]] = []
     if root.exists():
@@ -376,8 +409,9 @@ def network() -> dict[str, Any]:
             except OSError:
                 state = "unknown"
             kind = "wifi" if (path / "wireless").exists() else "ethernet"
-            interfaces.append({"name": path.name, "kind": kind, "state": state, "connected": state == "up"})
-    return {"connected": any(item["connected"] for item in interfaces), "interfaces": interfaces}
+            display_name = "Wi-Fi" if kind == "wifi" else "Ethernet"
+            interfaces.append({"name": display_name, "device": path.name, "kind": kind, "state": state, "connected": state == "up"})
+    return {"web_edition": False, "connected": any(item["connected"] for item in interfaces), "interfaces": interfaces}
 
 
 def _xdg_directories() -> dict[str, Path]:
@@ -1058,7 +1092,7 @@ def _system_entries() -> dict[str, dict[str, Any]]:
 def applications() -> dict[str, Any]:
     built_in = {"id": "para:files", "name": "Files", "category": "Tools", "roles": [], "icon": None, "launch": {"kind": "route", "route": "files"}}
     native = [{key: value for key, value in item.items() if not key.startswith("_")} for item in _system_entries().values()]
-    apps = ([built_in] if _controls_enabled else []) + native
+    apps = [built_in] + native
     categories = [name for name in ["All Apps", "Entertainment", "Tools"] if name == "All Apps" or any(item["category"] == name for item in apps)]
     return {"applications": apps, "categories": categories}
 

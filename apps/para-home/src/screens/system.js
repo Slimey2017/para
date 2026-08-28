@@ -1,4 +1,4 @@
-import { getProfilePreferences, getProfileRuntime, getState } from "../state.js";
+import { BACKGROUND_OPTIONS, getProfilePreferences, getProfileRuntime, getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { page, tile, listRow, progress, toggleRow } from "../ui/components.js";
 import { demoStorageBytes } from "../services/experience-runtime.js";
@@ -38,28 +38,50 @@ export async function activateStorage() {
   if (!container) return;
   try {
     const payload = await paraApi.storage();
-    const primary = payload.primary;
-    const mounts = (payload.mounts || []).filter((mount) => mount.external);
+    const primary = payload.primary || {};
     const demoBytes = demoStorageBytes();
+    if (payload.web_edition || primary.capacity_known === false) {
+      let browserSummary = "Capacity is managed by this browser.";
+      try {
+        const estimate = await navigator.storage?.estimate?.();
+        if (estimate?.quota) {
+          const used = Number(estimate.usage || 0);
+          const quota = Number(estimate.quota || 0);
+          const free = Math.max(0, quota - used);
+          browserSummary = `${(free / 1_000_000_000).toFixed(1)} GB available to browser storage`;
+        }
+      } catch { /* browser storage estimate is optional */ }
+      container.innerHTML = `<section class="storage-overview panel"><div class="panel__head"><div><span class="eyebrow">PARA Web Edition</span><h2>Browser storage</h2></div><strong>${escapeHtml(browserSummary)}</strong></div><p class="storage-usage">PARA does not expose Render/container disks as console storage.</p></section>${demoBytes ? `<section class="panel demo-storage"><div><span class="eyebrow">PARA demos</span><h2>${(demoBytes / 1_000_000).toFixed(1)} MB</h2></div><button class="action-button action-button--ghost" data-route="games">Manage</button></section>` : ""}<section class="storage-mounts"><h2>Connected drives</h2><div class="library-empty library-empty--small"><span>▯</span><h2>No device drives exposed in Web Edition</h2><p>External drives are available in the native PARA build.</p></div></section>`;
+      return;
+    }
+    const mounts = (payload.mounts || []).filter((mount) => mount.external);
     container.innerHTML = `<section class="storage-overview panel"><div class="panel__head"><div><span class="eyebrow">Primary storage</span><h2>${primary.total_gb} GB</h2></div><strong>${primary.free_gb} GB free</strong></div>${progress(primary.used_percent)}<p class="storage-usage">${primary.used_gb} GB used</p></section>${demoBytes ? `<section class="panel demo-storage"><div><span class="eyebrow">PARA demos</span><h2>${(demoBytes / 1_000_000).toFixed(1)} MB</h2></div><button class="action-button action-button--ghost" data-route="games">Manage</button></section>` : ""}<section class="storage-mounts"><h2>Connected drives</h2>${mounts.length ? `<div class="drive-grid">${mounts.map((mount) => `<div class="drive-card"><span>▯</span><strong>${escapeHtml(mount.name)}</strong><small>${mount.free_gb} GB free · ${escapeHtml(mount.filesystem)}</small></div>`).join("")}</div>` : `<div class="library-empty library-empty--small"><span>▯</span><h2>No external drives connected</h2></div>`}</section>`;
   } catch { container.innerHTML = `<div class="library-empty"><span>▯</span><h2>Storage information is unavailable</h2></div>`; }
 }
 
+
 export function settingsScreen() {
+  const state = getState();
+  const preferences = getProfilePreferences();
+  const background = BACKGROUND_OPTIONS[preferences.background.selection] || BACKGROUND_OPTIONS["para-aurora"];
+  const connectedControllers = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+  const controllerSummary = connectedControllers.length ? `${connectedControllers.length} connected` : "No controller connected";
+  const soundSummary = preferences.sound.menuMusic ? `Menu music ${preferences.sound.menuMusicVolume}%` : "Menu music Off";
   const cards = [
-    ["Appearance", "Background, Home & display", "personalization", "◩", "Violet Horizon"],
-    ["Controllers", "PulseWave, mapping & profiles", "controller", "◇", "Player 1"],
-    ["Sound", "Audio, menu music & microphone", "audio-settings", "◖", "Menu music 35%"],
+    ["Appearance", "Background, Home & display", "personalization", "◩", background.name],
+    ["Controllers", "PulseWave, mapping & profiles", "controller", "◇", controllerSummary],
+    ["Sound", "Audio, menu music & microphone", "audio-settings", "◖", soundSummary],
     ["Network", "Wi-Fi, Ethernet & connection test", "network", "⌁", navigator.onLine ? "Online" : "Offline"],
-    ["Account", "Profile, sign-in & family", "account", "●", "Local profile"],
+    ["Account", "Profile, sign-in & family", "account", "●", state.activeProfile || "Local profile"],
     ["Storage", "Games, apps, captures & drives", "storage", "▯", "Manage storage"],
+    ["PARA Files", "Browse files and downloads", "files", "▤", "File manager"],
     ["Media Gallery", "Screenshots and gameplay clips", "media-gallery", "▣", "Captures"],
     ["Accessibility", "Vision, hearing, controls & motion", "accessibility", "◎", "Quick access"],
     ["Notifications", "Friends, downloads & system alerts", "notifications", "◌", "Recent activity"],
     ["Games & Apps", "Library, files & game preferences", "games", "▦", "Your library"],
     ["System", "Power, health, updates & about", "health", "+", "PARA status"],
   ];
-  const body = cards.map((item, index) => `<button type="button" class="settings-home-card ${index < 3 ? "settings-home-card--primary" : ""}" data-route="${item[2]}" data-focus-id="settings-card-${index}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="settings-home-card__icon">${item[3]}</span><span class="settings-home-card__copy"><strong>${item[0]}</strong><small>${item[1]}</small></span><em>${item[4]}</em></button>`).join("");
+  const body = cards.map((item, index) => `<button type="button" class="settings-home-card ${index < 3 ? "settings-home-card--primary" : ""}" data-route="${item[2]}" data-focus-id="settings-card-${index}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="settings-home-card__icon">${item[3]}</span><span class="settings-home-card__copy"><strong>${item[0]}</strong><small>${item[1]}</small></span><em>${escapeHtml(item[4])}</em></button>`).join("");
   return page({
     title: "Settings",
     description: "Set up PARA your way.",
@@ -68,6 +90,7 @@ export function settingsScreen() {
     body: `<div class="settings-lounge-grid" data-focus-scope="settings">${body}</div>`,
   });
 }
+
 
 export function displayScreen() {
   const state = getState();
@@ -89,7 +112,7 @@ export async function activateNetwork() {
   try {
     const payload = await paraApi.network();
     if (!payload.interfaces?.length) { container.innerHTML = `<div class="library-empty library-empty--small"><span>⌁</span><h2>No network interfaces found</h2></div>`; return; }
-    container.innerHTML = `<div class="network-interface-list">${payload.interfaces.map((item) => `<div class="network-interface"><span>${item.kind === "wifi" ? "⌁" : "↔"}</span><div><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "wifi" ? "Wi-Fi" : "Ethernet"}</small></div><b class="${item.connected ? "is-connected" : ""}">${item.connected ? "Connected" : escapeHtml(item.state)}</b></div>`).join("")}</div>`;
+    container.innerHTML = `<div class="network-interface-list">${payload.interfaces.map((item) => { const type = item.kind === "wifi" ? "Wi-Fi" : item.kind === "web" ? "Web connection" : "Ethernet"; return `<div class="network-interface"><span>${item.kind === "wifi" ? "⌁" : "↔"}</span><div><strong>${escapeHtml(item.name)}</strong><small>${type}</small></div><b class="${item.connected ? "is-connected" : ""}">${item.connected ? "Connected" : escapeHtml(item.state)}</b></div>`; }).join("")}</div>`;
   } catch { container.innerHTML = `<div class="network-browser-state"><span>⌁</span><div><strong>${navigator.onLine ? "Online" : "Offline"}</strong><small>Browser connection status</small></div></div>`; }
 }
 
@@ -100,7 +123,8 @@ export function audioSettingsScreen() {
 
 export function notificationsScreen() {
   const notifications = getProfileRuntime().notifications;
-  return page({ title: "Notifications", description: "Recent events for this profile.", eyebrow: "System", body: notifications.length ? `<div class="notification-list">${notifications.map((note, index) => `<button class="notification-row" ${note.route ? `data-route="${escapeHtml(note.route)}"` : "disabled"} ${index === 0 ? "data-autofocus='true'" : ""}><span>◌</span><div><strong>${escapeHtml(note.title)}</strong><small>${new Date(note.createdAt).toLocaleDateString()}</small></div></button>`).join("")}</div>` : `<div class="library-empty"><span>◌</span><h2>You’re all caught up</h2></div>` });
+  const unread = notifications.filter((note) => !note.readAt).length;
+  return page({ title: "Notifications", description: "Recent events for this profile.", eyebrow: "System", body: notifications.length ? `<div class="notification-toolbar"><span>${unread ? `${unread} new` : "All read"}</span>${unread ? `<button class="action-button action-button--ghost" data-action="mark-all-notifications-read">Mark all as read</button>` : ""}</div><div class="notification-list">${notifications.map((note, index) => `<button class="notification-row ${note.readAt ? "" : "is-unread"}" ${note.route ? `data-route="${escapeHtml(note.route)}"` : `data-action="mark-notification-read"`} data-notification-id="${escapeHtml(note.id)}" aria-label="${escapeHtml(`${note.title}${note.readAt ? "" : ", new"}`)}" ${index === 0 ? "data-autofocus='true'" : ""}><span>◌</span><div><strong>${escapeHtml(note.title)}</strong><small>${new Date(note.createdAt).toLocaleDateString()}${note.readAt ? " · Read" : " · New"}</small></div></button>`).join("")}</div>` : `<div class="library-empty"><span>◌</span><h2>You’re all caught up</h2></div>` });
 }
 
 export function aboutScreen() {
@@ -185,7 +209,8 @@ export async function activateHealth() {
   if (!container) return;
   try {
     const [health, system] = await Promise.all([paraApi.health(), paraApi.system()]);
-    container.innerHTML = `<span class="update-check">✓</span><div><span class="eyebrow">PARA ${escapeHtml(health.version)}</span><h2>PARA is responding</h2><p>${escapeHtml(system.machine)} · ${escapeHtml(system.hostname)}</p></div><button class="action-button action-button--ghost" data-action="run-health-check">Check again</button>`;
+    const systemLabel = system.web_edition ? "PARA Web Edition · Cloud session" : `${escapeHtml(system.machine)} · ${escapeHtml(system.hostname)}`;
+    container.innerHTML = `<span class="update-check">✓</span><div><span class="eyebrow">PARA ${escapeHtml(health.version)}</span><h2>PARA is responding</h2><p>${systemLabel}</p></div><button class="action-button action-button--ghost" data-action="run-health-check">Check again</button>`;
   } catch { container.innerHTML = `<div><h2>PARA needs attention</h2><p>System information could not be reached.</p></div><button class="action-button" data-action="run-health-check">Try again</button>`; }
 }
 

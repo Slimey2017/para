@@ -165,6 +165,30 @@ export function clearNotification(id) {
   emit();
 }
 
+export function markNotificationRead(id) {
+  if (!id) return false;
+  const runtime = getProfileRuntime();
+  let changed = false;
+  const notifications = runtime.notifications.map((item) => {
+    if (item.id !== id || item.readAt) return item;
+    changed = true;
+    return { ...item, readAt: Date.now() };
+  });
+  if (!changed) return false;
+  setProfileRuntime({ notifications });
+  emit();
+  return true;
+}
+
+export function markAllNotificationsRead() {
+  const runtime = getProfileRuntime();
+  const now = Date.now();
+  if (!runtime.notifications.some((item) => !item.readAt)) return false;
+  setProfileRuntime({ notifications: runtime.notifications.map((item) => item.readAt ? item : { ...item, readAt: now }) });
+  emit();
+  return true;
+}
+
 export function currentProfileName() {
   return getState().activeProfile || "P1";
 }

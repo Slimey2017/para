@@ -46,7 +46,7 @@ import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, su
 import { mediaSessionAction, setMediaVolume, setGameMediaBalance, mediaSessionState } from "./services/media-session.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
-  activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall, pauseDownload, resumeDownload, cancelDownload,
+  activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall, pauseDownload, resumeDownload, cancelDownload, markNotificationRead, markAllNotificationsRead,
 } from "./services/experience-runtime.js";
 import { toggleMicrophone } from "./services/microphone.js";
 import {
@@ -722,7 +722,7 @@ function launchStoreGameDirect(storeId) {
   if (IS_SUSPENDED_GAME_SHELL) {
     return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
   }
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v21`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v23`;
   return transitionIntoGame(source, storeGameTitle(id));
 }
 
@@ -765,6 +765,15 @@ async function handleAction(action, target) {
       setSetupAccountChoice(target.dataset.providerGroup, target.dataset.provider, "skipped");
       rerender();
       break;
+    case "setup-toggle-privacy": {
+      const id = target.dataset.privacyId;
+      if (["diagnostics", "personalization", "location"].includes(id)) {
+        const privacy = state.setupChoices.privacy || {};
+        setState({ setupChoices: { privacy: { [id]: !privacy[id] } } });
+        rerender();
+      }
+      break;
+    }
     case "setup-sleep-timer":
       setSetupChoice("sleepMinutes", Number(target.dataset.value));
       resetIdleSleep();
@@ -853,6 +862,12 @@ async function handleAction(action, target) {
     case "pause-download": pauseDownload(target.dataset.downloadId); toast("Download paused"); break;
     case "resume-download": resumeDownload(target.dataset.downloadId); toast("Download resumed"); break;
     case "cancel-download": cancelDownload(target.dataset.downloadId); toast("Download canceled"); break;
+    case "mark-notification-read":
+      if (markNotificationRead(target.dataset.notificationId)) rerender();
+      break;
+    case "mark-all-notifications-read":
+      if (markAllNotificationsRead()) rerender();
+      break;
     case "open-replay-menu":
       openReplaySaveMenu();
       break;
@@ -1116,9 +1131,17 @@ async function handleAction(action, target) {
     case "open-store-product":
       if (target.dataset.storeId) {
         sessionStorage.setItem("para.store.product", target.dataset.storeId);
+        const currentRoute = router.current();
+        if (currentRoute && currentRoute !== "store-product") sessionStorage.setItem("para.store.returnRoute", currentRoute);
         navigate("store-product", {}, target);
       }
       break;
+    case "store-product-back": {
+      const returnRoute = sessionStorage.getItem("para.store.returnRoute") || "parastore";
+      sessionStorage.removeItem("para.store.returnRoute");
+      navigate(returnRoute === "store-product" ? "parastore" : returnRoute, {}, target);
+      break;
+    }
     case "add-store-cart": {
       const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
       if (addStoreCartItem(id)) toast("Added to cart", "Ready when you are");
@@ -1295,6 +1318,7 @@ document.addEventListener("click", (event) => {
     launchStoreGameDirect(target.dataset.storeId);
     return;
   }
+  if (target.dataset.notificationId) markNotificationRead(target.dataset.notificationId);
   if (target.dataset.route) navigate(target.dataset.route, {}, target);
   else handleAction(target.dataset.action, target);
 });

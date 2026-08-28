@@ -31,10 +31,31 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(storage_status, 200)
         self.assertGreater(storage["primary"]["total_gb"], 0)
 
+    def test_web_edition_sanitizes_host_network_storage_and_identity(self):
+        system_layer.configure(launch_enabled=False, web_edition=True)
+        try:
+            _, system = resolve("/api/v1/system")
+            _, storage = resolve("/api/v1/storage")
+            _, network = resolve("/api/v1/network")
+            self.assertTrue(system["web_edition"])
+            self.assertEqual(system["hostname"], "PARA Cloud Session")
+            self.assertEqual(system["machine"], "Web Edition")
+            self.assertTrue(storage["web_edition"])
+            self.assertEqual(storage["mounts"], [])
+            self.assertFalse(storage["primary"]["capacity_known"])
+            self.assertTrue(network["web_edition"])
+            self.assertEqual(network["interfaces"], [{"name": "Browser connection", "kind": "web", "state": "online", "connected": True}])
+            browse_status, browse = system_layer.browse_files("home")
+            self.assertEqual(browse_status, 403)
+            self.assertEqual(browse["error"], "files_unavailable")
+        finally:
+            system_layer.configure(launch_enabled=False)
+
     def test_application_launch_is_hidden_by_default(self):
         status, payload = resolve("/api/v1/apps")
         self.assertEqual(status, 200)
-        self.assertEqual(payload["applications"], [])
+        self.assertEqual([item["id"] for item in payload["applications"]], ["para:files"])
+        self.assertEqual(payload["applications"][0]["launch"], {"kind": "route", "route": "files"})
         launch_status, _ = system_layer.launch_application("linux:any.desktop")
         self.assertEqual(launch_status, 404)
 

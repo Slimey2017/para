@@ -74,7 +74,11 @@ function refreshGalleryMarkup({ keepFocus = false } = {}) {
   const selected = items.find((item) => item.id === selectedCaptureId) || items[0] || null;
   const focusId = keepFocus ? document.activeElement?.dataset?.captureId : null;
   host.innerHTML = `${heroMarkup(selected)}${railMarkup(items)}`;
-  document.querySelectorAll("[data-media-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.mediaFilter === galleryFilter));
+  document.querySelectorAll("[data-media-filter]").forEach((button) => {
+    const selected = button.dataset.mediaFilter === galleryFilter;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
   if (focusId) document.querySelector(`[data-action="select-media-capture"][data-capture-id="${focusId}"]`)?.focus();
 }
 
@@ -84,7 +88,7 @@ export function mediaGalleryScreen() {
     description: "Screenshots and gameplay videos captured on PARA.",
     eyebrow: "Capture",
     className: "media-gallery-page capture-gallery-page",
-    body: `<section class="capture-gallery-topbar"><div class="capture-filter-tabs" role="tablist" aria-label="Media filter"><button type="button" class="is-active" data-action="filter-media-gallery" data-media-filter="all">All</button><button type="button" data-action="filter-media-gallery" data-media-filter="videos">Videos</button><button type="button" data-action="filter-media-gallery" data-media-filter="screenshots">Screenshots</button></div><button type="button" class="capture-open-controls" data-action="open-control-center">◎ Capture Controls</button></section><div data-media-gallery><div class="library-loading"><span></span><strong>Opening captures…</strong></div></div>`,
+    body: `<section class="capture-gallery-topbar"><div class="capture-filter-tabs" role="tablist" aria-label="Media filter"><button type="button" role="tab" aria-selected="true" class="is-active" data-action="filter-media-gallery" data-media-filter="all">All</button><button type="button" role="tab" aria-selected="false" data-action="filter-media-gallery" data-media-filter="videos">Videos</button><button type="button" role="tab" aria-selected="false" data-action="filter-media-gallery" data-media-filter="screenshots">Screenshots</button></div><button type="button" class="capture-open-controls" data-action="open-control-center">◎ Capture Controls</button></section><div data-media-gallery><div class="library-loading"><span></span><strong>Opening captures…</strong></div></div>`,
   });
 }
 

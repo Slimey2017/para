@@ -77,15 +77,16 @@ function contextMarkup(id) {
     return `<div class="control-center-context__copy"><span>Profile</span><strong>${escapeHtml(currentData.profile)}</strong></div>${actionButton("Account Settings", `data-route="account"`, true)}`;
   }
   if (id === "power") {
-    return `<div class="control-center-context__copy"><span>Power</span><strong>Choose a power action</strong></div><div class="control-center-power">${actionButton("Sleep", `data-action="enter-sleep"`, true)}${actionButton("Restart PARA", `data-action="restart-shell"`)}${actionButton("Shut Down", `data-action="confirm-turn-off"`)}</div>`;
+    return `<div class="control-center-context__copy"><span>Power</span><strong>Choose a system action</strong></div><div class="control-center-power">${actionButton("Return Home", `data-route="home"`, true)}${actionButton("Sleep", `data-action="enter-sleep"`)}${actionButton("Restart PARA", `data-action="restart-shell"`)}${actionButton("Shut Down", `data-action="confirm-turn-off"`)}${actionButton("Sign Out", `data-action="sign-out"`)}${actionButton("Recovery", `data-route="recovery"`)}</div>`;
   }
   if (id === "switcher") {
     const running = runningExperiences();
     return running.length ? `<div class="control-center-context__copy"><span>Running</span><strong>${running.length} ${running.length === 1 ? "experience" : "experiences"}</strong></div><div class="control-center-running">${running.map((item, index) => actionButton(`${escapeHtml(item.kind)} · ${escapeHtml(item.title)}`, `data-route="${escapeHtml(item.route)}"`, index === 0)).join("")}</div>` : `<div class="control-center-context__copy"><span>Switcher</span><strong>No other apps running</strong></div>`;
   }
   if (id === "notifications") {
-    const count = currentData.runtime.notifications.length;
-    return `<div class="control-center-context__copy"><span>Notifications</span><strong>${count ? `${count} new` : "You’re all caught up"}</strong></div>${count ? actionButton("View Notifications", `data-route="notifications"`, true) : ""}`;
+    const notifications = currentData.runtime.notifications || [];
+    const count = notifications.filter((item) => !item.readAt).length;
+    return `<div class="control-center-context__copy"><span>Notifications</span><strong>${count ? `${count} new` : "You’re all caught up"}</strong><small>${notifications.length ? `${notifications.length} in history` : "No notifications yet"}</small></div>${notifications.length ? actionButton("View Notifications", `data-route="notifications"`, true) : ""}`;
   }
   if (id === "captures") {
     const recording = manualRecordingStatus();
@@ -100,15 +101,17 @@ function contextMarkup(id) {
   }
   if (id === "downloads") {
     const downloads = activeDownloads();
-    if (!downloads.length) return `<div class="control-center-context__copy"><span>Downloads</span><strong>No active downloads</strong></div>${actionButton("Open ParaStore", `data-route="parastore"`, true)}`;
-    return `<div class="control-center-context__copy"><span>Downloading</span><strong>${escapeHtml(downloads[0].title)}</strong><small>${downloads[0].progress || 0}%</small></div><div class="control-center-download"><i style="width:${downloads[0].progress || 0}%"></i></div>`;
+    if (downloads.length) return `<div class="control-center-context__copy"><span>Downloading</span><strong>${escapeHtml(downloads[0].title)}</strong><small>${downloads[0].progress || 0}%</small></div><div class="control-center-download"><i style="width:${downloads[0].progress || 0}%"></i></div>${actionButton("Open Downloads", `data-route="downloads"`, true)}`;
+    const completed = [...(currentData.runtime.downloads || [])].filter((item) => item.status === "complete").sort((a, b) => Number(b.completedAt || b.startedAt || 0) - Number(a.completedAt || a.startedAt || 0))[0];
+    if (completed) return `<div class="control-center-context__copy"><span>Downloads</span><strong>${escapeHtml(completed.title || "Install")} installed</strong><small>Most recent completed download</small></div>${actionButton("Open Downloads", `data-route="downloads"`, true)}`;
+    return `<div class="control-center-context__copy"><span>Downloads</span><strong>No active downloads</strong></div>${actionButton("Open Downloads", `data-route="downloads"`, true)}`;
   }
   return "";
 }
 
 function availableIds({ capabilities, network, audio, microphone, controller, profile, runtime, media }) {
   const ids = ["home", "switcher"];
-  if (runtime.notifications.length) ids.push("notifications");
+  if ((runtime.notifications || []).length) ids.push("notifications");
   ids.push("downloads");
   ids.push("captures");
   ids.push("music");
@@ -197,7 +200,7 @@ export async function populateControlCenter({ overlay, controller, focus }) {
   window.clearInterval(overlay._paraControlCenterTimer);
   overlay._paraControlCenterTimer = window.setInterval(() => {
     if (overlay.hidden) return;
-    if (lastSelectedId === "downloads") { currentData.runtime = profileRuntime(); showControlCenterContext("downloads"); }
+    if (["downloads", "notifications"].includes(lastSelectedId)) { currentData.runtime = profileRuntime(); showControlCenterContext(lastSelectedId); }
     if (lastSelectedId === "music") { currentData.media = mediaSessionState(); showControlCenterContext("music"); }
     if (lastSelectedId === "captures") showControlCenterContext("captures");
   }, 500);

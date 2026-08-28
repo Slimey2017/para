@@ -238,7 +238,7 @@ export function restoreDefaultBackground() {
 function arrangementRows(ids, labels, preferences, namespace) {
   const hidden = new Set(preferences.hidden);
   const core = new Set(["home", "power"]);
-  return ids.map((id, index) => `<div class="arrangement-row" data-arrangement-id="${id}"><div><strong>${escapeHtml(labels[id])}</strong><small>${core.has(id) ? "Always shown" : hidden.has(id) ? "Hidden" : "Shown"}</small></div><div><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="-1" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} earlier">↑</button><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="1" ${index === ids.length - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} later">↓</button>${core.has(id) ? "" : `<button data-action="toggle-${namespace}-item" data-item-id="${id}">${hidden.has(id) ? "Show" : "Hide"}</button>`}</div></div>`).join("");
+  return ids.map((id, index) => `<div class="arrangement-row" data-arrangement-id="${id}"><div><strong>${escapeHtml(labels[id])}</strong><small>${core.has(id) ? "Always shown" : hidden.has(id) ? "Hidden" : "Shown"}</small></div><div><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="-1" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} earlier">↑</button><button data-action="move-${namespace}-item" data-item-id="${id}" data-direction="1" ${index === ids.length - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(labels[id])} later">↓</button>${core.has(id) ? "" : `<button data-action="toggle-${namespace}-item" data-item-id="${id}" aria-label="${hidden.has(id) ? "Show" : "Hide"} ${escapeHtml(labels[id])} in Control Center">${hidden.has(id) ? "Show" : "Hide"}</button>`}</div></div>`).join("");
 }
 
 export function controlCenterSettingsScreen() {
@@ -250,8 +250,7 @@ export async function activateControlCenterSettings({ focus, controller }) {
   if (!container) return;
   let capabilities = {};
   try { capabilities = await paraApi.capabilities(); } catch { capabilities = {}; }
-  const allowed = ["home", "switcher", "downloads", "captures", "music", "audio"];
-  if (capabilities.notifications) allowed.push("notifications");
+  const allowed = ["home", "switcher", "notifications", "downloads", "captures", "music", "audio"];
   if (capabilities.network) allowed.push("network");
   if (capabilities.microphone || navigator.mediaDevices?.getUserMedia) allowed.push("microphone");
   if (controller.connected) allowed.push("controllers");

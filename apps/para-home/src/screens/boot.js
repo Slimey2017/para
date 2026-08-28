@@ -65,24 +65,24 @@ function setupProgress(step) {
 }
 
 function choiceButton({ title, meta, action, value = "", selected = false, disabled = false, autofocus = false, icon = "◦", extra = "" }) {
-  return `<button type="button" class="setup-choice ${selected ? "is-selected" : ""}" data-action="${action}" ${value ? `data-value="${escapeHtml(value)}"` : ""} ${extra} ${disabled ? "disabled aria-disabled='true'" : ""} ${autofocus && !disabled ? "data-autofocus='true'" : ""}><span class="setup-choice__icon" aria-hidden="true">${icon}</span><span><strong>${title}</strong><small>${meta}</small></span><i aria-hidden="true"></i></button>`;
+  return `<button type="button" class="setup-choice ${selected ? "is-selected" : ""}" data-action="${action}" aria-pressed="${selected}" ${value ? `data-value="${escapeHtml(value)}"` : ""} ${extra} ${disabled ? "disabled aria-disabled='true'" : ""} ${autofocus && !disabled ? "data-autofocus='true'" : ""}><span class="setup-choice__icon" aria-hidden="true">${icon}</span><span><strong>${title}</strong><small>${meta}</small></span><i aria-hidden="true"></i></button>`;
 }
 
 function accountProviderRows(providers, group, values) {
   return providers.map(([id, name]) => {
     const skipped = values[id] === "skipped";
-    return `<div class="setup-provider"><span aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span><strong>${escapeHtml(name)}</strong><button type="button" class="action-button action-button--ghost" disabled>Connect</button><button type="button" class="action-button ${skipped ? "action-button--ghost" : ""}" data-action="setup-skip-provider" data-provider-group="${group}" data-provider="${id}">${skipped ? "Skipped" : "Skip"}</button></div>`;
+    return `<div class="setup-provider"><span aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span><strong>${escapeHtml(name)}</strong><button type="button" class="action-button action-button--ghost" disabled aria-label="Connect ${escapeHtml(name)} account">Connect</button><button type="button" class="action-button ${skipped ? "action-button--ghost" : ""}" data-action="setup-skip-provider" data-provider-group="${group}" data-provider="${id}" aria-label="${skipped ? "Skipped" : "Skip"} ${escapeHtml(name)} account connection">${skipped ? "Skipped" : "Skip"}</button></div>`;
   }).join("");
 }
 
-function privacyRow(title, description) {
-  return `<div class="setup-fixed-row"><span><strong>${title}</strong><small>${description}</small></span><b>Off</b></div>`;
+function privacyRow(id, title, description, enabled = false) {
+  return `<button type="button" class="setup-fixed-row setup-privacy-row" data-action="setup-toggle-privacy" data-privacy-id="${id}" aria-pressed="${enabled}"><span><strong>${title}</strong><small>${description}</small></span><b>${enabled ? "On" : "Off"}</b></button>`;
 }
 
 function setupBackgroundChoices(selected) {
   return BUILT_IN_BACKGROUND_IDS.map((id) => {
     const option = BACKGROUND_OPTIONS[id];
-    return `<button type="button" class="setup-background-choice ${selected === id ? "is-selected" : ""}" data-action="setup-background" data-background-id="${id}" style="--setup-wallpaper:url('${option.image}')"><span aria-hidden="true"></span><strong>${escapeHtml(option.name)}</strong></button>`;
+    return `<button type="button" class="setup-background-choice ${selected === id ? "is-selected" : ""}" data-action="setup-background" data-background-id="${id}" aria-pressed="${selected === id}" style="--setup-wallpaper:url('${option.image}')"><span aria-hidden="true"></span><strong>${escapeHtml(option.name)}</strong></button>`;
   }).join("");
 }
 
@@ -99,7 +99,7 @@ function setupBody(step) {
     `<div class="setup-question"><span class="eyebrow">PARA Account</span><h1>How would you like to enter PARA?</h1><p class="lede">You can use PARA offline without connecting an account.</p><div class="setup-account-actions"><button class="action-button action-button--ghost" disabled>Log In</button><button class="action-button action-button--ghost" disabled>Create Account</button><button class="action-button" data-action="setup-account-offline" data-autofocus="true">Continue Offline</button></div><label class="setup-profile-name"><span>Profile name</span><input type="text" maxlength="32" value="${escapeHtml(choices.profileName)}" data-setup-setting="profileName" autocomplete="off" /></label></div>`,
     `<div class="setup-question"><span class="eyebrow">Gaming Accounts</span><h1>Connect your gaming accounts?</h1><p class="lede">This step is optional. Only supported libraries and services will be available through PARA.</p><div class="setup-provider-list">${accountProviderRows(GAMING_PROVIDERS, "gamingAccounts", choices.gamingAccounts)}</div></div>`,
     `<div class="setup-question"><span class="eyebrow">Other Accounts</span><h1>Connect another service?</h1><p class="lede">You can skip this and continue setting up PARA.</p><div class="setup-provider-list">${accountProviderRows(OTHER_PROVIDERS, "otherAccounts", choices.otherAccounts)}</div></div>`,
-    `<div class="setup-question"><span class="eyebrow">Privacy</span><h1>Choose what PARA can use</h1><p class="lede">These optional services remain off unless you choose to enable them later.</p><div class="setup-fixed-list">${privacyRow("Diagnostics", "Share reliability and performance information")}${privacyRow("Personalization", "Use activity to tailor suggestions")}${privacyRow("Location services", "Allow apps to request your location")}</div></div>`,
+    `<div class="setup-question"><span class="eyebrow">Privacy</span><h1>Choose what PARA can use</h1><p class="lede">These optional services remain off unless you choose to enable them.</p><div class="setup-fixed-list">${privacyRow("diagnostics", "Diagnostics", "Share reliability and performance information", Boolean(choices.privacy?.diagnostics))}${privacyRow("personalization", "Personalization", "Use activity to tailor suggestions", Boolean(choices.privacy?.personalization))}${privacyRow("location", "Location services", "Allow apps to request your location", Boolean(choices.privacy?.location))}</div></div>`,
     `<div class="setup-question"><span class="eyebrow">Accessibility</span><h1>What would make PARA more comfortable?</h1><p class="lede">These display choices take effect immediately.</p><div class="choice-stack">${toggleRow({ title: "Larger text", meta: "Increase text throughout PARA", icon: "Aa", action: "toggle-large", value: state.largeText, autofocus: true })}${toggleRow({ title: "Reduce motion", meta: "Use calmer transitions", icon: "≈", action: "toggle-reduced", value: state.reducedMotion })}${toggleRow({ title: "High contrast", meta: "Strengthen text and edges", icon: "◐", action: "toggle-contrast", value: state.highContrast })}</div><div class="setup-system-access"><strong>Screen reader</strong><span>PARA follows your system accessibility settings.</span></div></div>`,
     `<div class="setup-question"><span class="eyebrow">Audio</span><h1>Can you hear PARA clearly?</h1><p class="lede">PARA will use the current system audio output.</p><div class="setup-audio-state" data-setup-audio><div class="library-loading"><span></span><strong>Checking audio…</strong></div></div><button class="action-button" data-action="setup-audio-test" data-autofocus="true">Play Test Sound</button></div>`,
     `<div class="setup-question"><span class="eyebrow">Power & Sleep</span><h1>When should PARA sleep?</h1><p class="lede">Inactivity sleep protects the display and lowers power use.</p><div class="setup-choice-grid">${[[15, "After 15 minutes"], [30, "After 30 minutes"], [60, "After 1 hour"], [0, "Never automatically"]].map(([value, title], index) => choiceButton({ title, meta: value ? "Wake to continue where you left off" : "Use Sleep from the Power menu", action: "setup-sleep-timer", value: String(value), selected: Number(choices.sleepMinutes) === value, autofocus: index === 0, icon: "◒" })).join("")}</div></div>`,
@@ -178,7 +178,11 @@ export async function activateSetupNetwork() {
       container.innerHTML = `<div class="setup-network-state"><span>⌁</span><div><strong>No connection found</strong><small>You can connect later in System.</small></div></div>`;
       return;
     }
-    container.innerHTML = payload.interfaces.map((item) => `<div class="setup-network-state"><span>${item.kind === "wifi" ? "⌁" : "↔"}</span><div><strong>${item.kind === "wifi" ? "Wi-Fi" : "Ethernet"}</strong><small>${escapeHtml(item.name)}</small></div><b>${item.connected ? "Connected" : "Available"}</b></div>`).join("");
+    container.innerHTML = payload.interfaces.map((item) => {
+      const label = item.kind === "wifi" ? "Wi-Fi" : item.kind === "web" ? "Internet" : "Ethernet";
+      const icon = item.kind === "wifi" ? "⌁" : "↔";
+      return `<div class="setup-network-state"><span>${icon}</span><div><strong>${label}</strong><small>${escapeHtml(item.name || (item.kind === "web" ? "Browser connection" : label))}</small></div><b>${item.connected ? "Connected" : "Available"}</b></div>`;
+    }).join("");
   } catch {
     container.innerHTML = `<div class="setup-network-state"><span>⌁</span><div><strong>Set up later</strong><small>Network settings remain available in System.</small></div></div>`;
   }
@@ -225,6 +229,15 @@ export async function activateSetupStorage() {
   if (!container) return;
   try {
     const payload = await paraApi.storage();
+    if (payload.web_edition || payload.primary?.capacity_known === false) {
+      let detail = "Storage is managed by your browser";
+      try {
+        const estimate = await navigator.storage?.estimate?.();
+        if (estimate?.quota) detail = `${formatBytes(Math.max(0, Number(estimate.quota) - Number(estimate.usage || 0)))} browser storage available`;
+      } catch { /* browser estimate is optional */ }
+      container.innerHTML = `<div class="setup-storage-row"><span aria-hidden="true">▰</span><div><strong>PARA Web Storage</strong><small>${escapeHtml(detail)}</small></div></div>`;
+      return;
+    }
     const drives = [payload.primary, ...(payload.mounts || [])].filter(Boolean);
     container.innerHTML = drives.map((drive, index) => `<div class="setup-storage-row"><span aria-hidden="true">${drive.optical ? "◉" : drive.external ? "▯" : "▰"}</span><div><strong>${escapeHtml(drive.name || (index === 0 ? "Internal Storage" : "Storage"))}</strong><small>${formatBytes(Math.round(Number(drive.free_gb || 0) * 1_000_000_000))} free</small></div></div>`).join("");
   } catch {
