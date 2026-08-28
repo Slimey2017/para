@@ -717,7 +717,7 @@ function launchStoreGameDirect(storeId) {
   if (IS_SUSPENDED_GAME_SHELL) {
     return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
   }
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v18`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v19`;
   return transitionIntoGame(source, storeGameTitle(id));
 }
 
@@ -1396,6 +1396,24 @@ function showCrashScreen(error) {
   root.querySelector("pre").textContent = detail;
   focus.focusFirst();
 }
+
+window.addEventListener("message", (event) => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("para_suspended_shell") !== "1" || event.origin !== window.location.origin || event.source !== window.parent) return;
+  const data = event.data || {};
+  if (data.type !== "para-shell-power-command") return;
+  if (data.command === "sleep") {
+    beginSleep({ returnFocus: focus.current });
+    return;
+  }
+  if (data.command === "restart") {
+    beginPowerSequence("reboot", { returnFocus: focus.current });
+    return;
+  }
+  if (data.command === "shutdown") {
+    openTurnOffConfirmation(focus, focus.current);
+  }
+});
 
 window.addEventListener("error", (event) => showCrashScreen(event.error || event.message));
 window.addEventListener("unhandledrejection", (event) => showCrashScreen(event.reason));

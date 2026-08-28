@@ -473,7 +473,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeGameRuntime();
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
-    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v17`;
+    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v19`;
     setTimeout(() => { location.href = next; }, 430);
   }
 
@@ -481,9 +481,33 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     suspendGame(destination);
   }
 
+  function runShellPowerAction(command) {
+    closeShell?.();
+    suspendGame('/#/power');
+    const frame = suspendShellHost?.querySelector('iframe');
+    if (!frame) return;
+    const send = () => {
+      try {
+        frame.contentWindow?.postMessage({ type: 'para-shell-power-command', command }, location.origin);
+      } catch (_) {}
+    };
+    frame.addEventListener('load', () => setTimeout(send, 80), { once: true });
+  }
+
   addEventListener('message', (event) => {
     if (event.origin !== location.origin || event.source !== suspendShellHost?.querySelector('iframe')?.contentWindow) return;
     const data = event.data || {};
+    if (data.type === 'para-suspended-power-complete') {
+      if (data.action === 'reboot') {
+        closeGameRuntime();
+        try { sessionStorage.setItem('para.restart.sequence', '1'); } catch (_) {}
+        location.replace('/#/intro');
+      } else if (data.action === 'poweroff') {
+        closeGameRuntime();
+        gameClosing = true;
+      }
+      return;
+    }
     if (data.type !== 'para-suspended-game-command') return;
     if (data.command === 'resume') return resumeSuspendedGame();
     if (data.command === 'close') return closeSuspendedGame('/#/home');
@@ -1232,7 +1256,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     } else if (name === 'microphone') {
       context.innerHTML = `<div class="contextCopy"><span>Microphone</span><strong>Open microphone controls</strong><small>PARA does not invent microphone state when host data is unavailable.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
     } else if (name === 'power') {
-      context.innerHTML = `<div class="contextCopy"><span>Power</span><strong>Power options</strong><small>Sleep, restart, and shut down remain confirmation-protected.</small></div><div class="contextActions"><button data-context-action="power-menu">Open Power Menu</button></div>`;
+      context.innerHTML = `<div class="contextCopy"><span>Power</span><strong>Choose a power action</strong><small>PARA protects restart and shutdown from accidental activation.</small></div><div class="contextActions"><button data-context-action="power-sleep">Sleep</button><button data-context-action="power-restart">Restart PARA</button><button data-context-action="power-shutdown">Shut Down</button></div>`;
     }
     context.classList.add('show');
     if (focusContext && contextButtons().length) {
@@ -1394,7 +1418,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (contextAction === 'audio-settings') return leaveGame('/#/audio-settings');
     if (contextAction === 'controller-settings') return leaveGame('/#/controller');
     if (contextAction === 'account-settings') return leaveGame('/#/account');
-    if (contextAction === 'power-menu') return leaveGame('/#/power');
+    if (contextAction === 'power-sleep') return runShellPowerAction('sleep');
+    if (contextAction === 'power-restart') return runShellPowerAction('restart');
+    if (contextAction === 'power-shutdown') return runShellPowerAction('shutdown');
     if (name === 'fullscreen') {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();

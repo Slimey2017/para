@@ -343,6 +343,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('data-action="controller"', server)
         self.assertIn('maskedPadCache', server)
         self.assertIn("leaveGame('/#/home')", server)
+        for action in ['power-sleep', 'power-restart', 'power-shutdown']:
+            self.assertIn(f'data-context-action="{action}"', server)
+        self.assertNotIn('data-context-action="power-menu"', server)
+        self.assertIn('para-shell-power-command', server)
         self.assertNotIn('backdrop-filter:', server)
 
     def test_v17_games_have_real_suspend_resume_session(self):
@@ -363,7 +367,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('para_suspended_shell=1', server)
         self.assertIn("gameSuspended ? 'Suspended' : 'Running'", server)
         self.assertIn('if (!shellOpen && !gameSuspended) return pads;', server)
-        self.assertIn('para_build=v18', app)
+        self.assertIn('para_build=v19', app)
         self.assertIn('is_suspended_home_shell', server)
         self.assertIn("frame-ancestors 'self'", server)
 

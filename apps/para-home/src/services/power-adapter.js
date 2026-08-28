@@ -30,6 +30,14 @@ export async function completePowerAction(action) {
   const accepted = await requestPowerAction(action);
   if (accepted) return;
 
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("para_suspended_shell") === "1" && window.parent !== window) {
+      window.parent.postMessage({ type: "para-suspended-power-complete", action }, window.location.origin);
+      return;
+    }
+  } catch { /* fall back to normal browser behavior */ }
+
   if (action === "poweroff") {
     try { window.close(); } catch { /* the black screen remains active */ }
     return;
