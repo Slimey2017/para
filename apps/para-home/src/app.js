@@ -717,7 +717,7 @@ function launchStoreGameDirect(storeId) {
   if (IS_SUSPENDED_GAME_SHELL) {
     return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
   }
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v20`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v21`;
   return transitionIntoGame(source, storeGameTitle(id));
 }
 

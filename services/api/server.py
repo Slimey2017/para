@@ -255,6 +255,22 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   let gameSuspended = false;
   let gameClosing = false;
   let suspendShellHost = null;
+  let paraGameDocumentTitle = GAME_TITLE;
+
+  function rememberGameDocumentTitle() {
+    const current = String(document.title || '').trim();
+    if (current && current !== 'PARA Home') paraGameDocumentTitle = current;
+    else if (!paraGameDocumentTitle) paraGameDocumentTitle = GAME_TITLE;
+    return paraGameDocumentTitle;
+  }
+
+  function showParaHomeTabTitle() {
+    try { rememberGameDocumentTitle(); document.title = 'PARA Home'; } catch (_) {}
+  }
+
+  function restoreGameTabTitle() {
+    try { document.title = paraGameDocumentTitle || GAME_TITLE || 'PARA Game'; } catch (_) {}
+  }
   const suspendedMediaState = new Map();
   const suspendedAudioContextState = new Map();
   const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
@@ -398,10 +414,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   function suspendGame(destination = '/#/home') {
     if (gameSuspended) {
+      showParaHomeTabTitle();
       const frame = suspendShellHost?.querySelector('iframe');
       if (frame) frame.src = suspendedShellSource(destination);
       return;
     }
+    showParaHomeTabTitle();
     closeShell?.();
     try { recordGameActivity(); } catch (_) {}
     gameSuspended = true;
@@ -421,6 +439,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   function resumeSuspendedGame() {
     if (!gameSuspended) return;
+    restoreGameTabTitle();
     const node = createGamePageTransition('Resuming');
     node.classList.add('is-visible');
     nativeRequestAnimationFrame(() => nativeRequestAnimationFrame(() => {
@@ -456,6 +475,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (paraGameTransitionLeaving) return;
     paraGameTransitionLeaving = true;
     gameClosing = true;
+    showParaHomeTabTitle();
     closeGameRuntime();
     try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
     const node = createGamePageTransition('Closing Game');
@@ -470,10 +490,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (paraGameTransitionLeaving) return;
     paraGameTransitionLeaving = true;
     gameClosing = true;
+    try { document.title = 'PARA'; } catch (_) {}
     closeGameRuntime();
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
-    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v20`;
+    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v21`;
     setTimeout(() => { location.href = next; }, 430);
   }
 
@@ -514,8 +535,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (data.command === 'launch') return switchSuspendedGame(data.storeId);
   });
 
-  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', revealGameAfterLaunch, { once: true });
-  else revealGameAfterLaunch();
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', () => { rememberGameDocumentTitle(); revealGameAfterLaunch(); }, { once: true });
+  else { rememberGameDocumentTitle(); revealGameAfterLaunch(); }
 
   const map = (value) => {
     if (typeof value !== 'string') return value;

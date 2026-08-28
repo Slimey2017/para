@@ -370,7 +370,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('para_suspended_shell=1', server)
         self.assertIn("gameSuspended ? 'Suspended' : 'Running'", server)
         self.assertIn('if (!shellOpen && !gameSuspended) return pads;', server)
-        self.assertIn('para_build=v20', app)
+        self.assertIn('para_build=v21', app)
+        server = (ROOT / 'services' / 'api' / 'server.py').read_text(encoding='utf-8')
+        self.assertIn("document.title = 'PARA Home'", server)
+        self.assertIn('restoreGameTabTitle()', server)
+        self.assertIn('rememberGameDocumentTitle()', server)
         self.assertIn('is_suspended_home_shell', server)
         self.assertIn("frame-ancestors 'self'", server)
 
