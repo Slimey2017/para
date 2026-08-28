@@ -1600,10 +1600,22 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         is_store_game = self.path.startswith("/api/v1/store/content/")
+        # v18: the suspended-game Home shell is intentionally framed by a same-origin
+        # game runtime. Keep normal PARA Home protected from framing, but allow this
+        # narrowly-scoped shell route to render inside the game's suspend overlay.
+        parsed_path = urlparse(self.path)
+        suspended_shell_query = parse_qs(parsed_path.query)
+        is_suspended_home_shell = (
+            parsed_path.path == "/"
+            and suspended_shell_query.get("para_suspended_shell", [""])[0] == "1"
+        )
         if not self.path.startswith("/api/"):
             self.send_header("Cache-Control", "no-cache")
         if is_store_game:
             self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-downloads; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+        elif is_suspended_home_shell:
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'")
             self.send_header("X-Frame-Options", "SAMEORIGIN")
         else:
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")

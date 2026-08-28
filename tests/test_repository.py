@@ -363,7 +363,9 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('para_suspended_shell=1', server)
         self.assertIn("gameSuspended ? 'Suspended' : 'Running'", server)
         self.assertIn('if (!shellOpen && !gameSuspended) return pads;', server)
-        self.assertIn('para_build=v17', app)
+        self.assertIn('para_build=v18', app)
+        self.assertIn('is_suspended_home_shell', server)
+        self.assertIn("frame-ancestors 'self'", server)
 
 
 if __name__ == "__main__":
