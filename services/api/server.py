@@ -473,7 +473,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeGameRuntime();
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
-    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v19`;
+    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v20`;
     setTimeout(() => { location.href = next; }, 430);
   }
 
@@ -1059,15 +1059,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       .tile:hover strong,.tile:focus-visible strong,.tile.focused strong{opacity:1}
       .prompt{display:flex;align-items:center;justify-content:center;gap:6px;color:rgba(217,207,226,.48);font:650 10px/1 system-ui,sans-serif}
       .prompt b{min-width:21px;height:19px;padding:0 5px;display:grid;place-items:center;border:1px solid rgba(205,165,255,.36);border-radius:6px;color:rgba(255,255,255,.82);font-size:9px}
-      #recording{pointer-events:auto;position:fixed;top:16px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:9px;padding:9px 13px;border:1px solid rgba(255,105,121,.4);border-radius:999px;color:#fff;background:rgba(17,7,11,.86);box-shadow:0 12px 36px rgba(0,0,0,.35);;cursor:pointer;font:750 11px/1 system-ui,sans-serif}
-      #recording.show{display:flex}
-      #recording i{width:8px;height:8px;border-radius:50%;background:#ff5266;box-shadow:0 0 12px #ff5266}
       #toast{position:fixed;left:50%;bottom:138px;transform:translate(-50%,18px);padding:10px 14px;border:1px solid rgba(203,162,255,.28);border-radius:12px;color:#fff;background:rgba(8,6,12,.92);font:700 12px/1.3 system-ui,sans-serif;opacity:0;pointer-events:none;transition:.18s ease}
       #toast.show{opacity:1;transform:translate(-50%,0)}
       @media(max-width:820px){.dock{width:calc(100vw - 16px)}.strip{max-width:calc(100vw - 16px)}.tile{flex-basis:60px;min-width:60px}.context{width:calc(100vw - 24px);align-items:flex-start;flex-direction:column}.contextActions{justify-content:flex-start}}
     </style>
     <button id="systemButton" type="button" aria-label="Open PARA Control Center"></button>
-    <button id="recording" type="button" aria-label="Stop and save recording"><i></i><span>Recording · Stop & Save</span></button>
     <div id="overlay" aria-hidden="true">
       <div class="scrim" data-action="resume"></div>
       <div class="dock" role="dialog" aria-modal="true" aria-label="PARA Control Center">
@@ -1096,7 +1092,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const $ = (selector) => shadow.querySelector(selector);
   const overlay = $('#overlay');
   const context = $('#context');
-  const recordingPill = $('#recording');
   const systemButton = $('#systemButton');
   const toastBox = $('#toast');
   let toastTimer = 0;
@@ -1302,9 +1297,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         height: stream.__paraCaptureHeight || 0,
         captureMode: stream.__paraCaptureMode || ''
       };
-      recordingPill.classList.add('show');
-      const modeLabel = stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames';
-      toast(`${hasAudio ? 'Gameplay recording started' : 'Gameplay recording started · video only'} · ${modeLabel}`);
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
     } catch (error) {
       toast(error?.message || 'Recording could not start');
@@ -1315,7 +1307,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const active = manualRecording;
     if (!active || active.stopping) return;
     active.stopping = true;
-    recordingPill.classList.remove('show');
     try {
       if (active.recorder.state !== 'inactive') {
         const stopped = new Promise((resolve, reject) => {
@@ -1338,7 +1329,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         durationMs: Date.now() - active.startedAt,
         captureMode: active.captureMode || ''
       });
-      toast('Video verified and saved to PARA Media');
     } catch (error) {
       toast(error?.message || 'Recording could not be saved');
     } finally {
@@ -1447,7 +1437,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const target = event.target.closest?.('button,[data-action]');
     if (!target) return;
     if (target === systemButton) return toggleShell();
-    if (target === recordingPill) return stopRecording();
     const name = target.dataset.action || target.dataset.contextAction;
     if (target.dataset.contextAction) return action('', target);
     if (name) action(name, target);

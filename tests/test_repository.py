@@ -348,6 +348,9 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('data-context-action="power-menu"', server)
         self.assertIn('para-shell-power-command', server)
         self.assertNotIn('backdrop-filter:', server)
+        self.assertNotIn('id="recording"', server)
+        self.assertNotIn('Recording · Stop & Save', server)
+        self.assertNotIn("recordingPill.classList.add('show')", server)
 
     def test_v17_games_have_real_suspend_resume_session(self):
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
@@ -367,7 +370,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('para_suspended_shell=1', server)
         self.assertIn("gameSuspended ? 'Suspended' : 'Running'", server)
         self.assertIn('if (!shellOpen && !gameSuspended) return pads;', server)
-        self.assertIn('para_build=v19', app)
+        self.assertIn('para_build=v20', app)
         self.assertIn('is_suspended_home_shell', server)
         self.assertIn("frame-ancestors 'self'", server)
 
