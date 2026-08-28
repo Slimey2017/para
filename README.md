@@ -139,3 +139,7 @@ policy, file inventory, and next milestones.
 
 - **ParaBoard** is PARA's controller-first on-screen keyboard. Selecting a text field with a controller opens it automatically; it supports letters, symbols, shift, space, backspace, Done, and Cancel.
 - **ParaPoint** is PARA's browser pointer mode. In PARA Browser the right stick moves a system cursor, A clicks, X opens the page context action where supported, and L3 toggles pointer mode. Browser security prevents a web-hosted shell from injecting clicks into unrelated cross-origin frames; the native PARA browser runtime will remove that web-edition limitation.
+
+## Achievement runtime (v22)
+
+Published games can call `PARA.achievements.unlock(key)` or `PARA.achievements.setProgress(key, value)`. Definitions come from the Developer Portal/Supabase achievement catalog, and the hosted preview records progress in the active local PARA profile. See `PARA_ACHIEVEMENT_RUNTIME_V22.md`.

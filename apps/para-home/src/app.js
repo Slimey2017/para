@@ -640,6 +640,11 @@ document.addEventListener("para-markearned", (event) => {
   playNotificationSound();
   toast("Mark earned", event.detail?.title || "New milestone");
 });
+document.addEventListener("para-achievementearned", (event) => {
+  playNotificationSound();
+  toast("Achievement unlocked", event.detail?.name || "New achievement");
+  if (router.current() === "achievements") rerender();
+});
 const gamepad = new GamepadNavigation({
   move: (direction) => { if (!consumePowerInput()) { resetIdleSleep(); focus.move(direction); } },
   confirm: () => confirm(),

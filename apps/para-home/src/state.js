@@ -69,6 +69,7 @@ export function defaultProfileRuntime() {
     downloads: [],
     notifications: [],
     marks: [],
+    achievements: [],
     creator: { note: "", drawing: "" },
     saveData: [],
   };
@@ -100,6 +101,7 @@ function mergeProfileRuntime(value = {}) {
     downloads: [...(value.downloads || [])],
     notifications: [...(value.notifications || [])],
     marks: [...(value.marks || [])],
+    achievements: [...(value.achievements || [])],
     saveData: [...(value.saveData || [])],
     creator: { ...base.creator, ...(value.creator || {}) },
   };

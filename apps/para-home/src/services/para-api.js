@@ -14,6 +14,7 @@ export const paraApi = {
   applications: () => request("/api/v1/apps"),
   storeCatalog: () => request("/api/v1/store/catalog"),
   storeProduct: (id) => request(`/api/v1/store/product?id=${encodeURIComponent(id)}`),
+  storeAchievements: (id) => request(`/api/v1/store/achievements?id=${encodeURIComponent(id)}`),
   storeCheckoutQuote: (ids) => request("/api/v1/store/checkout/quote", { method: "POST", body: JSON.stringify({ ids }) }),
   launchApplication: (id) => request("/api/v1/apps/launch", { method: "POST", body: JSON.stringify({ id }) }),
   system: () => request("/api/v1/system"),

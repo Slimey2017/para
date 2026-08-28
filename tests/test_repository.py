@@ -230,6 +230,19 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('const shellOverlayActive = Boolean(document.querySelector("#para-overlay:not([hidden])"))', gamepad)
         self.assertIn('const shellOwnsInput = shellOverlayActive || !gameRuntimeActive', gamepad)
 
+    def test_v22_achievement_runtime_is_wired_to_game_and_profile(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        state = (ROOT / "apps/para-home/src/state.js").read_text(encoding="utf-8")
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        for marker_text in ["def store_achievements", "paraSdk.achievements", "unlock: (key)", "setProgress: (key, value)", "para-achievementearned"]:
+            self.assertIn(marker_text, server)
+        self.assertIn('achievements: []', state)
+        self.assertIn('achievements: [...(value.achievements || [])]', state)
+        self.assertIn('storeAchievements:', api)
+        self.assertIn('getProfileRuntime().achievements', media)
+        self.assertIn('PARA Score', media)
+
     def test_power_screen_has_real_routes_and_exact_shutdown_timeline(self):
         system_screen = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
         screen = system_screen.split("export function powerScreen()", 1)[1].split("export function healthScreen()", 1)[0]

@@ -1,5 +1,7 @@
 import { page } from "../ui/components.js";
 import { deleteCapture, listCaptures } from "../services/capture-service.js";
+import { getProfileRuntime } from "../state.js";
+import { escapeHtml } from "../services/para-api.js";
 
 const liveUrls = new Map();
 const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -121,11 +123,36 @@ export async function removeCapture(id) {
 }
 
 export function achievementsScreen() {
+  const achievements = [...getProfileRuntime().achievements].sort((a, b) => {
+    const aUnlocked = Number(a.unlockedAt || 0);
+    const bUnlocked = Number(b.unlockedAt || 0);
+    if (aUnlocked !== bUnlocked) return bUnlocked - aUnlocked;
+    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+  });
+  const unlocked = achievements.filter((item) => item.unlockedAt);
+  const score = unlocked.reduce((total, item) => total + Number(item.points || 0), 0);
+  const completion = achievements.length ? Math.round((unlocked.length / achievements.length) * 100) : 0;
+  const body = achievements.length
+    ? `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>${score}</strong><small>${unlocked.length} unlocked</small></div><div><span class="eyebrow">Completed</span><strong>${completion}%</strong><small>${unlocked.length} of ${achievements.length} tracked</small></div></section>
+       <section class="achievement-list">${achievements.map((item, index) => {
+         const unlockedAt = item.unlockedAt ? new Date(item.unlockedAt).toLocaleDateString() : '';
+         const target = Math.max(1, Number(item.target || 1));
+         const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
+         const percent = Math.round((progress / target) * 100);
+         const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
+         const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
+         return `<article class="achievement-card ${item.unlockedAt ? 'is-unlocked' : ''}" tabindex="0" ${index === 0 ? 'data-autofocus="true"' : ''}>
+           <div class="achievement-card__icon">${icon}</div>
+           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
+           <b>${Number(item.points || 0)} pts</b>
+         </article>`;
+       }).join('')}</section>`
+    : `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>0</strong><small>No unlocks yet</small></div><div><span class="eyebrow">Completed</span><strong>0%</strong><small>Across supported games</small></div></section><div class="library-empty achievements-empty"><span>◇</span><h2>No achievements yet</h2><p>Achievement lists appear here when a game reports progress through the PARA Achievement API.</p><button class="action-button" data-route="games" data-autofocus="true">Open Games</button></div>`;
   return page({
     title: "Achievements",
-    description: "Progress, unlocks, rarity, and completion history.",
+    description: "Progress, unlocks, points, and completion history.",
     eyebrow: "Games",
     className: "achievements-page",
-    body: `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>0</strong><small>No unlocks yet</small></div><div><span class="eyebrow">Completed</span><strong>0%</strong><small>Across supported games</small></div></section><div class="library-empty achievements-empty"><span>◇</span><h2>No achievements yet</h2><p>Achievement lists appear here when an installed game provides PARA achievement definitions.</p><button class="action-button" data-route="games" data-autofocus="true">Open Games</button></div>`,
+    body,
   });
 }

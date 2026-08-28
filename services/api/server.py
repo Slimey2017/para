@@ -99,6 +99,29 @@ def store_product(item_id: str) -> tuple[int, dict]:
 
 
 
+def store_achievements(item_id: str) -> tuple[int, dict]:
+    """Return published achievement definitions for a published ParaStore title."""
+    status, item = store_product(item_id)
+    if status != 200:
+        return status, item if isinstance(item, dict) else {"error": "product_unavailable"}
+    project_id = str(item.get("project_id") or "")
+    if not project_id:
+        return 409, {"error": "project_missing", "items": []}
+    quoted = urllib.parse.quote(project_id, safe="-")
+    status, payload = _supabase_get_json(
+        "/rest/v1/achievement_definitions"
+        "?select=id,project_id,achievement_key,name,description,points,kind,target_value,hidden,icon_path,status,sort_order,published_at"
+        f"&project_id=eq.{quoted}&status=in.(PUBLISHED,RETIRED)&order=sort_order.asc,created_at.asc"
+    )
+    if status >= 400:
+        return status, payload if isinstance(payload, dict) else {"error": "achievements_unavailable", "items": []}
+    rows = payload if isinstance(payload, list) else []
+    for row in rows:
+        icon_path = str(row.get("icon_path") or "")
+        row["icon_url"] = f"/api/v1/store/asset?path={urllib.parse.quote(icon_path, safe='')}" if icon_path else None
+    return 200, {"project_id": project_id, "store_id": item_id, "items": rows}
+
+
 def store_checkout_quote(ids: list[str]) -> tuple[int, dict]:
     """Build an authoritative cart quote from published server-side prices.
 
@@ -242,6 +265,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
             runtime_id = json.dumps(item_id)
             runtime_base_json = json.dumps(runtime_base)
             game_title_json = json.dumps(str(item.get("title") or "PARA Game"))
+            project_id_json = json.dumps(str(item.get("project_id") or ""))
             injection = (
                 f'<base href="{runtime_base}">\n'
                 + (
@@ -250,6 +274,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const BASE = __PARA_BASE__;
   const RUNTIME_ID = __PARA_RUNTIME_ID__;
   const GAME_TITLE = __PARA_GAME_TITLE__;
+  const PROJECT_ID = __PARA_PROJECT_ID__;
   const GAME_RETURN_TRANSITION_KEY = 'para.game.transition.return';
   let paraGameTransitionLeaving = false;
   let gameSuspended = false;
@@ -494,7 +519,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeGameRuntime();
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
-    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v21`;
+    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v22`;
     setTimeout(() => { location.href = next; }, 430);
   }
 
@@ -608,8 +633,101 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   function readProfileRuntime() {
     const state = readHomeState();
     const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
-    return { recent: [], running: [], installedDemos: [], downloads: [], notifications: [], marks: [], ...(state.profileRuntime?.[profile] || {}) };
+    return { recent: [], running: [], installedDemos: [], downloads: [], notifications: [], marks: [], achievements: [], ...(state.profileRuntime?.[profile] || {}) };
   }
+
+  const ACHIEVEMENT_CACHE_KEY = `para.achievement.definitions:${RUNTIME_ID}`;
+  let achievementDefinitionsPromise = null;
+
+  async function loadAchievementDefinitions(force = false) {
+    if (!force && achievementDefinitionsPromise) return achievementDefinitionsPromise;
+    achievementDefinitionsPromise = (async () => {
+      try {
+        const response = await fetch(`/api/v1/store/achievements?id=${encodeURIComponent(RUNTIME_ID)}`, { headers: { Accept: 'application/json' } });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error || `Achievement service returned ${response.status}`);
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        try { sessionStorage.setItem(ACHIEVEMENT_CACHE_KEY, JSON.stringify(items)); } catch (_) {}
+        return items;
+      } catch (error) {
+        try {
+          const cached = JSON.parse(sessionStorage.getItem(ACHIEVEMENT_CACHE_KEY) || '[]');
+          if (Array.isArray(cached) && cached.length) return cached;
+        } catch (_) {}
+        throw error;
+      }
+    })();
+    try { return await achievementDefinitionsPromise; }
+    catch (error) { achievementDefinitionsPromise = null; throw error; }
+  }
+
+  function saveLocalAchievement(definition, requestedProgress) {
+    const state = readHomeState();
+    const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
+    const profileRuntime = { ...(state.profileRuntime || {}) };
+    const runtime = {
+      recent: [], running: [], installedDemos: [], downloads: [], notifications: [], marks: [], achievements: [],
+      creator: { note: '', drawing: '' }, saveData: [],
+      ...(profileRuntime[profile] || {})
+    };
+    const achievementId = `achievement:${PROJECT_ID || RUNTIME_ID}:${definition.achievement_key}`;
+    const existing = (runtime.achievements || []).find((item) => item.id === achievementId) || {};
+    const target = Math.max(1, Number(definition.target_value || 1));
+    const previousProgress = Math.max(0, Number(existing.progress || 0));
+    const requested = definition.kind === 'BINARY' ? 1 : Math.max(0, Number(requestedProgress || 0));
+    const progress = Math.min(target, Math.max(previousProgress, requested));
+    const unlocked = progress >= target;
+    const newlyUnlocked = unlocked && !existing.unlockedAt;
+    const now = Date.now();
+    const record = {
+      ...existing,
+      id: achievementId,
+      achievementId: definition.id,
+      projectId: definition.project_id || PROJECT_ID,
+      storeId: RUNTIME_ID,
+      key: definition.achievement_key,
+      name: definition.name,
+      description: definition.description || '',
+      points: Number(definition.points || 0),
+      kind: definition.kind || 'BINARY',
+      target,
+      hidden: Boolean(definition.hidden),
+      iconUrl: definition.icon_url || '',
+      progress,
+      unlockedAt: existing.unlockedAt || (unlocked ? now : null),
+      updatedAt: now,
+      syncState: 'local'
+    };
+    runtime.achievements = [record, ...(runtime.achievements || []).filter((item) => item.id !== achievementId)];
+    if (newlyUnlocked) {
+      runtime.notifications = [{ id: `achievement-unlocked:${achievementId}:${now}`, title: `Achievement unlocked · ${definition.name}`, createdAt: now, route: 'achievements' }, ...(runtime.notifications || [])].slice(0, 20);
+    }
+    profileRuntime[profile] = runtime;
+    state.profileRuntime = profileRuntime;
+    localStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
+    if (newlyUnlocked) {
+      try { document.dispatchEvent(new CustomEvent('para-achievementearned', { detail: record })); } catch (_) {}
+    }
+    return { ...record, unlocked, newlyUnlocked };
+  }
+
+  async function setAchievementProgress(key, value) {
+    const achievementKey = String(key || '').trim();
+    if (!achievementKey) throw new Error('Achievement key is required.');
+    const definitions = await loadAchievementDefinitions();
+    const definition = definitions.find((item) => item.achievement_key === achievementKey && item.status === 'PUBLISHED');
+    if (!definition) throw new Error(`Achievement “${achievementKey}” is not published for this game.`);
+    return saveLocalAchievement(definition, value);
+  }
+
+  const paraSdk = window.PARA && typeof window.PARA === 'object' ? window.PARA : {};
+  paraSdk.achievements = {
+    unlock: (key) => setAchievementProgress(key, 1),
+    setProgress: (key, value) => setAchievementProgress(key, value),
+    definitions: () => loadAchievementDefinitions(),
+  };
+  window.PARA = paraSdk;
+  void loadAchievementDefinitions().catch(() => {});
 
   function recordGameActivity() {
     if (gameClosing) return;
@@ -1556,6 +1674,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
                     .replace('__PARA_BASE__', runtime_base_json)
                     .replace('__PARA_RUNTIME_ID__', runtime_id)
                     .replace('__PARA_GAME_TITLE__', game_title_json)
+                    .replace('__PARA_PROJECT_ID__', project_id_json)
                 )
             )
             # Rewrite the most common inline root navigations used by small
@@ -1617,6 +1736,8 @@ def resolve(path: str, query: dict[str, list[str]] | None = None) -> tuple[int, 
         return store_catalog()
     if path == "/api/v1/store/product":
         return store_product((query or {}).get("id", [""])[0])
+    if path == "/api/v1/store/achievements":
+        return store_achievements((query or {}).get("id", [""])[0])
     if path == "/api/v1/personalization":
         profile = (query or {}).get("profile", [""])[0]
         return system_layer.personalization(profile)

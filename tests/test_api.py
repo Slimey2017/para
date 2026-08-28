@@ -80,6 +80,22 @@ class ApiContractTests(unittest.TestCase):
                 self.assertTrue(result["accepted"])
                 startfile.assert_called_once_with("steam://rungameid/123")
 
+    def test_store_achievements_exposes_published_definitions(self):
+        definition = {
+            "id": "achievement-1",
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "achievement_key": "first_win",
+            "name": "First Victory",
+            "status": "PUBLISHED",
+            "icon_path": "developers/user/projects/11111111-1111-1111-1111-111111111111/achievements/icon.png",
+        }
+        with patch("server.store_product", return_value=(200, {"project_id": definition["project_id"]})), patch("server._supabase_get_json", return_value=(200, [definition])):
+            status, payload = resolve("/api/v1/store/achievements", {"id": ["catalog-1"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["project_id"], definition["project_id"])
+        self.assertEqual(payload["items"][0]["achievement_key"], "first_win")
+        self.assertIn("/api/v1/store/asset?path=", payload["items"][0]["icon_url"])
+
     def test_unknown_route_returns_not_found(self):
         status, payload = resolve("/api/v1/does-not-exist")
         self.assertEqual(status, 404)
