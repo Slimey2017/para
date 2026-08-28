@@ -648,17 +648,66 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         if (!response.ok) throw new Error(payload?.error || `Achievement service returned ${response.status}`);
         const items = Array.isArray(payload?.items) ? payload.items : [];
         try { sessionStorage.setItem(ACHIEVEMENT_CACHE_KEY, JSON.stringify(items)); } catch (_) {}
+        seedAchievementCatalog(items);
         return items;
       } catch (error) {
         try {
           const cached = JSON.parse(sessionStorage.getItem(ACHIEVEMENT_CACHE_KEY) || '[]');
-          if (Array.isArray(cached) && cached.length) return cached;
+          if (Array.isArray(cached) && cached.length) {
+            seedAchievementCatalog(cached);
+            return cached;
+          }
         } catch (_) {}
         throw error;
       }
     })();
     try { return await achievementDefinitionsPromise; }
     catch (error) { achievementDefinitionsPromise = null; throw error; }
+  }
+
+  function seedAchievementCatalog(definitions) {
+    if (!Array.isArray(definitions) || !definitions.length) return;
+    const published = definitions.filter((definition) => definition && definition.status === 'PUBLISHED');
+    if (!published.length) return;
+    const state = readHomeState();
+    const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
+    const profileRuntime = { ...(state.profileRuntime || {}) };
+    const runtime = {
+      recent: [], running: [], installedDemos: [], downloads: [], notifications: [], marks: [], achievements: [],
+      creator: { note: '', drawing: '' }, saveData: [],
+      ...(profileRuntime[profile] || {})
+    };
+    const current = Array.isArray(runtime.achievements) ? runtime.achievements : [];
+    let changed = false;
+    const next = [...current];
+    for (const definition of published) {
+      const achievementId = `achievement:${PROJECT_ID || RUNTIME_ID}:${definition.achievement_key}`;
+      if (next.some((item) => item.id === achievementId)) continue;
+      next.push({
+        id: achievementId,
+        achievementId: definition.id,
+        projectId: definition.project_id || PROJECT_ID,
+        storeId: RUNTIME_ID,
+        key: definition.achievement_key,
+        name: definition.name,
+        description: definition.description || '',
+        points: Number(definition.points || 0),
+        kind: definition.kind || 'BINARY',
+        target: Math.max(1, Number(definition.target_value || 1)),
+        hidden: Boolean(definition.hidden),
+        iconUrl: definition.icon_url || '',
+        progress: 0,
+        unlockedAt: null,
+        updatedAt: Date.now(),
+        syncState: 'local'
+      });
+      changed = true;
+    }
+    if (!changed) return;
+    runtime.achievements = next;
+    profileRuntime[profile] = runtime;
+    state.profileRuntime = profileRuntime;
+    try { localStorage.setItem(HOME_STATE_KEY, JSON.stringify(state)); } catch (_) {}
   }
 
   function saveLocalAchievement(definition, requestedProgress) {
@@ -706,7 +755,10 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     state.profileRuntime = profileRuntime;
     localStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
     if (newlyUnlocked) {
+      try { showAchievementToast(record); } catch (_) {}
       try { document.dispatchEvent(new CustomEvent('para-achievementearned', { detail: record })); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('para-achievementearned', { detail: record })); } catch (_) {}
+      try { window.parent?.postMessage?.({ type: 'para-achievementearned', detail: record }, location.origin); } catch (_) {}
     }
     return { ...record, unlocked, newlyUnlocked };
   }
@@ -1200,6 +1252,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       .prompt b{min-width:21px;height:19px;padding:0 5px;display:grid;place-items:center;border:1px solid rgba(205,165,255,.36);border-radius:6px;color:rgba(255,255,255,.82);font-size:9px}
       #toast{position:fixed;left:50%;bottom:138px;transform:translate(-50%,18px);padding:10px 14px;border:1px solid rgba(203,162,255,.28);border-radius:12px;color:#fff;background:rgba(8,6,12,.92);font:700 12px/1.3 system-ui,sans-serif;opacity:0;pointer-events:none;transition:.18s ease}
       #toast.show{opacity:1;transform:translate(-50%,0)}
+      #achievementToast{position:fixed;top:max(24px,3vh);right:max(24px,3vw);width:min(390px,calc(100vw - 32px));min-height:92px;padding:14px 16px;display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:13px;align-items:center;border:1px solid rgba(213,177,255,.5);border-radius:18px;color:#fff;background:linear-gradient(135deg,rgba(18,12,27,.97),rgba(8,6,13,.97));box-shadow:0 22px 70px rgba(0,0,0,.58),0 0 32px rgba(147,72,237,.18);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;opacity:0;transform:translate3d(24px,0,0) scale(.98);pointer-events:none;transition:opacity .2s ease,transform .22s ease}
+      #achievementToast.show{opacity:1;transform:translate3d(0,0,0) scale(1)}
+      .achievementTrophy{width:58px;height:58px;display:grid;place-items:center;border:1px solid rgba(218,187,255,.28);border-radius:15px;background:linear-gradient(145deg,rgba(138,69,225,.22),rgba(255,255,255,.035));font-size:29px;overflow:hidden}
+      .achievementTrophy img{width:100%;height:100%;object-fit:cover}
+      .achievementCopy{min-width:0}.achievementCopy span{display:block;color:#c994ff;font:850 9px/1.15 system-ui,sans-serif;letter-spacing:.15em;text-transform:uppercase}.achievementCopy strong{display:block;margin-top:6px;overflow:hidden;font:800 16px/1.15 system-ui,sans-serif;text-overflow:ellipsis;white-space:nowrap}.achievementCopy small{display:block;margin-top:5px;color:rgba(240,232,247,.62);font:600 11px/1.3 system-ui,sans-serif}.achievementPoints{align-self:start;margin-top:3px;color:#d9b9ff;font:850 11px/1 system-ui,sans-serif;white-space:nowrap}
       @media(max-width:820px){.dock{width:calc(100vw - 16px)}.strip{max-width:calc(100vw - 16px)}.tile{flex-basis:60px;min-width:60px}.context{width:calc(100vw - 24px);align-items:flex-start;flex-direction:column}.contextActions{justify-content:flex-start}}
     </style>
     <button id="systemButton" type="button" aria-label="Open PARA Control Center"></button>
@@ -1225,6 +1282,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       </div>
     </div>
     <div id="toast"></div>
+    <div id="achievementToast" role="status" aria-live="polite" aria-atomic="true">
+      <div class="achievementTrophy" id="achievementTrophy">🏆</div>
+      <div class="achievementCopy"><span>Achievement unlocked</span><strong id="achievementName">Achievement</strong><small id="achievementDescription">Added to your PARA profile</small></div>
+      <div class="achievementPoints" id="achievementPoints">+0</div>
+    </div>
   `;
   document.documentElement.appendChild(host);
 
@@ -1233,13 +1295,33 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const context = $('#context');
   const systemButton = $('#systemButton');
   const toastBox = $('#toast');
+  const achievementToast = $('#achievementToast');
+  const achievementTrophy = $('#achievementTrophy');
+  const achievementName = $('#achievementName');
+  const achievementDescription = $('#achievementDescription');
+  const achievementPoints = $('#achievementPoints');
   let toastTimer = 0;
+  let achievementToastTimer = 0;
 
   function toast(message) {
     clearTimeout(toastTimer);
     toastBox.textContent = message;
     toastBox.classList.add('show');
     toastTimer = setTimeout(() => toastBox.classList.remove('show'), 2600);
+  }
+
+  function showAchievementToast(record) {
+    if (!achievementToast) return;
+    clearTimeout(achievementToastTimer);
+    const iconUrl = String(record?.iconUrl || '');
+    achievementTrophy.innerHTML = iconUrl ? `<img src="${escapeMarkup(iconUrl)}" alt="">` : '🏆';
+    achievementName.textContent = String(record?.name || 'Achievement unlocked');
+    achievementDescription.textContent = String(record?.description || 'Added to your PARA profile');
+    achievementPoints.textContent = `+${Math.max(0, Number(record?.points || 0))} pts`;
+    achievementToast.classList.remove('show');
+    void achievementToast.offsetWidth;
+    achievementToast.classList.add('show');
+    achievementToastTimer = setTimeout(() => achievementToast.classList.remove('show'), 5200);
   }
 
   let contextFocusActive = false;

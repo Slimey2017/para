@@ -237,6 +237,8 @@ class RepositoryTests(unittest.TestCase):
         api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
         for marker_text in ["def store_achievements", "paraSdk.achievements", "unlock: (key)", "setProgress: (key, value)", "para-achievementearned"]:
             self.assertIn(marker_text, server)
+        for marker_text in ["seedAchievementCatalog", "achievementToast", "showAchievementToast(record)", "Achievement unlocked"]:
+            self.assertIn(marker_text, server)
         self.assertIn('achievements: []', state)
         self.assertIn('achievements: [...(value.achievements || [])]', state)
         self.assertIn('storeAchievements:', api)

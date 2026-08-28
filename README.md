@@ -170,3 +170,7 @@ exposing the Render filesystem.
 Control Center customization includes Notifications, and the Home and in-game
 Power context both expose Return Home, Sleep, Restart PARA, Shut Down, Sign Out,
 and Recovery.
+
+## Achievement tracking + trophy notifications (v24)
+
+PARA now seeds every published game achievement into the active local profile as a locked tracked record when the game runtime loads. Newly unlocked achievements show an in-game trophy notification and are persisted in the Notifications feed. See `PARA_ACHIEVEMENT_TRACKING_NOTIFICATIONS_V24.md`.
