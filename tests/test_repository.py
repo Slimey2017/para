@@ -342,8 +342,20 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("event.key?.toLowerCase() === 'm'", server)
         self.assertIn('data-action="controller"', server)
         self.assertIn('maskedPadCache', server)
-        self.assertIn("location.href = '/#/home'", server)
+        self.assertIn("leaveGame('/#/home')", server)
         self.assertNotIn('backdrop-filter:', server)
+
+    def test_v16_games_have_launch_and_return_transitions(self):
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn('function transitionIntoGame', app)
+        self.assertIn('GAME_RETURN_TRANSITION_KEY', app)
+        self.assertIn('para-game-transition', css)
+        self.assertIn('function revealGameAfterLaunch()', server)
+        self.assertIn('function leaveGame(destination', server)
+        self.assertIn("createGamePageTransition('Returning to PARA')", server)
+        self.assertIn('para_build=v16', app)
 
 
 if __name__ == "__main__":

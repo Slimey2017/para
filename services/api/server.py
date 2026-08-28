@@ -250,6 +250,60 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const BASE = __PARA_BASE__;
   const RUNTIME_ID = __PARA_RUNTIME_ID__;
   const GAME_TITLE = __PARA_GAME_TITLE__;
+  const GAME_RETURN_TRANSITION_KEY = 'para.game.transition.return';
+  let paraGameTransitionLeaving = false;
+
+  const transitionStyle = document.createElement('style');
+  transitionStyle.dataset.paraGameTransition = 'true';
+  transitionStyle.textContent = `
+    .para-game-page-transition{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#030207;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;pointer-events:none;transition:opacity .28s ease}
+    .para-game-page-transition::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(124,54,235,.2),transparent 28%),radial-gradient(circle at 50% 50%,rgba(96,28,188,.08),transparent 54%),#030207;transform:scale(1.035);transition:transform .62s cubic-bezier(.2,.86,.24,1)}
+    .para-game-page-transition>div{position:relative;display:grid;justify-items:center;gap:9px;text-align:center;opacity:0;transform:translateY(12px) scale(.985);transition:opacity .24s ease .08s,transform .42s cubic-bezier(.2,.86,.24,1) .04s}
+    .para-game-page-transition b{width:46px;height:46px;display:grid;place-items:center;border:2px solid rgba(184,133,255,.38);border-top-color:#b66fff;border-radius:50%;box-shadow:0 0 26px rgba(142,74,255,.18);animation:paraGameSpin .9s linear infinite}
+    .para-game-page-transition span{color:#aaa0b7;font-size:12px;font-weight:800;letter-spacing:.2em;text-transform:uppercase}
+    .para-game-page-transition strong{max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(20px,2.3vw,32px);letter-spacing:-.03em}
+    .para-game-page-transition.is-visible{opacity:1;pointer-events:all}.para-game-page-transition.is-visible::before{transform:scale(1)}.para-game-page-transition.is-visible>div{opacity:1;transform:none}
+    .para-game-page-transition.is-revealing{opacity:0;pointer-events:none}.para-game-page-transition.is-revealing>div{opacity:0;transform:translateY(-8px) scale(1.01)}
+    @keyframes paraGameSpin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){.para-game-page-transition,.para-game-page-transition::before,.para-game-page-transition>div{transition-duration:.001ms!important}.para-game-page-transition b{animation:none!important}}
+  `;
+  document.documentElement.appendChild(transitionStyle);
+
+  function createGamePageTransition(label, title = GAME_TITLE) {
+    const node = document.createElement('div');
+    node.className = 'para-game-page-transition';
+    node.setAttribute('role', 'status');
+    const content = document.createElement('div');
+    const spinner = document.createElement('b');
+    spinner.setAttribute('aria-hidden', 'true');
+    const caption = document.createElement('span');
+    caption.textContent = label;
+    const heading = document.createElement('strong');
+    heading.textContent = title || 'PARA Game';
+    content.append(spinner, caption, heading);
+    node.append(content);
+    (document.body || document.documentElement).append(node);
+    return node;
+  }
+
+  function revealGameAfterLaunch() {
+    const node = createGamePageTransition('Launching');
+    node.classList.add('is-visible');
+    requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add('is-revealing')));
+    setTimeout(() => node.remove(), 620);
+  }
+
+  function leaveGame(destination = '/#/home') {
+    if (paraGameTransitionLeaving) return;
+    paraGameTransitionLeaving = true;
+    try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
+    const node = createGamePageTransition('Returning to PARA');
+    requestAnimationFrame(() => node.classList.add('is-visible'));
+    setTimeout(() => { location.href = destination; }, 430);
+  }
+
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', revealGameAfterLaunch, { once: true });
+  else revealGameAfterLaunch();
 
   const map = (value) => {
     if (typeof value !== 'string') return value;
@@ -1139,16 +1193,16 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   async function action(name, button) {
     const contextAction = button?.dataset?.contextAction;
     if (name === 'resume') return closeShell();
-    if (name === 'home') return location.href = '/#/home';
+    if (name === 'home') return leaveGame('/#/home');
     if (['switcher','notifications','downloads','capture','music','network','sound','microphone','controller','profile','power'].includes(name)) return showContext(name, true);
-    if (contextAction === 'switcher-open') { sessionStorage.setItem('para-open-switcher', '1'); return location.href = '/#/home'; }
-    if (contextAction === 'notifications-open') return location.href = '/#/notifications';
-    if (contextAction === 'downloads-open') return location.href = '/#/downloads';
-    if (contextAction === 'network-settings') return location.href = '/#/network';
-    if (contextAction === 'audio-settings') return location.href = '/#/audio-settings';
-    if (contextAction === 'controller-settings') return location.href = '/#/controller';
-    if (contextAction === 'account-settings') return location.href = '/#/account';
-    if (contextAction === 'power-menu') return location.href = '/#/power';
+    if (contextAction === 'switcher-open') { sessionStorage.setItem('para-open-switcher', '1'); return leaveGame('/#/home'); }
+    if (contextAction === 'notifications-open') return leaveGame('/#/notifications');
+    if (contextAction === 'downloads-open') return leaveGame('/#/downloads');
+    if (contextAction === 'network-settings') return leaveGame('/#/network');
+    if (contextAction === 'audio-settings') return leaveGame('/#/audio-settings');
+    if (contextAction === 'controller-settings') return leaveGame('/#/controller');
+    if (contextAction === 'account-settings') return leaveGame('/#/account');
+    if (contextAction === 'power-menu') return leaveGame('/#/power');
     if (name === 'fullscreen') {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
@@ -1191,7 +1245,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
           keyboardParaTimer = 0;
           if (!keyboardParaDown) return;
           keyboardParaHeld = true;
-          location.href = '/#/home';
+          leaveGame('/#/home');
         }, 650);
       }
       return;
@@ -1238,7 +1292,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       }
       if (pressed[paraIndex] && !paraHeld && now - paraPressedAt >= 650) {
         paraHeld = true;
-        location.href = '/#/home';
+        leaveGame('/#/home');
       }
       if (!pressed[paraIndex] && gamepadPrevious[paraIndex] && !paraHeld) toggleShell();
 

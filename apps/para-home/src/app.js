@@ -127,6 +127,55 @@ let idleDimTimer = null;
 let overlayCloseTimer = null;
 let captureViewerUrl = "";
 let activeInputDevice = "keyboard";
+let gameTransitionInFlight = false;
+const GAME_RETURN_TRANSITION_KEY = "para.game.transition.return";
+
+function gameTransitionNode({ mode = "launch", title = "" } = {}) {
+  const node = document.createElement("div");
+  node.className = `para-game-transition para-game-transition--${mode}`;
+  node.setAttribute("role", "status");
+  node.setAttribute("aria-live", "polite");
+  const heading = mode === "return" ? "Returning to PARA" : "Launching";
+  const detail = title ? `<strong>${String(title).replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch])}</strong>` : "";
+  node.innerHTML = `<div class="para-game-transition__backdrop"></div><div class="para-game-transition__content"><img src="./assets/para-logo.png" alt=""><span>${heading}</span>${detail}<i aria-hidden="true"></i></div>`;
+  document.body.append(node);
+  return node;
+}
+
+function storeGameTitle(storeId) {
+  const id = String(storeId || "");
+  const runtime = runningExperiences().find((item) => String(item.storeId || "") === id || String(item.id || "") === `store:${id}`);
+  if (runtime?.title) return runtime.title;
+  const button = [...document.querySelectorAll("[data-store-id]")].find((item) => item.dataset.storeId === id);
+  const cardTitle = button?.closest("article,section")?.querySelector("h1,h2,h3,strong")?.textContent?.trim();
+  return cardTitle || "PARA Game";
+}
+
+function transitionIntoGame(destination, title = "PARA Game") {
+  if (gameTransitionInFlight) return false;
+  gameTransitionInFlight = true;
+  closeControlCenter(false);
+  suspendMenuMusic();
+  const node = gameTransitionNode({ mode: "launch", title });
+  requestAnimationFrame(() => node.classList.add("is-visible"));
+  const reduced = getState().reducedMotion;
+  window.setTimeout(() => {
+    node.classList.add("is-committed");
+    window.setTimeout(() => window.location.assign(destination), reduced ? 1 : 120);
+  }, reduced ? 20 : 500);
+  return true;
+}
+
+function revealHomeAfterGame() {
+  let payload = null;
+  try { payload = JSON.parse(sessionStorage.getItem(GAME_RETURN_TRANSITION_KEY) || "null"); } catch (_) {}
+  if (!payload) return;
+  sessionStorage.removeItem(GAME_RETURN_TRANSITION_KEY);
+  const node = gameTransitionNode({ mode: "return", title: payload.title || "" });
+  node.classList.add("is-visible", "is-committed");
+  requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add("is-revealing")));
+  window.setTimeout(() => node.remove(), getState().reducedMotion ? 30 : 620);
+}
 
 function toast(title, message = "") {
   const node = document.createElement("div");
@@ -309,6 +358,7 @@ function render(route) {
 }
 
 const router = new Router(render);
+revealHomeAfterGame();
 
 function navigate(route, options = {}, target = null) {
   if (consumePowerInput()) return;
@@ -650,9 +700,8 @@ function launchStoreGameDirect(storeId) {
   if (!id) return false;
   sessionStorage.setItem("para.store.launch", id);
   sessionStorage.setItem("para.store.lastLibraryRoute", "games");
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v15`;
-  window.location.assign(source);
-  return true;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v16`;
+  return transitionIntoGame(source, storeGameTitle(id));
 }
 
 async function handleAction(action, target) {
