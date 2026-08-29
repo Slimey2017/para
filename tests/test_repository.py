@@ -237,8 +237,9 @@ class RepositoryTests(unittest.TestCase):
         api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
         for marker_text in ["def store_achievements", "paraSdk.achievements", "unlock: (key)", "setProgress: (key, value)", "para-achievementearned"]:
             self.assertIn(marker_text, server)
-        for marker_text in ["seedAchievementCatalog", "achievementToast", "showAchievementToast(record)", "Achievement unlocked"]:
+        for marker_text in ["seedAchievementCatalog", "achievementToast", "showAchievementToast(record)", "Achievement unlocked", "para-achievement-request", "drainAchievementRequests", "PARA_ACHIEVEMENT_QUEUE_KEY"]:
             self.assertIn(marker_text, server)
+        self.assertLess(server.index("paraSdk.achievements ="), server.index("if (window.top !== window.self) return;"))
         self.assertIn('achievements: []', state)
         self.assertIn('achievements: [...(value.achievements || [])]', state)
         self.assertIn('storeAchievements:', api)
@@ -406,7 +407,7 @@ class RepositoryTests(unittest.TestCase):
         for label in ['Return Home', 'Sign Out', 'Recovery']:
             self.assertIn(label, control)
         self.assertIn('PARA Files', system)
-        self.assertIn('para_build=v23', server)
+        self.assertIn('para_build=v25', server)
 
     def test_v17_games_have_real_suspend_resume_session(self):
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
@@ -426,7 +427,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('para_suspended_shell=1', server)
         self.assertIn("gameSuspended ? 'Suspended' : 'Running'", server)
         self.assertIn('if (!shellOpen && !gameSuspended) return pads;', server)
-        self.assertIn('para_build=v23', app)
+        self.assertIn('para_build=v25', app)
         server = (ROOT / 'services' / 'api' / 'server.py').read_text(encoding='utf-8')
         self.assertIn("document.title = 'PARA Home'", server)
         self.assertIn('restoreGameTabTitle()', server)

@@ -174,3 +174,7 @@ and Recovery.
 ## Achievement tracking + trophy notifications (v24)
 
 PARA now seeds every published game achievement into the active local profile as a locked tracked record when the game runtime loads. Newly unlocked achievements show an in-game trophy notification and are persisted in the Notifications feed. See `PARA_ACHIEVEMENT_TRACKING_NOTIFICATIONS_V24.md`.
+
+### v25 achievement bridge hardening
+
+Achievement tracking now initializes independently of the top-level Control Center shell, queues early/failed achievement requests, accepts the `para-achievement-request` bridge event, synchronizes framed-game unlocks back into PARA Home, and exposes `PARA.achievements.status()` for diagnostics. See `PARA_ACHIEVEMENT_BRIDGE_V25.md`.

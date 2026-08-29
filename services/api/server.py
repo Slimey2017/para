@@ -519,7 +519,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeGameRuntime();
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
-    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v23`;
+    const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
     setTimeout(() => { location.href = next; }, 430);
   }
 
@@ -596,8 +596,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }, true);
 
   try { parent.postMessage({ type: 'para-game-runtime-ready', id: RUNTIME_ID }, location.origin); } catch (_) {}
-
-  if (window.top !== window.self) return;
 
   const PARA_CAPTURE_HANDLE = `para-self-capture:${location.origin}`;
   const DB_NAME = 'para-media-gallery';
@@ -772,14 +770,53 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return saveLocalAchievement(definition, value);
   }
 
+  const PARA_ACHIEVEMENT_QUEUE_KEY = '__PARA_ACHIEVEMENT_QUEUE__';
+
+  async function processAchievementRequest(request) {
+    if (!request || typeof request !== 'object') return null;
+    const key = String(request.key || '').trim();
+    if (!key) return null;
+    const mode = request.mode === 'progress' ? 'progress' : 'unlock';
+    const value = mode === 'progress' ? Number(request.value || 0) : 1;
+    return setAchievementProgress(key, value);
+  }
+
+  function queueAchievementRequest(request) {
+    const queue = Array.isArray(window[PARA_ACHIEVEMENT_QUEUE_KEY]) ? window[PARA_ACHIEVEMENT_QUEUE_KEY] : [];
+    queue.push(request);
+    window[PARA_ACHIEVEMENT_QUEUE_KEY] = queue.slice(-100);
+  }
+
+  async function drainAchievementRequests() {
+    const queue = Array.isArray(window[PARA_ACHIEVEMENT_QUEUE_KEY]) ? [...window[PARA_ACHIEVEMENT_QUEUE_KEY]] : [];
+    window[PARA_ACHIEVEMENT_QUEUE_KEY] = [];
+    for (const request of queue) {
+      try { await processAchievementRequest(request); }
+      catch (_) { queueAchievementRequest(request); }
+    }
+  }
+
   const paraSdk = window.PARA && typeof window.PARA === 'object' ? window.PARA : {};
   paraSdk.achievements = {
     unlock: (key) => setAchievementProgress(key, 1),
     setProgress: (key, value) => setAchievementProgress(key, value),
     definitions: () => loadAchievementDefinitions(),
+    status: () => ({ storeId: RUNTIME_ID, projectId: PROJECT_ID, queued: Array.isArray(window[PARA_ACHIEVEMENT_QUEUE_KEY]) ? window[PARA_ACHIEVEMENT_QUEUE_KEY].length : 0 }),
   };
   window.PARA = paraSdk;
-  void loadAchievementDefinitions().catch(() => {});
+
+  window.addEventListener('para-achievement-request', (event) => {
+    const detail = event?.detail || {};
+    void processAchievementRequest(detail).catch(() => queueAchievementRequest(detail));
+  });
+
+  void loadAchievementDefinitions()
+    .then(() => drainAchievementRequests())
+    .catch(() => {});
+
+  // Achievement tracking must exist even when the game document is rendered in
+  // a same-origin frame. Only the heavyweight console/capture shell is top-level.
+  if (window.top !== window.self) return;
 
   function recordGameActivity() {
     if (gameClosing) return;

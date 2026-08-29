@@ -139,6 +139,12 @@ export function getState() {
   return { ...state, profiles: [...state.profiles], profilePreferences: { ...state.profilePreferences }, profileRuntime: { ...state.profileRuntime } };
 }
 
+export function syncStateFromStorage() {
+  state = load();
+  applyPreferences();
+  return getState();
+}
+
 export function getProfilePreferences(profile = state.activeProfile || "P1") {
   return mergeProfilePreferences(state.profilePreferences[profile]);
 }

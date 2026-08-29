@@ -450,7 +450,7 @@ export function activateStoreGame() {
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>No game selected</h2><button class="action-button" data-route="games">Back to Games</button></div>`;
     return () => {};
   }
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v23`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
   host.innerHTML = `<div class="store-game-boot"><span class="store-game-boot__spinner"></span><strong>Starting game…</strong><small>Opening direct PARA Game Mode…</small></div>`;
   window.location.replace(source);
   return () => {};

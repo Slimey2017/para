@@ -4,7 +4,7 @@ import { GamepadNavigation, keyboardController } from "./gamepad.js";
 import {
   addProfile, applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getState, postStartupDestination,
   replaceProfilePreferences, resetState, setProfilePreferences, setSetupAccountChoice,
-  setSetupChoice, setState, startupDestination,
+  setSetupChoice, setState, startupDestination, syncStateFromStorage,
 } from "./state.js";
 import {
   SETUP_CHAPTERS, startupScreen, introScreen, setupScreen, activateIntro,
@@ -645,6 +645,13 @@ document.addEventListener("para-achievementearned", (event) => {
   toast("Achievement unlocked", event.detail?.name || "New achievement");
   if (router.current() === "achievements") rerender();
 });
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin || event.data?.type !== "para-achievementearned") return;
+  syncStateFromStorage();
+  playNotificationSound();
+  toast("🏆 Achievement unlocked", event.data?.detail?.name || "New achievement");
+  if (router.current() === "achievements") rerender();
+});
 const gamepad = new GamepadNavigation({
   move: (direction) => { if (!consumePowerInput()) { resetIdleSleep(); focus.move(direction); } },
   confirm: () => confirm(),
@@ -722,7 +729,7 @@ function launchStoreGameDirect(storeId) {
   if (IS_SUSPENDED_GAME_SHELL) {
     return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
   }
-  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v23`;
+  const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
   return transitionIntoGame(source, storeGameTitle(id));
 }
 
