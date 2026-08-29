@@ -36,6 +36,7 @@ const renderers = {
   files: files.filesScreen,
   downloads: files.downloadsScreen,
   controller: system.controllerScreen,
+  "para-input": system.paraInputScreen,
   storage: system.storageScreen,
   settings: system.settingsScreen,
   display: system.displayScreen,

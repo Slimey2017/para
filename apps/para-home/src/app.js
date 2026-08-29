@@ -19,7 +19,7 @@ import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadMana
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
 import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
-  controllerScreen, updateControllerScreen, activateControllerScreen, storageScreen, activateStorage,
+  controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
   accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen, audioSettingsScreen,
   notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen, activateSavedData,
@@ -49,6 +49,7 @@ import {
   activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall, pauseDownload, resumeDownload, cancelDownload, markNotificationRead, markAllNotificationsRead,
 } from "./services/experience-runtime.js";
 import { toggleMicrophone } from "./services/microphone.js";
+import { cycleParaInputBinding, getParaInputSettings, patchParaInputSettings, resetParaInputSettings } from "./services/para-input.js";
 import {
   playConfirmSound, playNavigationSound, playNotificationSound, playSystemCue,
   setInterfaceSoundVolume, toggleInterfaceSounds,
@@ -97,6 +98,7 @@ const renderers = {
   files: filesScreen,
   downloads: downloadManagerScreen,
   controller: controllerScreen,
+  "para-input": paraInputScreen,
   storage: storageScreen,
   "saved-data": savedDataScreen,
   settings: settingsScreen,
@@ -360,6 +362,8 @@ function render(route) {
   } else if (route === "controller") {
     updateControllerScreen(controllerStatus);
     cleanupScreen = activateControllerScreen();
+  } else if (route === "para-input") {
+    cleanupScreen = activateParaInputScreen();
   } else if (route === "para-lab") {
     cleanupScreen = activateParaLab();
   } else if (route === "background") {
@@ -861,6 +865,35 @@ async function handleAction(action, target) {
       router.go("home", { replace: true });
       break;
     case "check-controller-firmware": toast("PulseWave firmware", controllerStatus.type === "para" ? "Controller is ready for firmware service integration." : "Firmware updates are available only for PulseWave hardware."); break;
+    case "toggle-para-input": {
+      const input = getParaInputSettings();
+      patchParaInputSettings({ enabled: !input.enabled });
+      toast("PARA Input", input.enabled ? "Off" : "On");
+      rerender();
+      break;
+    }
+    case "toggle-para-input-auto": {
+      const input = getParaInputSettings();
+      patchParaInputSettings({ automaticWebGames: !input.automaticWebGames });
+      toast("Automatic mapping", input.automaticWebGames ? "Off" : "On for PARA web games");
+      rerender();
+      break;
+    }
+    case "toggle-para-input-invert": {
+      const input = getParaInputSettings();
+      patchParaInputSettings({ invertY: !input.invertY });
+      rerender();
+      break;
+    }
+    case "cycle-para-input-binding":
+      cycleParaInputBinding(target.dataset.inputControl, 1);
+      rerender();
+      break;
+    case "reset-para-input":
+      resetParaInputSettings();
+      toast("PARA Input", "Default WASD + mouse profile restored");
+      rerender();
+      break;
     case "repair-storage": toast("Repair Storage", "Storage check queued. Native repair service connects in the Linux build."); break;
     case "network-recovery": toast("Network Recovery", "PARA Network recovery check started."); break;
     case "rollback-update": toast("Roll Back Update", "Rollback requires a previous verified system image."); break;
@@ -1350,6 +1383,10 @@ document.addEventListener("change", async (event) => {
   if (event.target.matches("[data-menu-music-volume]")) {
     setMenuMusicVolume(event.target.value);
     schedulePreferenceSave();
+  }
+  if (event.target.matches("[data-para-input-speed]")) {
+    patchParaInputSettings({ pointerSpeed: Number(event.target.value) });
+    return;
   }
   if (event.target.matches("[data-interface-volume]")) {
     setInterfaceSoundVolume(event.target.value);

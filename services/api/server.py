@@ -924,6 +924,208 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
   installGamepadMask();
 
+  // ===================== PARA INPUT =====================
+  // PARA Input is a compatibility layer for web games that only understand
+  // keyboard + mouse. It reads the physical controller without stealing the
+  // PARA system button and emits synthetic game-facing keyboard/mouse events.
+  const PARA_INPUT_STORAGE_KEY = 'para.input.v1';
+  const PARA_INPUT_DEFAULTS = {
+    enabled: true,
+    automaticWebGames: false,
+    deadzone: 0.28,
+    pointerSpeed: 18,
+    invertY: false,
+    bindings: {
+      left_up: 'KeyW', left_down: 'KeyS', left_left: 'KeyA', left_right: 'KeyD',
+      button_0: 'Space', button_1: 'Escape', button_2: 'KeyE', button_3: 'KeyR',
+      button_4: 'KeyQ', button_5: 'KeyF', button_6: 'Mouse2', button_7: 'Mouse0',
+      button_10: 'ShiftLeft', button_11: 'ControlLeft',
+      button_12: 'ArrowUp', button_13: 'ArrowDown', button_14: 'ArrowLeft', button_15: 'ArrowRight'
+    },
+    games: {}
+  };
+  const PARA_INPUT_KEYS = {
+    KeyW: ['w','KeyW'], KeyA: ['a','KeyA'], KeyS: ['s','KeyS'], KeyD: ['d','KeyD'],
+    Space: [' ','Space'], Escape: ['Escape','Escape'], KeyE: ['e','KeyE'], KeyF: ['f','KeyF'],
+    KeyQ: ['q','KeyQ'], KeyR: ['r','KeyR'], ShiftLeft: ['Shift','ShiftLeft'], ControlLeft: ['Control','ControlLeft'],
+    ArrowUp: ['ArrowUp','ArrowUp'], ArrowDown: ['ArrowDown','ArrowDown'], ArrowLeft: ['ArrowLeft','ArrowLeft'], ArrowRight: ['ArrowRight','ArrowRight']
+  };
+  let paraInputGameUsesGamepad = false;
+  let paraInputPreviousOutputs = new Set();
+  let paraInputPointerX = Math.max(0, innerWidth / 2);
+  let paraInputPointerY = Math.max(0, innerHeight / 2);
+  let paraInputMouseButtons = 0;
+  let paraInputLastMoveAt = 0;
+
+  // The runtime already keeps a private nativeGetGamepads reference for PARA's
+  // system button. Wrap the game-visible API so automatic mode can stand down
+  // when a title actually asks for native controller data.
+  const paraInputGameVisibleGetGamepads = navigator.getGamepads?.bind(navigator);
+  if (paraInputGameVisibleGetGamepads) {
+    try {
+      Object.defineProperty(navigator, 'getGamepads', {
+        configurable: true,
+        value: () => {
+          paraInputGameUsesGamepad = true;
+          return paraInputGameVisibleGetGamepads();
+        }
+      });
+    } catch (_) {}
+  }
+
+  function paraInputSettings() {
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem(PARA_INPUT_STORAGE_KEY) || '{}') || {}; } catch (_) {}
+    const merged = {
+      ...PARA_INPUT_DEFAULTS,
+      ...stored,
+      bindings: { ...PARA_INPUT_DEFAULTS.bindings, ...(stored.bindings || {}) },
+      games: stored.games && typeof stored.games === 'object' ? stored.games : {}
+    };
+    const gameOverride = merged.games?.[RUNTIME_ID];
+    const requested = typeof gameOverride?.enabled === 'boolean' ? gameOverride.enabled : Boolean(merged.automaticWebGames);
+    return {
+      ...merged,
+      requested,
+      deadzone: Math.max(.12, Math.min(.65, Number(merged.deadzone) || .28)),
+      pointerSpeed: Math.max(4, Math.min(42, Number(merged.pointerSpeed) || 18))
+    };
+  }
+
+  function paraInputActive(settings = paraInputSettings()) {
+    return Boolean(settings.enabled && settings.requested && !paraInputGameUsesGamepad && !shellOpen && !gameSuspended && !gameClosing);
+  }
+
+  function paraInputEventTarget(x = paraInputPointerX, y = paraInputPointerY) {
+    return document.elementFromPoint?.(x, y) || document.activeElement || document.body || document.documentElement;
+  }
+
+  function paraInputDispatchKey(code, down) {
+    const meta = PARA_INPUT_KEYS[code];
+    if (!meta) return;
+    const target = document.activeElement || document.body || document.documentElement;
+    try {
+      target?.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {
+        key: meta[0], code: meta[1], bubbles: true, cancelable: true, composed: true
+      }));
+    } catch (_) {}
+  }
+
+  function paraInputDispatchMouseButton(output, down) {
+    const button = output === 'Mouse2' ? 2 : 0;
+    const bit = button === 2 ? 2 : 1;
+    paraInputMouseButtons = down ? (paraInputMouseButtons | bit) : (paraInputMouseButtons & ~bit);
+    const target = paraInputEventTarget();
+    try {
+      target?.dispatchEvent(new MouseEvent(down ? 'mousedown' : 'mouseup', {
+        button, buttons: paraInputMouseButtons, clientX: paraInputPointerX, clientY: paraInputPointerY,
+        bubbles: true, cancelable: true, composed: true, view: window
+      }));
+      if (!down && button === 0) target?.dispatchEvent(new MouseEvent('click', {
+        button: 0, buttons: 0, clientX: paraInputPointerX, clientY: paraInputPointerY,
+        bubbles: true, cancelable: true, composed: true, view: window
+      }));
+    } catch (_) {}
+  }
+
+  function paraInputDispatchOutput(output, down) {
+    if (!output || output === 'none') return;
+    if (output === 'Mouse0' || output === 'Mouse2') paraInputDispatchMouseButton(output, down);
+    else paraInputDispatchKey(output, down);
+  }
+
+  function paraInputReleaseAll() {
+    for (const output of paraInputPreviousOutputs) paraInputDispatchOutput(output, false);
+    paraInputPreviousOutputs.clear();
+    paraInputMouseButtons = 0;
+  }
+
+  function paraInputMovePointer(pad, settings, now) {
+    const x = Number(pad.axes?.[2] || 0);
+    const rawY = Number(pad.axes?.[3] || 0);
+    const y = settings.invertY ? -rawY : rawY;
+    const dx = Math.abs(x) >= settings.deadzone ? x * settings.pointerSpeed : 0;
+    const dy = Math.abs(y) >= settings.deadzone ? y * settings.pointerSpeed : 0;
+    if (!dx && !dy) return;
+    const previousX = paraInputPointerX;
+    const previousY = paraInputPointerY;
+    paraInputPointerX = Math.max(0, Math.min(innerWidth - 1, paraInputPointerX + dx));
+    paraInputPointerY = Math.max(0, Math.min(innerHeight - 1, paraInputPointerY + dy));
+    if (now - paraInputLastMoveAt < 8) return;
+    paraInputLastMoveAt = now;
+    const target = paraInputEventTarget();
+    try {
+      target?.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: paraInputPointerX, clientY: paraInputPointerY,
+        movementX: paraInputPointerX - previousX, movementY: paraInputPointerY - previousY,
+        buttons: paraInputMouseButtons, bubbles: true, cancelable: true, composed: true, view: window
+      }));
+    } catch (_) {}
+  }
+
+  function paraInputCollectOutputs(pad, settings) {
+    const outputs = new Set();
+    const bind = (control) => {
+      const output = settings.bindings?.[control];
+      if (output && output !== 'none') outputs.add(output);
+    };
+    const x = Number(pad.axes?.[0] || 0);
+    const y = Number(pad.axes?.[1] || 0);
+    if (x <= -settings.deadzone) bind('left_left');
+    if (x >= settings.deadzone) bind('left_right');
+    if (y <= -settings.deadzone) bind('left_up');
+    if (y >= settings.deadzone) bind('left_down');
+    for (const index of [0,1,2,3,4,5,6,7,10,11,12,13,14,15]) {
+      const button = pad.buttons?.[index];
+      if (button && (button.pressed || Number(button.value || 0) >= .45)) bind(`button_${index}`);
+    }
+    return outputs;
+  }
+
+  function paraInputTick(now) {
+    const settings = paraInputSettings();
+    if (!paraInputActive(settings)) {
+      if (paraInputPreviousOutputs.size) paraInputReleaseAll();
+      window.requestAnimationFrame(paraInputTick);
+      return;
+    }
+    const pad = [...(nativeGetGamepads?.() || [])].find(Boolean);
+    if (!pad) {
+      if (paraInputPreviousOutputs.size) paraInputReleaseAll();
+      window.requestAnimationFrame(paraInputTick);
+      return;
+    }
+    paraInputMovePointer(pad, settings, now);
+    const next = paraInputCollectOutputs(pad, settings);
+    for (const output of paraInputPreviousOutputs) if (!next.has(output)) paraInputDispatchOutput(output, false);
+    for (const output of next) if (!paraInputPreviousOutputs.has(output)) paraInputDispatchOutput(output, true);
+    paraInputPreviousOutputs = next;
+    window.requestAnimationFrame(paraInputTick);
+  }
+
+  window.PARA = window.PARA && typeof window.PARA === 'object' ? window.PARA : {};
+  window.PARA.input = {
+    status: () => {
+      const settings = paraInputSettings();
+      return { active: paraInputActive(settings), enabled: Boolean(settings.enabled), requested: Boolean(settings.requested), nativeGamepadDetected: paraInputGameUsesGamepad, profile: 'Keyboard + Mouse' };
+    },
+    enableForThisGame: () => {
+      const settings = paraInputSettings();
+      settings.games = { ...(settings.games || {}), [RUNTIME_ID]: { ...(settings.games?.[RUNTIME_ID] || {}), enabled: true } };
+      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify(settings));
+      paraInputGameUsesGamepad = false;
+      return true;
+    },
+    disableForThisGame: () => {
+      const settings = paraInputSettings();
+      settings.games = { ...(settings.games || {}), [RUNTIME_ID]: { ...(settings.games?.[RUNTIME_ID] || {}), enabled: false } };
+      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify(settings));
+      paraInputReleaseAll();
+      return true;
+    }
+  };
+  window.requestAnimationFrame(paraInputTick);
+
   function configureCaptureHandle() {
     try {
       navigator.mediaDevices?.setCaptureHandleConfig?.({
@@ -1466,9 +1668,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       context.innerHTML = `<div class="contextCopy"><span>Sound</span><strong>${muted ? 'Muted' : 'Playing'}</strong><small>${media.length ? 'Game audio output' : 'No HTML media output detected'}</small></div><div class="contextActions"><button data-context-action="toggle-mute">${muted ? 'Unmute' : 'Mute'}</button></div>`;
     } else if (name === 'controller') {
       const pad = [...(nativeGetGamepads?.() || [])].find(Boolean);
+      const inputStatus = window.PARA?.input?.status?.() || { active: false, requested: false, nativeGamepadDetected: false };
+      const inputState = inputStatus.active ? 'PARA Input active' : inputStatus.nativeGamepadDetected ? 'Native controller support detected' : inputStatus.requested ? 'PARA Input waiting' : 'PARA Input off';
       context.innerHTML = pad
-        ? `<div class="contextCopy"><span>Controller</span><strong>${escapeMarkup(pad.id || 'Controller')}</strong><small>Connected</small></div><div class="contextActions"><button data-context-action="controller-settings">Controller Settings</button></div>`
-        : `<div class="contextCopy"><span>Controller</span><strong>No controller connected</strong><small>Keyboard controls remain available.</small></div>`;
+        ? `<div class="contextCopy"><span>Controller</span><strong>${escapeMarkup(pad.id || 'Controller')}</strong><small>${escapeMarkup(inputState)}</small></div><div class="contextActions"><button data-context-action="para-input-toggle">${inputStatus.requested ? 'Disable PARA Input' : 'Enable PARA Input'}</button><button data-context-action="para-input-settings">PARA Input Settings</button><button data-context-action="controller-settings">Controller Settings</button></div>`
+        : `<div class="contextCopy"><span>Controller</span><strong>No controller connected</strong><small>Keyboard controls remain available.</small></div><div class="contextActions"><button data-context-action="para-input-settings">PARA Input Settings</button></div>`;
     } else if (name === 'profile') {
       const state = readHomeState();
       const profile = state.activeProfile || state.setupChoices?.profileName || '';
@@ -1669,6 +1873,14 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (contextAction === 'downloads-open') return leaveGame('/#/downloads');
     if (contextAction === 'network-settings') return leaveGame('/#/network');
     if (contextAction === 'audio-settings') return leaveGame('/#/audio-settings');
+    if (contextAction === 'para-input-toggle') {
+      const status = window.PARA?.input?.status?.() || {};
+      if (status.requested) window.PARA?.input?.disableForThisGame?.();
+      else window.PARA?.input?.enableForThisGame?.();
+      showContext('controller', true);
+      return;
+    }
+    if (contextAction === 'para-input-settings') return leaveGame('/#/para-input');
     if (contextAction === 'controller-settings') return leaveGame('/#/controller');
     if (contextAction === 'account-settings') return leaveGame('/#/account');
     if (contextAction === 'power-home') return leaveGame('/#/home');

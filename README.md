@@ -67,6 +67,7 @@ These flags are never enabled by the Render launcher.
 - Hold `P` / PARA-mapped controller button: suspend the current game and return to PARA Home
 - Tab / Shift+Tab: focus cycle
 - Mouse: select, double-click, right-click, multi-select, and drag/drop
+- PARA Input: Settings → Controllers → PARA Input configures controller-to-keyboard/mouse compatibility. In a running web game, open Control Center → Controller → Enable PARA Input to apply the profile to that game.
 
 PARA Files also supports Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Delete, F2, Enter,
 Backspace, and address-bar input. Prompts adapt to the identified controller;

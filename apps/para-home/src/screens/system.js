@@ -2,9 +2,44 @@ import { BACKGROUND_OPTIONS, getProfilePreferences, getProfileRuntime, getState 
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { page, tile, listRow, progress, toggleRow } from "../ui/components.js";
 import { demoStorageBytes } from "../services/experience-runtime.js";
+import { getParaInputSettings, paraInputOutputLabel, PARA_INPUT_CONTROLS } from "../services/para-input.js";
 
 export function controllerScreen() {
-  return page({ title: "Controllers", description: "Controllers available to PARA. PulseWave features appear only on verified PulseWave hardware.", eyebrow: "Input", body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"><i data-controller-live-stick></i><b data-controller-live-button="0"></b><b data-controller-live-button="1"></b><b data-controller-live-button="2"></b><b data-controller-live-button="3"></b></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section><div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="para">PARA</b><strong>PARA</strong><small>Tap controls · hold Home</small></span></div></div><section class="panel pulsewave-firmware" data-pulsewave-firmware hidden><span class="eyebrow">PulseWave hardware</span><h2>Controller firmware</h2><p>Firmware updates, battery health, wake support, and hardware profiles are available only for genuine PulseWave controllers.</p><button class="action-button" data-action="check-controller-firmware">Check for update</button></section>` });
+  const input = getParaInputSettings();
+  return page({
+    title: "Controllers",
+    description: "Controllers available to PARA. PulseWave features appear only on verified PulseWave hardware.",
+    eyebrow: "Input",
+    body: `<section class="controller-hero"><div class="controller-shape" aria-hidden="true"><i data-controller-live-stick></i><b data-controller-live-button="0"></b><b data-controller-live-button="1"></b><b data-controller-live-button="2"></b><b data-controller-live-button="3"></b></div><div><span class="eyebrow" data-controller-slot>Controller</span><h2 data-controller-name>No controller connected</h2><p data-controller-detail>Connect a controller, then press any button.</p></div></section>
+      <section class="panel para-input-entry"><div><span class="eyebrow">PARA Input</span><h2>Make keyboard games controller-ready</h2><p>Translate sticks, triggers, and buttons into keyboard and mouse controls with a system profile.</p></div><div class="para-input-entry__state"><strong>${input.enabled ? "Ready" : "Off"}</strong><small>${input.automaticWebGames ? "Automatic web-game mapping On" : "Manual activation"}</small><button class="action-button" data-route="para-input" data-autofocus="true">Open PARA Input</button></div></section>
+      <div class="controller-map" data-controller-map hidden><h2>Controls</h2><div><span><b data-prompt="confirm">Enter</b><strong>Select</strong><small>Primary action</small></span><span><b data-prompt="back">Esc</b><strong>Back</strong><small>Return or cancel</small></span><span><b data-prompt="para">PARA</b><strong>PARA</strong><small>Tap controls · hold Home</small></span></div></div>
+      <section class="panel pulsewave-firmware" data-pulsewave-firmware hidden><span class="eyebrow">PulseWave hardware</span><h2>Controller firmware</h2><p>Firmware updates, battery health, wake support, and hardware profiles are available only for genuine PulseWave controllers.</p><button class="action-button" data-action="check-controller-firmware">Check for update</button></section>`,
+  });
+}
+
+export function paraInputScreen() {
+  const input = getParaInputSettings();
+  const bindings = PARA_INPUT_CONTROLS.map((control, index) => `<button type="button" class="para-input-binding" data-action="cycle-para-input-binding" data-input-control="${control.id}" ${index === 0 ? "data-autofocus='true'" : ""}><span><strong>${control.label}</strong><small>Controller input</small></span><em>${paraInputOutputLabel(input.bindings[control.id])}</em></button>`).join("");
+  return page({
+    title: "PARA Input",
+    description: "Turn controller input into keyboard and mouse controls for games that were never built for a controller.",
+    eyebrow: "Controllers",
+    className: "para-input-page",
+    body: `<section class="para-input-hero panel"><div><span class="eyebrow">Compatibility layer</span><h2>Controller → keyboard + mouse</h2><p>PARA Input runs at the game-runtime layer. The PARA button remains reserved for the console.</p></div><button type="button" class="para-input-master ${input.enabled ? "is-on" : ""}" data-action="toggle-para-input"><span>${input.enabled ? "ON" : "OFF"}</span><small>Master switch</small></button></section>
+      <section class="panel para-input-auto"><div><span class="eyebrow">Web games</span><h2>Automatic mapping</h2><p>Apply the default keyboard-and-mouse profile when a PARA web game starts.</p></div><button type="button" class="toggle ${input.automaticWebGames ? "is-on" : ""}" data-action="toggle-para-input-auto" aria-pressed="${input.automaticWebGames}"><span></span></button></section>
+      <section class="panel para-input-pointer"><div><span class="eyebrow">Right stick</span><h2>Mouse pointer</h2><p>Right stick controls a virtual mouse cursor for games that aim with the mouse.</p></div><label>Speed <strong data-para-input-speed-output>${Math.round(input.pointerSpeed)}</strong><input type="range" min="4" max="42" step="1" value="${input.pointerSpeed}" data-para-input-speed></label><button type="button" class="action-button action-button--ghost" data-action="toggle-para-input-invert">Vertical ${input.invertY ? "Inverted" : "Normal"}</button></section>
+      <section class="para-input-bindings"><div class="panel__head"><div><span class="eyebrow">Default profile</span><h2>Keyboard bindings</h2></div><button class="action-button action-button--ghost" data-action="reset-para-input">Reset</button></div><div class="para-input-binding-grid">${bindings}</div><p class="para-input-help">Select a control to cycle its output. This first version focuses on the common WASD + mouse layout; per-game profiles come next.</p></section>`,
+  });
+}
+
+export function activateParaInputScreen() {
+  const onInput = (event) => {
+    if (!event.target.matches("[data-para-input-speed]")) return;
+    const output = document.querySelector("[data-para-input-speed-output]");
+    if (output) output.textContent = event.target.value;
+  };
+  document.addEventListener("input", onInput);
+  return () => document.removeEventListener("input", onInput);
 }
 
 export function updateControllerScreen(controller) {

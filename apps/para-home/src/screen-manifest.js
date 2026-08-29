@@ -25,6 +25,7 @@ export const screens = [
   { id: "background", label: "Background", group: "system" },
   { id: "control-center-settings", label: "Control Center customization", group: "system" },
   { id: "controller", label: "Controller pairing", group: "system" },
+  { id: "para-input", label: "PARA Input", group: "system" },
   { id: "storage", label: "Storage management", group: "system" },
   { id: "saved-data", label: "Saved Data Manager", group: "system" },
   { id: "settings", label: "System settings", group: "system" },
