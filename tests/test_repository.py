@@ -368,7 +368,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('Recording · Stop & Save', server)
         self.assertNotIn("recordingPill.classList.add('show')", server)
 
-    def test_para_input_v1_is_wired(self):
+    def test_para_input_v2_is_wired(self):
         manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
         system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
@@ -378,7 +378,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('"para-input": paraInputScreen', app)
         self.assertIn('case "toggle-para-input"', app)
         self.assertIn('data-route="para-input"', system)
-        self.assertIn('para.input.v1', service)
+        self.assertIn('para.input.v2', service)
+        self.assertIn('rightStickMode', service)
+        self.assertIn('PARA INPUT V2', server)
+        self.assertIn('configureForThisGame', server)
         self.assertIn('PARA INPUT', server)
         self.assertIn("enableForThisGame", server)
         self.assertIn("nativeGetGamepads", server)

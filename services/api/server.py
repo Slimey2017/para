@@ -924,42 +924,51 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
   installGamepadMask();
 
-  // ===================== PARA INPUT =====================
-  // PARA Input is a compatibility layer for web games that only understand
-  // keyboard + mouse. It reads the physical controller without stealing the
-  // PARA system button and emits synthetic game-facing keyboard/mouse events.
-  const PARA_INPUT_STORAGE_KEY = 'para.input.v1';
+  // ===================== PARA INPUT V2 =====================
+  // Controller-to-keyboard/mouse compatibility for web games. V2 fixes the
+  // first version's edge-clamped aiming, hard deadzone jump, frame-rate based
+  // pointer speed, and manual-enable/native-gamepad conflict.
+  const PARA_INPUT_STORAGE_KEY = 'para.input.v2';
+  const PARA_INPUT_LEGACY_STORAGE_KEY = 'para.input.v1';
   const PARA_INPUT_DEFAULTS = {
+    version: 2,
     enabled: true,
     automaticWebGames: false,
-    deadzone: 0.28,
-    pointerSpeed: 18,
+    leftDeadzone: 0.22,
+    rightDeadzone: 0.14,
+    triggerThreshold: 0.28,
+    pointerSpeed: 900,
+    pointerCurve: 1.65,
+    pointerAcceleration: 0.45,
+    rightStickMode: 'relative',
     invertY: false,
     bindings: {
       left_up: 'KeyW', left_down: 'KeyS', left_left: 'KeyA', left_right: 'KeyD',
-      button_0: 'Space', button_1: 'Escape', button_2: 'KeyE', button_3: 'KeyR',
+      button_0: 'Space', button_1: 'KeyC', button_2: 'KeyE', button_3: 'KeyR',
       button_4: 'KeyQ', button_5: 'KeyF', button_6: 'Mouse2', button_7: 'Mouse0',
-      button_10: 'ShiftLeft', button_11: 'ControlLeft',
+      button_8: 'Tab', button_9: 'Escape', button_10: 'ShiftLeft', button_11: 'ControlLeft',
       button_12: 'ArrowUp', button_13: 'ArrowDown', button_14: 'ArrowLeft', button_15: 'ArrowRight'
     },
     games: {}
   };
   const PARA_INPUT_KEYS = {
-    KeyW: ['w','KeyW'], KeyA: ['a','KeyA'], KeyS: ['s','KeyS'], KeyD: ['d','KeyD'],
-    Space: [' ','Space'], Escape: ['Escape','Escape'], KeyE: ['e','KeyE'], KeyF: ['f','KeyF'],
-    KeyQ: ['q','KeyQ'], KeyR: ['r','KeyR'], ShiftLeft: ['Shift','ShiftLeft'], ControlLeft: ['Control','ControlLeft'],
-    ArrowUp: ['ArrowUp','ArrowUp'], ArrowDown: ['ArrowDown','ArrowDown'], ArrowLeft: ['ArrowLeft','ArrowLeft'], ArrowRight: ['ArrowRight','ArrowRight']
+    KeyW:['w','KeyW',87], KeyA:['a','KeyA',65], KeyS:['s','KeyS',83], KeyD:['d','KeyD',68],
+    Space:[' ','Space',32], Escape:['Escape','Escape',27], Enter:['Enter','Enter',13], Tab:['Tab','Tab',9],
+    ShiftLeft:['Shift','ShiftLeft',16], ControlLeft:['Control','ControlLeft',17], AltLeft:['Alt','AltLeft',18],
+    KeyE:['e','KeyE',69], KeyF:['f','KeyF',70], KeyQ:['q','KeyQ',81], KeyR:['r','KeyR',82],
+    KeyC:['c','KeyC',67], KeyV:['v','KeyV',86], KeyX:['x','KeyX',88], KeyZ:['z','KeyZ',90],
+    KeyM:['m','KeyM',77], KeyI:['i','KeyI',73],
+    Digit1:['1','Digit1',49], Digit2:['2','Digit2',50], Digit3:['3','Digit3',51], Digit4:['4','Digit4',52], Digit5:['5','Digit5',53],
+    ArrowUp:['ArrowUp','ArrowUp',38], ArrowDown:['ArrowDown','ArrowDown',40], ArrowLeft:['ArrowLeft','ArrowLeft',37], ArrowRight:['ArrowRight','ArrowRight',39]
   };
   let paraInputGameUsesGamepad = false;
   let paraInputPreviousOutputs = new Set();
   let paraInputPointerX = Math.max(0, innerWidth / 2);
   let paraInputPointerY = Math.max(0, innerHeight / 2);
   let paraInputMouseButtons = 0;
-  let paraInputLastMoveAt = 0;
+  let paraInputLastTickAt = performance.now();
+  let paraInputMoveLatch = { left:false, right:false, up:false, down:false };
 
-  // The runtime already keeps a private nativeGetGamepads reference for PARA's
-  // system button. Wrap the game-visible API so automatic mode can stand down
-  // when a title actually asks for native controller data.
   const paraInputGameVisibleGetGamepads = navigator.getGamepads?.bind(navigator);
   if (paraInputGameVisibleGetGamepads) {
     try {
@@ -973,49 +982,77 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     } catch (_) {}
   }
 
+  function paraInputClamp(value, min, max, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+  }
+
   function paraInputSettings() {
     let stored = {};
-    try { stored = JSON.parse(localStorage.getItem(PARA_INPUT_STORAGE_KEY) || '{}') || {}; } catch (_) {}
+    try {
+      const v2 = localStorage.getItem(PARA_INPUT_STORAGE_KEY);
+      const raw = v2 || localStorage.getItem(PARA_INPUT_LEGACY_STORAGE_KEY) || '{}';
+      stored = JSON.parse(raw) || {};
+    } catch (_) {}
+    const isV2 = Number(stored.version || 0) >= 2;
     const merged = {
       ...PARA_INPUT_DEFAULTS,
       ...stored,
+      version: 2,
+      pointerSpeed: isV2 ? stored.pointerSpeed : PARA_INPUT_DEFAULTS.pointerSpeed,
       bindings: { ...PARA_INPUT_DEFAULTS.bindings, ...(stored.bindings || {}) },
       games: stored.games && typeof stored.games === 'object' ? stored.games : {}
     };
     const gameOverride = merged.games?.[RUNTIME_ID];
-    const requested = typeof gameOverride?.enabled === 'boolean' ? gameOverride.enabled : Boolean(merged.automaticWebGames);
-    return {
+    const manualOverride = typeof gameOverride?.enabled === 'boolean';
+    const effective = gameOverride && typeof gameOverride === 'object' ? {
       ...merged,
-      requested,
-      deadzone: Math.max(.12, Math.min(.65, Number(merged.deadzone) || .28)),
-      pointerSpeed: Math.max(4, Math.min(42, Number(merged.pointerSpeed) || 18))
+      ...gameOverride,
+      bindings: { ...merged.bindings, ...(gameOverride.bindings || {}) },
+      games: merged.games
+    } : merged;
+    return {
+      ...effective,
+      requested: manualOverride ? gameOverride.enabled : Boolean(merged.automaticWebGames),
+      forced: Boolean(manualOverride && gameOverride.enabled),
+      leftDeadzone: paraInputClamp(effective.leftDeadzone ?? effective.deadzone, .10, .55, .22),
+      rightDeadzone: paraInputClamp(effective.rightDeadzone ?? effective.deadzone, .06, .45, .14),
+      triggerThreshold: paraInputClamp(effective.triggerThreshold, .08, .80, .28),
+      pointerSpeed: paraInputClamp(effective.pointerSpeed, 250, 2200, 900),
+      pointerCurve: paraInputClamp(effective.pointerCurve, .75, 2.75, 1.65),
+      pointerAcceleration: paraInputClamp(effective.pointerAcceleration, 0, 1.5, .45),
+      rightStickMode: effective.rightStickMode === 'cursor' ? 'cursor' : 'relative'
     };
   }
 
   function paraInputActive(settings = paraInputSettings()) {
-    return Boolean(settings.enabled && settings.requested && !paraInputGameUsesGamepad && !shellOpen && !gameSuspended && !gameClosing);
+    return Boolean(settings.enabled && settings.requested && (settings.forced || !paraInputGameUsesGamepad) && !shellOpen && !gameSuspended && !gameClosing);
   }
 
-  function paraInputEventTarget(x = paraInputPointerX, y = paraInputPointerY) {
-    return document.elementFromPoint?.(x, y) || document.activeElement || document.body || document.documentElement;
+  function paraInputGameTarget(x = paraInputPointerX, y = paraInputPointerY) {
+    return document.pointerLockElement || document.elementFromPoint?.(x, y) || document.querySelector('canvas') || document.activeElement || document.body || document.documentElement;
   }
 
   function paraInputDispatchKey(code, down) {
     const meta = PARA_INPUT_KEYS[code];
     if (!meta) return;
-    const target = document.activeElement || document.body || document.documentElement;
+    const target = document.activeElement || document.querySelector('canvas') || document.body || document.documentElement;
     try {
-      target?.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {
-        key: meta[0], code: meta[1], bubbles: true, cancelable: true, composed: true
-      }));
+      const event = new KeyboardEvent(down ? 'keydown' : 'keyup', {
+        key: meta[0], code: meta[1], bubbles: true, cancelable: true, composed: true,
+        repeat: false, location: code.endsWith('Left') ? 1 : 0
+      });
+      try { Object.defineProperty(event, 'keyCode', { get: () => meta[2] }); } catch (_) {}
+      try { Object.defineProperty(event, 'which', { get: () => meta[2] }); } catch (_) {}
+      target?.dispatchEvent(event);
     } catch (_) {}
   }
 
   function paraInputDispatchMouseButton(output, down) {
-    const button = output === 'Mouse2' ? 2 : 0;
-    const bit = button === 2 ? 2 : 1;
+    const button = output === 'Mouse2' ? 2 : output === 'Mouse1' ? 1 : 0;
+    const bit = button === 2 ? 2 : button === 1 ? 4 : 1;
     paraInputMouseButtons = down ? (paraInputMouseButtons | bit) : (paraInputMouseButtons & ~bit);
-    const target = paraInputEventTarget();
+    const target = paraInputGameTarget();
     try {
       target?.dispatchEvent(new MouseEvent(down ? 'mousedown' : 'mouseup', {
         button, buttons: paraInputMouseButtons, clientX: paraInputPointerX, clientY: paraInputPointerY,
@@ -1028,9 +1065,21 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     } catch (_) {}
   }
 
+  function paraInputDispatchWheel(output) {
+    const target = paraInputGameTarget();
+    const deltaY = output === 'WheelUp' ? -120 : 120;
+    try {
+      target?.dispatchEvent(new WheelEvent('wheel', {
+        deltaY, deltaMode: 0, clientX: paraInputPointerX, clientY: paraInputPointerY,
+        bubbles: true, cancelable: true, composed: true, view: window
+      }));
+    } catch (_) {}
+  }
+
   function paraInputDispatchOutput(output, down) {
     if (!output || output === 'none') return;
-    if (output === 'Mouse0' || output === 'Mouse2') paraInputDispatchMouseButton(output, down);
+    if (output === 'Mouse0' || output === 'Mouse1' || output === 'Mouse2') paraInputDispatchMouseButton(output, down);
+    else if (output === 'WheelUp' || output === 'WheelDown') { if (down) paraInputDispatchWheel(output); }
     else paraInputDispatchKey(output, down);
   }
 
@@ -1038,29 +1087,65 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     for (const output of paraInputPreviousOutputs) paraInputDispatchOutput(output, false);
     paraInputPreviousOutputs.clear();
     paraInputMouseButtons = 0;
+    paraInputMoveLatch = { left:false, right:false, up:false, down:false };
   }
 
-  function paraInputMovePointer(pad, settings, now) {
-    const x = Number(pad.axes?.[2] || 0);
-    const rawY = Number(pad.axes?.[3] || 0);
-    const y = settings.invertY ? -rawY : rawY;
-    const dx = Math.abs(x) >= settings.deadzone ? x * settings.pointerSpeed : 0;
-    const dy = Math.abs(y) >= settings.deadzone ? y * settings.pointerSpeed : 0;
+  function paraInputCurveStick(rawX, rawY, deadzone, curve) {
+    const magnitude = Math.min(1, Math.hypot(rawX, rawY));
+    if (magnitude <= deadzone) return { x:0, y:0, strength:0 };
+    const normalized = Math.min(1, (magnitude - deadzone) / Math.max(.001, 1 - deadzone));
+    const strength = Math.pow(normalized, curve);
+    return { x:(rawX / magnitude) * strength, y:(rawY / magnitude) * strength, strength };
+  }
+
+  function paraInputDispatchRelativeMove(dx, dy) {
     if (!dx && !dy) return;
+    const target = paraInputGameTarget();
+    try {
+      const event = new MouseEvent('mousemove', {
+        clientX: paraInputPointerX, clientY: paraInputPointerY,
+        buttons: paraInputMouseButtons, bubbles: true, cancelable: true, composed: true, view: window
+      });
+      try { Object.defineProperty(event, 'movementX', { get: () => dx }); } catch (_) {}
+      try { Object.defineProperty(event, 'movementY', { get: () => dy }); } catch (_) {}
+      target?.dispatchEvent(event);
+    } catch (_) {}
+  }
+
+  function paraInputMovePointer(pad, settings, dt) {
+    const rawX = Number(pad.axes?.[2] || 0);
+    const sourceY = Number(pad.axes?.[3] || 0);
+    const rawY = settings.invertY ? -sourceY : sourceY;
+    const stick = paraInputCurveStick(rawX, rawY, settings.rightDeadzone, settings.pointerCurve);
+    if (!stick.strength) return;
+    const speed = settings.pointerSpeed * (1 + stick.strength * settings.pointerAcceleration);
+    const dx = stick.x * speed * dt;
+    const dy = stick.y * speed * dt;
+    if (settings.rightStickMode === 'relative') {
+      paraInputDispatchRelativeMove(dx, dy);
+      return;
+    }
     const previousX = paraInputPointerX;
     const previousY = paraInputPointerY;
     paraInputPointerX = Math.max(0, Math.min(innerWidth - 1, paraInputPointerX + dx));
     paraInputPointerY = Math.max(0, Math.min(innerHeight - 1, paraInputPointerY + dy));
-    if (now - paraInputLastMoveAt < 8) return;
-    paraInputLastMoveAt = now;
-    const target = paraInputEventTarget();
+    const target = paraInputGameTarget();
     try {
-      target?.dispatchEvent(new MouseEvent('mousemove', {
+      const event = new MouseEvent('mousemove', {
         clientX: paraInputPointerX, clientY: paraInputPointerY,
-        movementX: paraInputPointerX - previousX, movementY: paraInputPointerY - previousY,
         buttons: paraInputMouseButtons, bubbles: true, cancelable: true, composed: true, view: window
-      }));
+      });
+      try { Object.defineProperty(event, 'movementX', { get: () => paraInputPointerX - previousX }); } catch (_) {}
+      try { Object.defineProperty(event, 'movementY', { get: () => paraInputPointerY - previousY }); } catch (_) {}
+      target?.dispatchEvent(event);
     } catch (_) {}
+  }
+
+  function paraInputUpdateAxisLatch(name, value, negative, settings) {
+    const press = settings.leftDeadzone;
+    const release = Math.max(.07, press * .68);
+    const magnitude = negative ? -value : value;
+    paraInputMoveLatch[name] = paraInputMoveLatch[name] ? magnitude >= release : magnitude >= press;
   }
 
   function paraInputCollectOutputs(pad, settings) {
@@ -1071,18 +1156,25 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     };
     const x = Number(pad.axes?.[0] || 0);
     const y = Number(pad.axes?.[1] || 0);
-    if (x <= -settings.deadzone) bind('left_left');
-    if (x >= settings.deadzone) bind('left_right');
-    if (y <= -settings.deadzone) bind('left_up');
-    if (y >= settings.deadzone) bind('left_down');
-    for (const index of [0,1,2,3,4,5,6,7,10,11,12,13,14,15]) {
+    paraInputUpdateAxisLatch('left', x, true, settings);
+    paraInputUpdateAxisLatch('right', x, false, settings);
+    paraInputUpdateAxisLatch('up', y, true, settings);
+    paraInputUpdateAxisLatch('down', y, false, settings);
+    if (paraInputMoveLatch.left) bind('left_left');
+    if (paraInputMoveLatch.right) bind('left_right');
+    if (paraInputMoveLatch.up) bind('left_up');
+    if (paraInputMoveLatch.down) bind('left_down');
+    for (const index of [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]) {
       const button = pad.buttons?.[index];
-      if (button && (button.pressed || Number(button.value || 0) >= .45)) bind(`button_${index}`);
+      const threshold = index === 6 || index === 7 ? settings.triggerThreshold : .45;
+      if (button && (button.pressed || Number(button.value || 0) >= threshold)) bind(`button_${index}`);
     }
     return outputs;
   }
 
   function paraInputTick(now) {
+    const dt = Math.max(.001, Math.min(.05, (now - paraInputLastTickAt) / 1000));
+    paraInputLastTickAt = now;
     const settings = paraInputSettings();
     if (!paraInputActive(settings)) {
       if (paraInputPreviousOutputs.size) paraInputReleaseAll();
@@ -1095,7 +1187,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       window.requestAnimationFrame(paraInputTick);
       return;
     }
-    paraInputMovePointer(pad, settings, now);
+    paraInputMovePointer(pad, settings, dt);
     const next = paraInputCollectOutputs(pad, settings);
     for (const output of paraInputPreviousOutputs) if (!next.has(output)) paraInputDispatchOutput(output, false);
     for (const output of next) if (!paraInputPreviousOutputs.has(output)) paraInputDispatchOutput(output, true);
@@ -1107,20 +1199,27 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   window.PARA.input = {
     status: () => {
       const settings = paraInputSettings();
-      return { active: paraInputActive(settings), enabled: Boolean(settings.enabled), requested: Boolean(settings.requested), nativeGamepadDetected: paraInputGameUsesGamepad, profile: 'Keyboard + Mouse' };
+      return { active: paraInputActive(settings), enabled: Boolean(settings.enabled), requested: Boolean(settings.requested), forced: Boolean(settings.forced), nativeGamepadDetected: paraInputGameUsesGamepad, profile: settings.rightStickMode === 'relative' ? 'Keyboard + Relative Aim' : 'Keyboard + Cursor' };
     },
     enableForThisGame: () => {
       const settings = paraInputSettings();
       settings.games = { ...(settings.games || {}), [RUNTIME_ID]: { ...(settings.games?.[RUNTIME_ID] || {}), enabled: true } };
-      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify(settings));
-      paraInputGameUsesGamepad = false;
+      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify({ ...settings, version:2 }));
       return true;
     },
     disableForThisGame: () => {
       const settings = paraInputSettings();
       settings.games = { ...(settings.games || {}), [RUNTIME_ID]: { ...(settings.games?.[RUNTIME_ID] || {}), enabled: false } };
-      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify(settings));
+      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify({ ...settings, version:2 }));
       paraInputReleaseAll();
+      return true;
+    },
+    configureForThisGame: (patch = {}) => {
+      const settings = paraInputSettings();
+      const previous = settings.games?.[RUNTIME_ID] || {};
+      const next = { ...previous, ...patch, bindings: patch.bindings ? { ...(previous.bindings || {}), ...patch.bindings } : previous.bindings };
+      settings.games = { ...(settings.games || {}), [RUNTIME_ID]: next };
+      localStorage.setItem(PARA_INPUT_STORAGE_KEY, JSON.stringify({ ...settings, version:2 }));
       return true;
     }
   };

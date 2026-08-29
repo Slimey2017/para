@@ -179,3 +179,8 @@ PARA now seeds every published game achievement into the active local profile as
 ### v25 achievement bridge hardening
 
 Achievement tracking now initializes independently of the top-level Control Center shell, queues early/failed achievement requests, accepts the `para-achievement-request` bridge event, synchronizes framed-game unlocks back into PARA Home, and exposes `PARA.achievements.status()` for diagnostics. See `PARA_ACHIEVEMENT_BRIDGE_V25.md`.
+
+
+## PARA Input V2
+
+Controller-to-keyboard/mouse compatibility now includes relative aiming, deadzone/curve tuning, forced per-game mapping, and expanded bindings. See `PARA_INPUT_V2.md`.

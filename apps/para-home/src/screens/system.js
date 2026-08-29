@@ -19,24 +19,32 @@ export function controllerScreen() {
 
 export function paraInputScreen() {
   const input = getParaInputSettings();
-  const bindings = PARA_INPUT_CONTROLS.map((control, index) => `<button type="button" class="para-input-binding" data-action="cycle-para-input-binding" data-input-control="${control.id}" ${index === 0 ? "data-autofocus='true'" : ""}><span><strong>${control.label}</strong><small>Controller input</small></span><em>${paraInputOutputLabel(input.bindings[control.id])}</em></button>`).join("");
+  const bindings = PARA_INPUT_CONTROLS.map((control, index) => `<button type="button" class="para-input-binding" data-action="cycle-para-input-binding" data-input-control="${control.id}" ${index === 0 ? "data-autofocus='true'" : ""}><span><strong>${control.label}</strong><small>Press A to cycle output</small></span><em>${paraInputOutputLabel(input.bindings[control.id])}</em></button>`).join("");
+  const aimMode = input.rightStickMode === "relative" ? "Relative Aim" : "Screen Cursor";
   return page({
     title: "PARA Input",
     description: "Turn controller input into keyboard and mouse controls for games that were never built for a controller.",
     eyebrow: "Controllers",
     className: "para-input-page",
-    body: `<section class="para-input-hero panel"><div><span class="eyebrow">Compatibility layer</span><h2>Controller → keyboard + mouse</h2><p>PARA Input runs at the game-runtime layer. The PARA button remains reserved for the console.</p></div><button type="button" class="para-input-master ${input.enabled ? "is-on" : ""}" data-action="toggle-para-input"><span>${input.enabled ? "ON" : "OFF"}</span><small>Master switch</small></button></section>
-      <section class="panel para-input-auto"><div><span class="eyebrow">Web games</span><h2>Automatic mapping</h2><p>Apply the default keyboard-and-mouse profile when a PARA web game starts.</p></div><button type="button" class="toggle ${input.automaticWebGames ? "is-on" : ""}" data-action="toggle-para-input-auto" aria-pressed="${input.automaticWebGames}"><span></span></button></section>
-      <section class="panel para-input-pointer"><div><span class="eyebrow">Right stick</span><h2>Mouse pointer</h2><p>Right stick controls a virtual mouse cursor for games that aim with the mouse.</p></div><label>Speed <strong data-para-input-speed-output>${Math.round(input.pointerSpeed)}</strong><input type="range" min="4" max="42" step="1" value="${input.pointerSpeed}" data-para-input-speed></label><button type="button" class="action-button action-button--ghost" data-action="toggle-para-input-invert">Vertical ${input.invertY ? "Inverted" : "Normal"}</button></section>
-      <section class="para-input-bindings"><div class="panel__head"><div><span class="eyebrow">Default profile</span><h2>Keyboard bindings</h2></div><button class="action-button action-button--ghost" data-action="reset-para-input">Reset</button></div><div class="para-input-binding-grid">${bindings}</div><p class="para-input-help">Select a control to cycle its output. This first version focuses on the common WASD + mouse layout; per-game profiles come next.</p></section>`,
+    body: `<section class="para-input-hero panel"><div><span class="eyebrow">Compatibility layer V2</span><h2>Controller → keyboard + mouse</h2><p>V2 uses proper relative-stick aiming, smoother deadzones, frame-rate independent sensitivity, and forced mapping when you enable it for a game.</p></div><button type="button" class="para-input-master ${input.enabled ? "is-on" : ""}" data-action="toggle-para-input"><span>${input.enabled ? "ON" : "OFF"}</span><small>Master switch</small></button></section>
+      <section class="panel para-input-auto"><div><span class="eyebrow">Web games</span><h2>Automatic mapping</h2><p>Use PARA Input automatically only when a game is not using native controller input. Manually enabling PARA Input in Control Center now forces the mapping instead of immediately backing off.</p></div><button type="button" class="toggle ${input.automaticWebGames ? "is-on" : ""}" data-action="toggle-para-input-auto" aria-pressed="${input.automaticWebGames}"><span></span></button></section>
+      <section class="panel para-input-pointer"><div><span class="eyebrow">Right stick</span><h2>${aimMode}</h2><p>${input.rightStickMode === "relative" ? "Best for shooters and camera control. Aim keeps moving even after the virtual pointer reaches a screen edge." : "Best for menus, point-and-click games, and games that need an actual screen position."}</p></div><div class="para-input-tuning"><button type="button" class="action-button action-button--ghost" data-action="toggle-para-input-aim-mode">Mode: ${aimMode}</button><label>Sensitivity <strong data-para-input-speed-output>${Math.round(input.pointerSpeed)}</strong><input type="range" min="250" max="2200" step="50" value="${input.pointerSpeed}" data-para-input-speed></label><label>Aim deadzone <strong data-para-input-right-deadzone-output>${input.rightDeadzone.toFixed(2)}</strong><input type="range" min="0.06" max="0.45" step="0.01" value="${input.rightDeadzone}" data-para-input-right-deadzone></label><label>Response curve <strong data-para-input-curve-output>${input.pointerCurve.toFixed(2)}</strong><input type="range" min="0.75" max="2.75" step="0.05" value="${input.pointerCurve}" data-para-input-curve></label><button type="button" class="action-button action-button--ghost" data-action="toggle-para-input-invert">Vertical ${input.invertY ? "Inverted" : "Normal"}</button></div></section>
+      <section class="panel para-input-pointer"><div><span class="eyebrow">Left stick + triggers</span><h2>Movement tuning</h2><p>Movement uses press/release hysteresis so WASD does not chatter when the stick hovers around the deadzone.</p></div><div class="para-input-tuning"><label>Move deadzone <strong data-para-input-left-deadzone-output>${input.leftDeadzone.toFixed(2)}</strong><input type="range" min="0.10" max="0.55" step="0.01" value="${input.leftDeadzone}" data-para-input-left-deadzone></label><label>Trigger threshold <strong data-para-input-trigger-output>${input.triggerThreshold.toFixed(2)}</strong><input type="range" min="0.08" max="0.80" step="0.02" value="${input.triggerThreshold}" data-para-input-trigger></label></div></section>
+      <section class="para-input-bindings"><div class="panel__head"><div><span class="eyebrow">Default profile</span><h2>Keyboard bindings</h2></div><button class="action-button action-button--ghost" data-action="reset-para-input">Reset</button></div><div class="para-input-binding-grid">${bindings}</div><p class="para-input-help">V2 adds Start/View, more keyboard keys, middle mouse, and wheel outputs. The PARA system button is still reserved for the console.</p></section>`,
   });
 }
 
 export function activateParaInputScreen() {
+  const outputFor = (selector, value) => {
+    const output = document.querySelector(selector);
+    if (output) output.textContent = value;
+  };
   const onInput = (event) => {
-    if (!event.target.matches("[data-para-input-speed]")) return;
-    const output = document.querySelector("[data-para-input-speed-output]");
-    if (output) output.textContent = event.target.value;
+    if (event.target.matches("[data-para-input-speed]")) outputFor("[data-para-input-speed-output]", event.target.value);
+    if (event.target.matches("[data-para-input-right-deadzone]")) outputFor("[data-para-input-right-deadzone-output]", Number(event.target.value).toFixed(2));
+    if (event.target.matches("[data-para-input-left-deadzone]")) outputFor("[data-para-input-left-deadzone-output]", Number(event.target.value).toFixed(2));
+    if (event.target.matches("[data-para-input-curve]")) outputFor("[data-para-input-curve-output]", Number(event.target.value).toFixed(2));
+    if (event.target.matches("[data-para-input-trigger]")) outputFor("[data-para-input-trigger-output]", Number(event.target.value).toFixed(2));
   };
   document.addEventListener("input", onInput);
   return () => document.removeEventListener("input", onInput);

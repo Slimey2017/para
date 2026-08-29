@@ -885,6 +885,12 @@ async function handleAction(action, target) {
       rerender();
       break;
     }
+    case "toggle-para-input-aim-mode": {
+      const input = getParaInputSettings();
+      patchParaInputSettings({ rightStickMode: input.rightStickMode === "relative" ? "cursor" : "relative" });
+      rerender();
+      break;
+    }
     case "cycle-para-input-binding":
       cycleParaInputBinding(target.dataset.inputControl, 1);
       rerender();
@@ -1386,6 +1392,22 @@ document.addEventListener("change", async (event) => {
   }
   if (event.target.matches("[data-para-input-speed]")) {
     patchParaInputSettings({ pointerSpeed: Number(event.target.value) });
+    return;
+  }
+  if (event.target.matches("[data-para-input-right-deadzone]")) {
+    patchParaInputSettings({ rightDeadzone: Number(event.target.value) });
+    return;
+  }
+  if (event.target.matches("[data-para-input-left-deadzone]")) {
+    patchParaInputSettings({ leftDeadzone: Number(event.target.value) });
+    return;
+  }
+  if (event.target.matches("[data-para-input-curve]")) {
+    patchParaInputSettings({ pointerCurve: Number(event.target.value) });
+    return;
+  }
+  if (event.target.matches("[data-para-input-trigger]")) {
+    patchParaInputSettings({ triggerThreshold: Number(event.target.value) });
     return;
   }
   if (event.target.matches("[data-interface-volume]")) {
