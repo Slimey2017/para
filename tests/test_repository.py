@@ -16,6 +16,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertGreaterEqual(focus.count('if (!key) return;'), 2)
         self.assertIn('target?.matches?.("input:not([type=\'range\']),textarea,select")', focus)
 
+
     def test_para_account_auth_is_real_and_first_boot_buttons_are_enabled(self):
         auth = (ROOT / "apps/para-home/src/screens/auth.js").read_text(encoding="utf-8")
         boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
