@@ -863,8 +863,10 @@ async function handleAction(action, target) {
         } catch (verificationError) {
           if (result.signed_in) await finishCloudAccountAuth(result, target);
           else {
-            accountStatus(verificationError?.message || "Account created, but the verification email could not be sent.", "error");
-            toast("Account created", "Verification email could not be sent yet.");
+            const verificationMessage = verificationError?.message || "Account created, but the verification email could not be sent.";
+            accountStatus(verificationMessage, "error");
+            toast("Verification send failed", verificationMessage);
+            console.error("PARA email verification send failed", verificationError);
           }
         }
       } catch (error) {
