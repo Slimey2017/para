@@ -37,6 +37,8 @@ AUTH_REFRESH_COOKIE = "para_refresh_token"
 EMAILJS_SERVICE_ID = os.environ.get("PARA_EMAILJS_SERVICE_ID", "service_rozuv2c")
 EMAILJS_TEMPLATE_ID = os.environ.get("PARA_EMAILJS_TEMPLATE_ID", "template_hitoc7a")
 EMAILJS_PUBLIC_KEY = os.environ.get("PARA_EMAILJS_PUBLIC_KEY", "Vcb2UJ9zNsxvhEajq")
+EMAILJS_PRIVATE_KEY = os.environ.get("PARA_EMAILJS_PRIVATE_KEY", "")
+EMAILJS_ORIGIN = os.environ.get("PARA_EMAILJS_ORIGIN", "")
 EMAIL_VERIFICATION_TTL_SECONDS = 15 * 60
 EMAIL_VERIFICATION_RESEND_SECONDS = 45
 EMAIL_VERIFICATION_MAX_ATTEMPTS = 6
@@ -215,6 +217,16 @@ def _verification_digest(code: str, salt: str) -> str:
     return hashlib.sha256(f"{salt}:{code}".encode("utf-8")).hexdigest()
 
 
+def _emailjs_error_text(raw: bytes | str) -> str:
+    if isinstance(raw, bytes):
+        text = raw.decode("utf-8", "replace")
+    else:
+        text = str(raw or "")
+    # EmailJS normally returns a short plain-text reason. Keep diagnostics useful
+    # without allowing a provider to flood the console UI.
+    return " ".join(text.strip().split())[:300]
+
+
 def _emailjs_send_verification(email: str, code: str) -> tuple[int, dict]:
     if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
         return 503, {"error": "verification_not_configured", "message": "PARA Protection Services email is not configured."}
@@ -224,21 +236,45 @@ def _emailjs_send_verification(email: str, code: str) -> tuple[int, dict]:
         "user_id": EMAILJS_PUBLIC_KEY,
         "template_params": {"email": email, "passcode": code},
     }
+    # EmailJS only requires the public key by default. If Account > Security has
+    # private-key authorization enabled, the secret stays server-side and is
+    # supplied through PARA_EMAILJS_PRIVATE_KEY.
+    if EMAILJS_PRIVATE_KEY:
+        payload["accessToken"] = EMAILJS_PRIVATE_KEY
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/plain",
+        "User-Agent": "PARA-Protection-Services/1.0",
+    }
+    if EMAILJS_ORIGIN:
+        headers["Origin"] = EMAILJS_ORIGIN
     request = urllib.request.Request(
         "https://api.emailjs.com/api/v1.0/email/send",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "text/plain"},
+        headers=headers,
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
-            response.read(1024)
-            return response.status, {"sent": True}
+            body = _emailjs_error_text(response.read(2048))
+            return response.status, {"sent": True, "provider": body or "OK"}
     except urllib.error.HTTPError as error:
-        error.read(2048)
-        return error.code, {"error": "verification_send_failed", "message": "PARA Protection Services could not send the verification email."}
-    except (urllib.error.URLError, TimeoutError):
-        return 502, {"error": "verification_service_unavailable", "message": "PARA Protection Services could not reach the email service."}
+        detail = _emailjs_error_text(error.read(4096))
+        message = f"EmailJS returned HTTP {error.code}."
+        if detail:
+            message += f" {detail}"
+        return error.code, {
+            "error": "verification_send_failed",
+            "message": message,
+            "emailjs_status": error.code,
+            "emailjs_detail": detail,
+        }
+    except (urllib.error.URLError, TimeoutError) as error:
+        detail = _emailjs_error_text(getattr(error, "reason", error))
+        message = "PARA Protection Services could not reach EmailJS."
+        if detail:
+            message += f" {detail}"
+        return 502, {"error": "verification_service_unavailable", "message": message}
 
 
 def auth_request_email_verification(email: str, client_key: str = "local") -> tuple[int, dict]:

@@ -5,7 +5,7 @@ async function request(path, options = {}) {
     ...options,
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
+  if (!response.ok) throw new Error(payload.message || payload.error || `Request failed: ${response.status}`);
   return payload;
 }
 
@@ -47,7 +47,7 @@ export const paraApi = {
       signal: AbortSignal.timeout(12_000),
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
+    if (!response.ok) throw new Error(payload.message || payload.error || `Request failed: ${response.status}`);
     return payload;
   },
 };
