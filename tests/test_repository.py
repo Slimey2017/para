@@ -16,7 +16,6 @@ class RepositoryTests(unittest.TestCase):
         self.assertGreaterEqual(focus.count('if (!key) return;'), 2)
         self.assertIn('target?.matches?.("input:not([type=\'range\']),textarea,select")', focus)
 
-
     def test_para_account_auth_is_real_and_first_boot_buttons_are_enabled(self):
         auth = (ROOT / "apps/para-home/src/screens/auth.js").read_text(encoding="utf-8")
         boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
@@ -179,6 +178,21 @@ class RepositoryTests(unittest.TestCase):
             self.assertIn(f'data-action="{action}"', screen)
             self.assertIn(f'case "{action}"', app)
         self.assertIn("Add Custom Background", screen)
+
+    def test_para_account_email_verification_is_controller_ready(self):
+        auth = (ROOT / "apps/para-home/src/screens/auth.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
+        self.assertIn('accountVerifyScreen', auth)
+        self.assertIn('autocomplete="one-time-code"', auth)
+        self.assertIn('case "account-verify-submit"', app)
+        self.assertIn('case "account-verification-resend"', app)
+        self.assertIn('authRequestVerification', api)
+        self.assertIn('/api/v1/auth/verification/request', server)
+        self.assertIn('EMAIL_VERIFICATION_MAX_ATTEMPTS = 6', server)
+        self.assertIn('"account-verify"', manifest)
 
     def test_para_button_supports_tap_and_hold(self):
         gamepad = (ROOT / "apps/para-home/src/gamepad.js").read_text(encoding="utf-8")

@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
 import mimetypes
 import os
+import secrets
+import threading
+import time
 import platform
 import urllib.error
 import urllib.parse
@@ -29,6 +34,17 @@ import system_layer  # noqa: E402
 
 AUTH_ACCESS_COOKIE = "para_access_token"
 AUTH_REFRESH_COOKIE = "para_refresh_token"
+EMAILJS_SERVICE_ID = os.environ.get("PARA_EMAILJS_SERVICE_ID", "service_rozuv2c")
+EMAILJS_TEMPLATE_ID = os.environ.get("PARA_EMAILJS_TEMPLATE_ID", "template_hitoc7a")
+EMAILJS_PUBLIC_KEY = os.environ.get("PARA_EMAILJS_PUBLIC_KEY", "Vcb2UJ9zNsxvhEajq")
+EMAIL_VERIFICATION_TTL_SECONDS = 15 * 60
+EMAIL_VERIFICATION_RESEND_SECONDS = 45
+EMAIL_VERIFICATION_MAX_ATTEMPTS = 6
+EMAIL_VERIFICATION_CLIENT_WINDOW_SECONDS = 10 * 60
+EMAIL_VERIFICATION_CLIENT_MAX_SENDS = 5
+_email_verifications: dict[str, dict] = {}
+_email_verification_client_sends: dict[str, list[float]] = {}
+_email_verification_lock = threading.Lock()
 
 
 def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
@@ -68,11 +84,15 @@ def _public_auth_user(user: object) -> dict | None:
     metadata = user.get("user_metadata") if isinstance(user.get("user_metadata"), dict) else {}
     email = str(user.get("email") or "")
     display_name = str(metadata.get("display_name") or metadata.get("name") or (email.split("@", 1)[0] if email else "PARA User"))
+    auth_email_confirmed = bool(user.get("email_confirmed_at") or user.get("confirmed_at"))
+    para_email_verified = bool(metadata.get("para_email_verified"))
     return {
         "id": str(user.get("id")),
         "email": email,
         "display_name": display_name[:32],
-        "email_confirmed": bool(user.get("email_confirmed_at") or user.get("confirmed_at")),
+        "email_confirmed": auth_email_confirmed,
+        "para_email_verified": para_email_verified,
+        "email_verified": auth_email_confirmed or para_email_verified,
         "created_at": user.get("created_at"),
     }
 
@@ -170,6 +190,128 @@ def auth_update_user(access_token: str, *, display_name: str | None = None, pass
     status, payload = _supabase_auth_request("/auth/v1/user", method="PUT", payload=body, bearer=access_token)
     if status >= 400:
         return status, {"error": "account_update_failed", "message": _auth_message(payload, "Could not update the PARA Account.")}
+    return 200, {"signed_in": True, "user": _public_auth_user(payload)}
+
+
+def _normalize_verification_email(email: str) -> str:
+    clean = str(email or "").strip().lower()
+    if "@" not in clean or len(clean) > 254:
+        return ""
+    local, _, domain = clean.partition("@")
+    if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
+        return ""
+    return clean
+
+
+def _mask_email(email: str) -> str:
+    local, _, domain = email.partition("@")
+    if not local or not domain:
+        return "email"
+    visible = local[:2] if len(local) > 2 else local[:1]
+    return f"{visible}{'*' * max(2, len(local) - len(visible))}@{domain}"
+
+
+def _verification_digest(code: str, salt: str) -> str:
+    return hashlib.sha256(f"{salt}:{code}".encode("utf-8")).hexdigest()
+
+
+def _emailjs_send_verification(email: str, code: str) -> tuple[int, dict]:
+    if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
+        return 503, {"error": "verification_not_configured", "message": "PARA Protection Services email is not configured."}
+    payload = {
+        "service_id": EMAILJS_SERVICE_ID,
+        "template_id": EMAILJS_TEMPLATE_ID,
+        "user_id": EMAILJS_PUBLIC_KEY,
+        "template_params": {"email": email, "passcode": code},
+    }
+    request = urllib.request.Request(
+        "https://api.emailjs.com/api/v1.0/email/send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "text/plain"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            response.read(1024)
+            return response.status, {"sent": True}
+    except urllib.error.HTTPError as error:
+        error.read(2048)
+        return error.code, {"error": "verification_send_failed", "message": "PARA Protection Services could not send the verification email."}
+    except (urllib.error.URLError, TimeoutError):
+        return 502, {"error": "verification_service_unavailable", "message": "PARA Protection Services could not reach the email service."}
+
+
+def auth_request_email_verification(email: str, client_key: str = "local") -> tuple[int, dict]:
+    clean = _normalize_verification_email(email)
+    if not clean:
+        return 400, {"error": "invalid_email", "message": "Enter a valid email address."}
+    now = time.time()
+    client_key = str(client_key or "local")[:128]
+    with _email_verification_lock:
+        recent = [stamp for stamp in _email_verification_client_sends.get(client_key, []) if now - stamp < EMAIL_VERIFICATION_CLIENT_WINDOW_SECONDS]
+        _email_verification_client_sends[client_key] = recent
+        if len(recent) >= EMAIL_VERIFICATION_CLIENT_MAX_SENDS:
+            wait = max(1, int(EMAIL_VERIFICATION_CLIENT_WINDOW_SECONDS - (now - recent[0])))
+            return 429, {"error": "verification_rate_limited", "message": "Too many verification emails were requested from this device. Try again later.", "retry_after": wait}
+        current = _email_verifications.get(clean)
+        if current and now - float(current.get("sent_at") or 0) < EMAIL_VERIFICATION_RESEND_SECONDS:
+            wait = max(1, int(EMAIL_VERIFICATION_RESEND_SECONDS - (now - float(current.get("sent_at") or 0))))
+            return 429, {"error": "verification_cooldown", "message": f"Wait {wait} seconds before requesting another code.", "retry_after": wait}
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    salt = secrets.token_hex(16)
+    status, result = _emailjs_send_verification(clean, code)
+    if status >= 400:
+        return status, result
+    with _email_verification_lock:
+        _email_verification_client_sends.setdefault(client_key, []).append(now)
+        _email_verifications[clean] = {
+            "digest": _verification_digest(code, salt),
+            "salt": salt,
+            "sent_at": now,
+            "expires_at": now + EMAIL_VERIFICATION_TTL_SECONDS,
+            "attempts": 0,
+        }
+    return 202, {"sent": True, "email": _mask_email(clean), "expires_in": EMAIL_VERIFICATION_TTL_SECONDS}
+
+
+def auth_verify_email_code(email: str, code: str) -> tuple[int, dict]:
+    clean = _normalize_verification_email(email)
+    code = "".join(character for character in str(code or "") if character.isdigit())
+    if not clean or len(code) != 6:
+        return 400, {"error": "invalid_verification", "message": "Enter the 6-digit verification code."}
+    now = time.time()
+    with _email_verification_lock:
+        current = _email_verifications.get(clean)
+        if not current:
+            return 400, {"error": "verification_missing", "message": "Request a new verification code."}
+        if now >= float(current.get("expires_at") or 0):
+            _email_verifications.pop(clean, None)
+            return 400, {"error": "verification_expired", "message": "That verification code expired. Request a new one."}
+        attempts = int(current.get("attempts") or 0)
+        if attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            _email_verifications.pop(clean, None)
+            return 429, {"error": "verification_locked", "message": "Too many incorrect attempts. Request a new code."}
+        expected = str(current.get("digest") or "")
+        actual = _verification_digest(code, str(current.get("salt") or ""))
+        if not hmac.compare_digest(expected, actual):
+            current["attempts"] = attempts + 1
+            remaining = EMAIL_VERIFICATION_MAX_ATTEMPTS - current["attempts"]
+            return 400, {"error": "verification_incorrect", "message": f"That code is not correct. {remaining} attempt{'s' if remaining != 1 else ''} remaining."}
+        _email_verifications.pop(clean, None)
+    return 200, {"verified": True, "email": clean}
+
+
+def auth_mark_para_email_verified(access_token: str) -> tuple[int, dict]:
+    if not access_token:
+        return 401, {"error": "not_signed_in", "message": "Sign in to finish email verification."}
+    status, payload = _supabase_auth_request(
+        "/auth/v1/user",
+        method="PUT",
+        payload={"data": {"para_email_verified": True, "para_email_verified_at": int(time.time())}},
+        bearer=access_token,
+    )
+    if status >= 400:
+        return status, {"error": "verification_update_failed", "message": _auth_message(payload, "Email was verified, but PARA could not update the account yet.")}
     return 200, {"signed_in": True, "user": _public_auth_user(payload)}
 
 
@@ -2528,6 +2670,32 @@ class ParaHandler(SimpleHTTPRequestHandler):
         if request.path == "/api/v1/auth/signin":
             status, result, tokens = auth_sign_in(str(payload.get("email", "")), str(payload.get("password", "")))
             self._send_json(status, result, self._auth_cookie_headers(tokens))
+            return
+        if request.path == "/api/v1/auth/verification/request":
+            status, result = auth_request_email_verification(str(payload.get("email", "")), self.client_address[0] if self.client_address else "local")
+            self._send_json(status, result)
+            return
+        if request.path == "/api/v1/auth/verification/verify":
+            email = str(payload.get("email", ""))
+            status, result = auth_verify_email_code(email, str(payload.get("code", "")))
+            extra_headers: list[tuple[str, str]] = []
+            if status == 200:
+                session_status, session, refreshed_headers = self._auth_session()
+                extra_headers = refreshed_headers
+                if session_status == 200 and session.get("signed_in") and str(session.get("user", {}).get("email") or "").strip().lower() == _normalize_verification_email(email):
+                    access = self._cookies().get(AUTH_ACCESS_COOKIE, "")
+                    if refreshed_headers:
+                        for key, value in refreshed_headers:
+                            if key.lower() == "set-cookie" and value.startswith(AUTH_ACCESS_COOKIE + "="):
+                                access = value.split(";", 1)[0].split("=", 1)[1]
+                                break
+                    mark_status, mark_result = auth_mark_para_email_verified(access)
+                    if mark_status == 200:
+                        result["user"] = mark_result.get("user")
+                        result["account_updated"] = True
+                    else:
+                        result["account_updated"] = False
+            self._send_json(status, result, extra_headers)
             return
         if request.path == "/api/v1/auth/signout":
             cookies = self._cookies()

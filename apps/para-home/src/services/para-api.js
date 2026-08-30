@@ -17,6 +17,8 @@ export const paraApi = {
   authSignOut: () => request("/api/v1/auth/signout", { method: "POST", body: JSON.stringify({}) }),
   authUpdateProfile: (displayName) => request("/api/v1/auth/profile", { method: "POST", body: JSON.stringify({ display_name: displayName }) }),
   authUpdatePassword: (password) => request("/api/v1/auth/password", { method: "POST", body: JSON.stringify({ password }) }),
+  authRequestVerification: (email) => request("/api/v1/auth/verification/request", { method: "POST", body: JSON.stringify({ email }), signal: AbortSignal.timeout(12_000) }),
+  authVerifyEmail: (email, code) => request("/api/v1/auth/verification/verify", { method: "POST", body: JSON.stringify({ email, code }), signal: AbortSignal.timeout(12_000) }),
   applications: () => request("/api/v1/apps"),
   storeCatalog: () => request("/api/v1/store/catalog"),
   storeProduct: (id) => request(`/api/v1/store/product?id=${encodeURIComponent(id)}`),

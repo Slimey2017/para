@@ -2016,3 +2016,20 @@ html[data-modal-owner] #para-app { overflow:hidden; }
 .account-manage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.account-manage-card h3{margin:5px 0 14px}.account-inline-form{display:flex;gap:9px}.account-inline-form input{min-width:0}.account-inline-form .action-button{flex:0 0 auto}
 .setup-account-connected{margin-top:16px;color:#95efc2;font-weight:700}
 @media(max-width:760px){.account-manage-grid{grid-template-columns:1fr}.account-device,.account-cloud{align-items:flex-start;flex-direction:column}.account-inline-form{flex-direction:column}}
+
+.verification-code-input {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: .45em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.account-verification-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin-bottom: 1rem;
+}
+.account-verification-prompt h3, .account-verification-prompt p { margin: .25rem 0; }
+@media (max-width: 720px) { .account-verification-prompt { align-items: stretch; flex-direction: column; } }

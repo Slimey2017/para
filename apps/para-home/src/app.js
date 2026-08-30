@@ -10,7 +10,7 @@ import {
   SETUP_CHAPTERS, startupScreen, introScreen, setupScreen, activateIntro,
   activateSetupChapter, playSetupAudioTest, updateSetupControllerStatus,
 } from "./screens/boot.js";
-import { accountSignInScreen, accountSignUpScreen, createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
+import { accountSignInScreen, accountSignUpScreen, accountVerifyScreen, createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
   appsScreen, activateApps, filterApps, launchSystemApplication,
@@ -79,6 +79,7 @@ const renderers = {
   "create-profile": createProfileScreen,
   "account-signin": accountSignInScreen,
   "account-signup": accountSignUpScreen,
+  "account-verify": accountVerifyScreen,
   home: homeScreen,
   apps: appsScreen,
   browser: browserScreen,
@@ -760,6 +761,24 @@ function accountStatus(message = "", kind = "") {
   node.dataset.kind = kind;
 }
 
+
+function rememberVerificationEmail(email) {
+  const clean = String(email || "").trim().toLowerCase();
+  if (clean) sessionStorage.setItem("para.account.verify.email", clean);
+  return clean;
+}
+
+function pendingVerificationEmail() {
+  return sessionStorage.getItem("para.account.verify.email") || "";
+}
+
+async function sendVerificationCode(email) {
+  const clean = rememberVerificationEmail(email);
+  if (!clean) throw new Error("Enter a valid email address.");
+  const result = await paraApi.authRequestVerification(clean);
+  return result;
+}
+
 async function finishCloudAccountAuth(result, target) {
   const user = result?.user;
   if (!user) return false;
@@ -835,15 +854,56 @@ async function handleAction(action, target) {
       target.disabled = true;
       try {
         const result = await paraApi.authSignUp(displayName, email, password);
-        if (result.signed_in) await finishCloudAccountAuth(result, target);
-        else {
-          accountStatus("Account created. Check your email to confirm it, then sign in.", "success");
-          toast("PARA Account created", "Check your email to confirm your account.");
+        rememberVerificationEmail(email);
+        try {
+          await sendVerificationCode(email);
+          accountStatus("Account created. Sending you to email verification…", "success");
+          toast("Verification code sent", "Check your email from PARA Protection Services.");
+          navigate("account-verify", {}, target);
+        } catch (verificationError) {
+          if (result.signed_in) await finishCloudAccountAuth(result, target);
+          else {
+            accountStatus(verificationError?.message || "Account created, but the verification email could not be sent.", "error");
+            toast("Account created", "Verification email could not be sent yet.");
+          }
         }
       } catch (error) {
         accountStatus(error?.message || "Account creation failed.", "error");
         toast("Couldn’t create account", error?.message || "Try again.");
       } finally { if (target?.isConnected) target.disabled = false; }
+      break;
+    }
+
+    case "account-verify-submit": {
+      const email = pendingVerificationEmail();
+      const code = document.querySelector("[data-account-verification-code]")?.value || "";
+      if (!email) { accountStatus("No verification request is active. Sign in or create an account first.", "error"); break; }
+      accountStatus("Checking code…");
+      target.disabled = true;
+      try {
+        const result = await paraApi.authVerifyEmail(email, code);
+        sessionStorage.removeItem("para.account.verify.email");
+        accountStatus("Email verified.", "success");
+        toast("Email verified", "PARA Protection Services confirmed your email.");
+        const session = await paraApi.authSession();
+        if (session?.signed_in && session?.user) await finishCloudAccountAuth(session, target);
+        else navigate("account-signin", { replace: true }, target);
+      } catch (error) {
+        accountStatus(error?.message || "That verification code was not accepted.", "error");
+      } finally { if (target?.isConnected) target.disabled = false; }
+      break;
+    }
+    case "account-verification-resend": {
+      const email = pendingVerificationEmail();
+      if (!email) { accountStatus("No email is waiting for verification.", "error"); break; }
+      accountStatus("Sending a new code…");
+      try {
+        const result = await sendVerificationCode(email);
+        accountStatus(`New code sent${result?.expires_in ? ` · expires in ${Math.round(result.expires_in / 60)} minutes` : ""}.`, "success");
+        toast("Verification code sent", "Check your email.");
+      } catch (error) {
+        accountStatus(error?.message || "Couldn’t resend the code yet.", "error");
+      }
       break;
     }
     case "account-cloud-signout":
@@ -862,6 +922,16 @@ async function handleAction(action, target) {
       const password = document.querySelector("[data-account-new-password]")?.value || "";
       try { await paraApi.authUpdatePassword(password); toast("Password updated", "Your PARA Account password has changed."); const input=document.querySelector("[data-account-new-password]"); if(input) input.value=""; }
       catch (error) { toast("Couldn’t update password", error?.message || "Use at least 8 characters."); }
+      break;
+    }
+
+    case "account-send-verification": {
+      const email = target.dataset.accountEmail || "";
+      try {
+        await sendVerificationCode(email);
+        toast("Verification code sent", "Check your email from PARA Protection Services.");
+        navigate("account-verify", {}, target);
+      } catch (error) { toast("Couldn’t send verification", error?.message || "Try again in a moment."); }
       break;
     }
     case "account-refresh":
@@ -1506,6 +1576,16 @@ document.addEventListener("click", (event) => {
   if (target.dataset.notificationId) markNotificationRead(target.dataset.notificationId);
   if (target.dataset.route) navigate(target.dataset.route, {}, target);
   else handleAction(target.dataset.action, target);
+});
+
+
+document.addEventListener("submit", (event) => {
+  const form = event.target.closest("form");
+  if (!form) return;
+  const submitter = event.submitter || form.querySelector("button[type='submit'][data-action]");
+  if (!submitter?.dataset.action) return;
+  event.preventDefault();
+  handleAction(submitter.dataset.action, submitter);
 });
 
 document.addEventListener("change", async (event) => {

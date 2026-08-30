@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -134,6 +134,35 @@ class ApiContractTests(unittest.TestCase):
         self.assertTrue(payload["signed_in"])
         self.assertEqual(payload["user"]["display_name"], "Slimey")
         self.assertEqual(tokens["refresh_token"], "refresh")
+
+
+    def test_para_email_verification_sends_emailjs_code_without_returning_code(self):
+        import server
+        server._email_verifications.clear()
+        with patch("server._emailjs_send_verification", return_value=(200, {"sent": True})) as sender:
+            status, payload = auth_request_email_verification("player@example.com")
+        self.assertEqual(status, 202)
+        self.assertTrue(payload["sent"])
+        self.assertNotIn("code", payload)
+        sent_email, sent_code = sender.call_args.args
+        self.assertEqual(sent_email, "player@example.com")
+        self.assertRegex(sent_code, r"^\d{6}$")
+
+    def test_para_email_verification_accepts_only_matching_code(self):
+        import server
+        server._email_verifications.clear()
+        captured = {}
+        def fake_send(email, code):
+            captured["code"] = code
+            return 200, {"sent": True}
+        with patch("server._emailjs_send_verification", side_effect=fake_send):
+            status, _ = auth_request_email_verification("player@example.com")
+        self.assertEqual(status, 202)
+        bad_status, _ = auth_verify_email_code("player@example.com", "000000" if captured["code"] != "000000" else "111111")
+        self.assertEqual(bad_status, 400)
+        good_status, payload = auth_verify_email_code("player@example.com", captured["code"] )
+        self.assertEqual(good_status, 200)
+        self.assertTrue(payload["verified"])
 
     def test_para_account_password_requires_eight_characters(self):
         status, payload = auth_update_user("token", password="1234567")
