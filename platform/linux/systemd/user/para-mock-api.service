@@ -7,7 +7,8 @@ After=graphical-session.target
 Type=simple
 # Template path only. Copying/enabling this unit is a future manual developer step.
 WorkingDirectory=%h/PARA
-ExecStart=/usr/bin/python3 %h/PARA/services/gateway/server.py --host 127.0.0.1 --port 4173
+EnvironmentFile=-%h/.config/para/account.env
+ExecStart=/usr/bin/python3 %h/PARA/services/api/server.py --host 127.0.0.1 --port 4173
 Restart=on-failure
 NoNewPrivileges=yes
 PrivateTmp=yes

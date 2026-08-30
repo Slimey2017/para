@@ -13,6 +13,35 @@ function demoArt(demo) {
 const STORE_INSTALL_KEY = "para.store.installed.v1";
 const STORE_CART_KEY = "para.store.cart.v1";
 const STORE_VIEW_KEY = "para.store.view.v1";
+const STORE_WISHLIST_KEY = "para.store.wishlist.v1";
+const MESSAGES_KEY = "para.messages.v1";
+
+function storeWishlistIds() {
+  const profile = getState().activeProfile || "P1";
+  try {
+    const all = JSON.parse(localStorage.getItem(STORE_WISHLIST_KEY) || "{}");
+    return Array.isArray(all[profile]) ? all[profile] : [];
+  } catch { return []; }
+}
+
+function saveStoreWishlistIds(ids) {
+  const profile = getState().activeProfile || "P1";
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(STORE_WISHLIST_KEY) || "{}"); } catch { all = {}; }
+  all[profile] = [...new Set(ids.filter(Boolean))];
+  localStorage.setItem(STORE_WISHLIST_KEY, JSON.stringify(all));
+  window.dispatchEvent(new CustomEvent("para-store-wishlist-change"));
+}
+
+export function toggleStoreWishlistItem(id) {
+  if (!id) return false;
+  const current = storeWishlistIds();
+  const adding = !current.includes(id);
+  saveStoreWishlistIds(adding ? [...current, id] : current.filter((value) => value !== id));
+  return adding;
+}
+
+export function isStoreWishlistItem(id) { return storeWishlistIds().includes(id); }
 
 function storeCartIds() {
   const profile = getState().activeProfile || "P1";
@@ -171,7 +200,7 @@ export function paraStoreScreen() {
     body: `<div class="parastore-environment" aria-hidden="true"></div>
       <section class="store-discovery-bar" aria-label="ParaStore tools">
         <label class="store-search"><span aria-hidden="true">⌕</span><span class="sr-only">Search ParaStore</span><input type="search" aria-label="Search ParaStore" placeholder="Search games, apps, developers, genres…" data-store-search autocomplete="off" /></label>
-        <button type="button" data-store-tool="wishlist">♡ <span>Wishlist</span></button>
+        <button type="button" data-store-tool="wishlist" aria-pressed="false">♡ <span>Wishlist</span><b data-store-wishlist-count>${storeWishlistIds().length}</b></button>
         <button type="button" class="store-cart-button" data-route="store-cart">🛒 <span>Cart</span><b data-store-cart-count>${storeCartCount()}</b></button>
         <button type="button" data-route="downloads">↓ <span>Downloads</span></button>
       </section>
@@ -217,16 +246,19 @@ export function activateParaStore() {
   let genre = saved.genre || "All";
   let runtime = saved.runtime || "ALL";
   let newest = Boolean(saved.newest);
+  let wishlistOnly = Boolean(saved.wishlistOnly);
   if (search) search.value = saved.query || "";
 
   const saveView = () => {
     try {
       sessionStorage.setItem(STORE_VIEW_KEY, JSON.stringify({
-        type, genre, runtime, newest, query: search?.value || "", scrollTop: scroller?.scrollTop || 0,
+        type, genre, runtime, newest, wishlistOnly, query: search?.value || "", scrollTop: scroller?.scrollTop || 0,
       }));
     } catch { /* session persistence is optional */ }
   };
   const syncFilterA11y = () => {
+    const wishlistButton = document.querySelector("[data-store-tool='wishlist']");
+    if (wishlistButton) { wishlistButton.classList.toggle("is-active", wishlistOnly); wishlistButton.setAttribute("aria-pressed", String(wishlistOnly)); const count = wishlistButton.querySelector("[data-store-wishlist-count]"); if (count) count.textContent = String(storeWishlistIds().length); }
     document.querySelectorAll("[data-store-type]").forEach((button) => {
       const active = !newest && button.dataset.storeType === type;
       button.classList.toggle("is-active", active);
@@ -258,15 +290,16 @@ export function activateParaStore() {
   };
   const render = () => {
     const q = (search?.value || "").trim().toLowerCase();
+    const wishlist = new Set(storeWishlistIds());
     let items = catalog.filter((item) => {
       const meta = item.store_metadata || {};
       const hay = [item.title, item.developer_name, meta.developer, meta.developer_name, meta.genre, meta.short_description, item.runtime, item.project_type].filter(Boolean).join(" ").toLowerCase();
-      return (type === "ALL" || (item.project_type || "GAME") === type) && (genre === "All" || String(meta.genre || "").toLowerCase().includes(genre.toLowerCase())) && runtimeMatch(item.runtime) && (!q || hay.includes(q));
+      return (!wishlistOnly || wishlist.has(item.id)) && (type === "ALL" || (item.project_type || "GAME") === type) && (genre === "All" || String(meta.genre || "").toLowerCase().includes(genre.toLowerCase())) && runtimeMatch(item.runtime) && (!q || hay.includes(q));
     });
     if (newest) items = [...items].sort((a,b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
     host.innerHTML = items.length ? items.map(liveStoreCard).join("") : `<div class="library-empty store-empty"><span>⌕</span><h2>No matches</h2><p>Try another genre, runtime, or search.</p></div>`;
     if (resultCount) resultCount.textContent = `${items.length} ${items.length === 1 ? "title" : "titles"}`;
-    if (shelfTitle) shelfTitle.textContent = q ? `Results for “${search.value.trim()}”` : newest ? "New Releases" : genre !== "All" ? genre : type === "GAME" ? "Games" : type === "APP" ? "Apps" : "Featured";
+    if (shelfTitle) shelfTitle.textContent = wishlistOnly ? "Wishlist" : q ? `Results for “${search.value.trim()}”` : newest ? "New Releases" : genre !== "All" ? genre : type === "GAME" ? "Games" : type === "APP" ? "Apps" : "Featured";
     const featured = items[0] || catalog[0];
     if (feature && featured) {
       const meta = featured.store_metadata || {}, assets = featured.asset_references || {}, hero = assetUrl(assets.hero || assets.cover || assets.icon);
@@ -279,6 +312,8 @@ export function activateParaStore() {
   const listeners = [];
   const on = (el, event, fn, options) => { if (el) { el.addEventListener(event, fn, options); listeners.push(() => el.removeEventListener(event, fn, options)); } };
   on(search, "input", () => { render(); });
+  on(document.querySelector("[data-store-tool='wishlist']"), "click", () => { wishlistOnly = !wishlistOnly; render(); });
+  on(window, "para-store-wishlist-change", () => render());
   document.querySelectorAll("[data-store-type]").forEach((button) => on(button, "click", () => { type = button.dataset.storeType; newest = false; render(); }));
   document.querySelectorAll("[data-store-sort]").forEach((button) => on(button, "click", () => { newest = true; type = "ALL"; render(); }));
   document.querySelectorAll("[data-store-genre]").forEach((button) => on(button, "click", () => { genre = button.dataset.storeGenre; render(); }));
@@ -377,7 +412,8 @@ export function activateStoreProduct() {
             <div class="store-product-meta"><strong>${escapeHtml(price)}</strong><small>${escapeHtml(item.runtime || "PARA")}</small>${commerce.hasIap || interactive.some(x => x.startsWith("In-Game Purchases")) ? `<small>In-Game Purchases</small>` : ""}</div>
             <div class="store-product-actions">
               ${isStoreItemInstalled(item.id) ? `<button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Play</button><button class="action-button action-button--ghost" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button>` : commerce.model === "FREE" ? `<button class="action-button" data-action="install-store-game" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Get</button>` : `<button class="action-button" data-action="buy-store-game-now" data-store-id="${escapeHtml(item.id)}" data-autofocus="true">Buy ${escapeHtml(price)}</button><button class="action-button action-button--ghost" data-action="add-store-cart" data-store-id="${escapeHtml(item.id)}">Add to Cart</button>`}
-              <button class="action-button action-button--ghost" data-action="store-more-info">•••</button>
+              <button class="action-button action-button--ghost" data-action="toggle-store-wishlist" data-store-id="${escapeHtml(item.id)}" aria-pressed="${isStoreWishlistItem(item.id)}">${isStoreWishlistItem(item.id) ? "♥ In Wishlist" : "♡ Wishlist"}</button>
+              <button class="action-button action-button--ghost" data-action="store-more-info" data-store-id="${escapeHtml(item.id)}">•••</button>
             </div>
           </div>
         </div>
@@ -456,14 +492,100 @@ export function activateStoreGame() {
   return () => {};
 }
 
+function messageStore() {
+  const profile = getState().activeProfile || "P1";
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "{}"); } catch { all = {}; }
+  if (!Array.isArray(all[profile]) || !all[profile].length) {
+    all[profile] = [{ id: "para-friends", title: "PARA Friends", initial: "P", messages: [{ id: `m-${Date.now()}`, sender: "PARA", text: "Welcome to Messages. This conversation is saved to your PARA profile on this console.", at: Date.now() }] }];
+    try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(all)); } catch {}
+  }
+  return { profile, all, threads: all[profile] };
+}
+
+function saveMessageStore(profile, all, threads) {
+  all[profile] = threads;
+  localStorage.setItem(MESSAGES_KEY, JSON.stringify(all));
+  window.dispatchEvent(new CustomEvent("para-messages-change"));
+}
+
+function renderMessageThreads(threads, activeId) {
+  return threads.map((thread, index) => {
+    const last = thread.messages?.[thread.messages.length - 1];
+    const time = last?.at ? new Date(last.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+    return `<button type="button" class="message-thread ${thread.id === activeId ? "is-active" : ""}" data-message-thread="${escapeHtml(thread.id)}" ${index === 0 ? "data-autofocus='true'" : ""}><i>${escapeHtml(thread.initial || (thread.title || "?")[0])}</i><span><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${escapeHtml(last?.text || "No messages yet")}</small></span><time>${escapeHtml(time)}</time></button>`;
+  }).join("");
+}
+
+function renderMessageConversation(thread) {
+  if (!thread) return `<section class="message-conversation"><div class="library-empty"><span>…</span><h2>Choose a conversation</h2></div></section>`;
+  const bubbles = (thread.messages || []).map((message) => `<div class="message-bubble ${message.sender === "You" ? "is-self" : ""}"><span>${escapeHtml(message.sender || "PARA")}</span><p>${escapeHtml(message.text || "")}</p></div>`).join("");
+  return `<section class="message-conversation" data-message-conversation><header><div><strong>${escapeHtml(thread.title)}</strong><small>Saved to this PARA profile</small></div></header><div class="message-conversation__body" data-message-body>${bubbles || `<div class="library-empty"><span>…</span><h2>No messages yet</h2></div>`}</div><form class="message-composer" data-message-form><button type="button" data-message-attach aria-label="Attach a file">＋</button><input type="file" data-message-file hidden><input placeholder="Message" aria-label="Message" data-message-input autocomplete="off"/><button type="submit">Send</button></form></section>`;
+}
+
 export function messagesScreen() {
+  const { threads } = messageStore();
+  const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id || "";
+  const active = threads.find((thread) => thread.id === activeId) || threads[0];
   return page({
     title: "Messages",
-    description: "Chat with friends across PARA.",
+    description: "Conversations saved to your PARA profile.",
     eyebrow: "Community",
     className: "messages-page",
-    body: `<div class="messages-shell"><aside class="messages-list"><div class="messages-list__head"><h2>Chats</h2><button aria-label="New message">＋</button></div><button class="message-thread is-active" data-autofocus="true"><i>S</i><span><strong>PARA Friends</strong><small>Welcome to Messages</small></span><time>Now</time></button><button class="message-thread"><i>＋</i><span><strong>Start a conversation</strong><small>Find a friend to message</small></span></button></aside><section class="message-conversation"><header><div><strong>PARA Friends</strong><small>Messages stay with your profile</small></div></header><div class="message-conversation__body"><div class="message-bubble"><span>PARA</span><p>Chat is ready for the social service. Friends, parties, voice, and real-time messages can plug into this screen next.</p></div></div><form class="message-composer" onsubmit="return false"><button type="button">＋</button><input placeholder="Message" aria-label="Message"/><button type="button">Send</button></form></section></div>`,
+    body: `<div class="messages-shell" data-messages-shell><aside class="messages-list"><div class="messages-list__head"><h2>Chats</h2><button type="button" aria-label="New message" data-message-new>＋</button></div><div data-message-thread-list>${renderMessageThreads(threads, active?.id || "")}</div></aside>${renderMessageConversation(active)}</div>`,
   });
+}
+
+export function activateMessages({ focus } = {}) {
+  const shell = document.querySelector("[data-messages-shell]");
+  if (!shell) return () => {};
+  const render = (requestedId = "") => {
+    const { threads } = messageStore();
+    const activeId = requestedId || sessionStorage.getItem("para.messages.active") || threads[0]?.id || "";
+    const active = threads.find((thread) => thread.id === activeId) || threads[0];
+    if (active) sessionStorage.setItem("para.messages.active", active.id);
+    const list = shell.querySelector("[data-message-thread-list]");
+    if (list) list.innerHTML = renderMessageThreads(threads, active?.id || "");
+    const conversation = shell.querySelector("[data-message-conversation]");
+    const fresh = document.createElement("div"); fresh.innerHTML = renderMessageConversation(active);
+    const replacement = fresh.firstElementChild;
+    if (conversation && replacement) conversation.replaceWith(replacement);
+    else if (replacement) shell.append(replacement);
+    requestAnimationFrame(() => { const body = shell.querySelector("[data-message-body]"); if (body) body.scrollTop = body.scrollHeight; });
+  };
+  const onClick = (event) => {
+    const threadButton = event.target.closest("[data-message-thread]");
+    if (threadButton) { render(threadButton.dataset.messageThread); return; }
+    if (event.target.closest("[data-message-new]")) {
+      const { profile, all, threads } = messageStore();
+      const id = `local-${Date.now()}`;
+      const next = [...threads, { id, title: `Conversation ${threads.length + 1}`, initial: "+", messages: [] }];
+      saveMessageStore(profile, all, next); sessionStorage.setItem("para.messages.active", id); render(id); shell.querySelector("[data-message-input]")?.focus(); return;
+    }
+    if (event.target.closest("[data-message-attach]")) shell.querySelector("[data-message-file]")?.click();
+  };
+  const onSubmit = (event) => {
+    if (!event.target.matches("[data-message-form]")) return;
+    event.preventDefault();
+    const input = event.target.querySelector("[data-message-input]");
+    const text = String(input?.value || "").trim(); if (!text) return;
+    const { profile, all, threads } = messageStore();
+    const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id;
+    const next = threads.map((thread) => thread.id === activeId ? { ...thread, messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }] } : thread);
+    saveMessageStore(profile, all, next); if (input) input.value = ""; render(activeId);
+  };
+  const onChange = (event) => {
+    if (!event.target.matches("[data-message-file]") || !event.target.files?.[0]) return;
+    const file = event.target.files[0];
+    const { profile, all, threads } = messageStore();
+    const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id;
+    const text = `Attachment selected: ${file.name}`;
+    const next = threads.map((thread) => thread.id === activeId ? { ...thread, messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }] } : thread);
+    saveMessageStore(profile, all, next); render(activeId);
+  };
+  shell.addEventListener("click", onClick); shell.addEventListener("submit", onSubmit); shell.addEventListener("change", onChange);
+  render(); focus?.focusFirst?.();
+  return () => { shell.removeEventListener("click", onClick); shell.removeEventListener("submit", onSubmit); shell.removeEventListener("change", onChange); };
 }
 
 export function activateDemoLibrary({ rerender }) {

@@ -212,8 +212,25 @@ export function resetParaScreen() {
 
 export function accountScreen() {
   const profile = getState().activeProfile || "P1";
-  const initials = profile.slice(0, 2).toUpperCase();
-  return page({ title: "Account", description: "The profile used for this PARA session.", eyebrow: "Local profile", body: `<section class="account-hero panel"><span class="avatar">${escapeHtml(initials)}</span><div><h2>${escapeHtml(profile)}</h2><p>Stored on this device</p></div><button class="action-button action-button--ghost" data-route="profiles" data-autofocus="true">Switch Profile</button></section><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Marks", meta: "Milestones earned on PARA", route: "marks", icon: "◇" })}${tile({ title: "Sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}</div>` });
+  return page({ title: "Account", description: "PARA Account and this console profile.", eyebrow: "Identity", body: `<section data-account-view><div class="library-loading"><span></span><strong>Checking PARA Account…</strong></div></section><section class="account-device panel"><div><span class="eyebrow">This console</span><h2>${escapeHtml(profile)}</h2><p>Your local profile remains usable offline.</p></div><button class="action-button action-button--ghost" data-route="profiles">Switch Local Profile</button></section>` });
+}
+
+export async function activateAccount() {
+  const host = document.querySelector("[data-account-view]");
+  if (!host) return;
+  const profile = getState().activeProfile || "P1";
+  try {
+    const session = await paraApi.authSession();
+    const user = session?.user;
+    if (!session?.signed_in || !user) {
+      host.innerHTML = `<section class="account-cloud panel"><div class="account-cloud__mark">P</div><div class="account-cloud__body"><span class="eyebrow">PARA Account</span><h2>Not signed in</h2><p>Sign in to connect this console to your PARA identity. Offline profiles still work without an account.</p><div class="account-cloud__actions"><button class="action-button" data-route="account-signin" data-autofocus="true">Sign In</button><button class="action-button action-button--ghost" data-route="account-signup">Create Account</button></div></div></section><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Marks", meta: "Local milestones for " + profile, route: "marks", icon: "◇" })}${tile({ title: "Local sign out", meta: "Return to profile selection", action: "sign-out", icon: "↗" })}</div>`;
+      return;
+    }
+    const initials = String(user.display_name || user.email || "P").split(/\s+/).filter(Boolean).slice(0,2).map((part)=>part[0]).join("").toUpperCase();
+    host.innerHTML = `<section class="account-hero panel"><span class="avatar">${escapeHtml(initials)}</span><div><span class="eyebrow">PARA Account</span><h2>${escapeHtml(user.display_name || "PARA User")}</h2><p>${escapeHtml(user.email || "")} · ${user.email_confirmed ? "Email verified" : "Email verification pending"}</p></div><span class="status-ok">Connected</span></section><div class="account-manage-grid"><section class="panel account-manage-card"><span class="eyebrow">Display name</span><h3>How you appear on PARA</h3><div class="account-inline-form"><input type="text" maxlength="32" value="${escapeHtml(user.display_name || "")}" data-account-new-display-name /><button class="action-button action-button--ghost" data-action="account-update-profile">Save</button></div></section><section class="panel account-manage-card"><span class="eyebrow">Security</span><h3>Change password</h3><div class="account-inline-form"><input type="password" minlength="8" autocomplete="new-password" placeholder="New password" data-account-new-password /><button class="action-button action-button--ghost" data-action="account-update-password">Update</button></div></section></div><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Marks", meta: "Milestones earned on PARA", route: "marks", icon: "◇" })}${tile({ title: "Sign out of PARA Account", meta: "Keep the local profile on this console", action: "account-cloud-signout", icon: "↗" })}</div>`;
+  } catch (error) {
+    host.innerHTML = `<section class="panel account-cloud"><div class="account-cloud__body"><span class="eyebrow">PARA Account</span><h2>Account service unavailable</h2><p>${escapeHtml(error?.message || "PARA could not reach the account service.")}</p><div class="account-cloud__actions"><button class="action-button" data-action="account-refresh" data-autofocus="true">Try Again</button></div></div></section>`;
+  }
 }
 
 export function powerScreen() {

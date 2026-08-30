@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -116,6 +116,29 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(payload["project_id"], definition["project_id"])
         self.assertEqual(payload["items"][0]["achievement_key"], "first_win")
         self.assertIn("/api/v1/store/asset?path=", payload["items"][0]["icon_url"])
+
+    def test_para_account_signup_validates_console_credentials(self):
+        status, payload, tokens = auth_sign_up("not-an-email", "short", "Player")
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "invalid_email")
+        self.assertIsNone(tokens)
+
+    def test_para_account_signin_normalizes_supabase_session(self):
+        remote = {
+            "access_token": "access", "refresh_token": "refresh", "expires_in": 3600,
+            "user": {"id": "user-1", "email": "player@example.com", "user_metadata": {"display_name": "Slimey"}, "email_confirmed_at": "2026-08-30T00:00:00Z"},
+        }
+        with patch("server._supabase_auth_request", return_value=(200, remote)):
+            status, payload, tokens = auth_sign_in("player@example.com", "password123")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["signed_in"])
+        self.assertEqual(payload["user"]["display_name"], "Slimey")
+        self.assertEqual(tokens["refresh_token"], "refresh")
+
+    def test_para_account_password_requires_eight_characters(self):
+        status, payload = auth_update_user("token", password="1234567")
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "weak_password")
 
     def test_unknown_route_returns_not_found(self):
         status, payload = resolve("/api/v1/does-not-exist")

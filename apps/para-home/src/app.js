@@ -10,7 +10,7 @@ import {
   SETUP_CHAPTERS, startupScreen, introScreen, setupScreen, activateIntro,
   activateSetupChapter, playSetupAudioTest, updateSetupControllerStatus,
 } from "./screens/boot.js";
-import { createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
+import { accountSignInScreen, accountSignUpScreen, createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
   appsScreen, activateApps, filterApps, launchSystemApplication,
@@ -21,14 +21,14 @@ import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip,
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
-  accountScreen, powerScreen, healthScreen, activateHealth, recoveryScreen, audioSettingsScreen,
+  accountScreen, activateAccount, powerScreen, healthScreen, activateHealth, recoveryScreen, audioSettingsScreen,
   notificationsScreen, aboutScreen, paraLabScreen, activateParaLab, resetParaScreen, savedDataScreen, activateSavedData,
 } from "./screens/system.js";
 import {
   gamesScreen, activateGames, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
-  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateParaStore, activateStoreProduct, activateStoreCart,
+  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateMessages, activateParaStore, activateStoreProduct, activateStoreCart,
   storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem, addStoreCartItem, removeStoreCartItem,
-  playCreatorTone, clearCreatorDrawing, currentStoreCartIds,
+  playCreatorTone, clearCreatorDrawing, currentStoreCartIds, toggleStoreWishlistItem,
 } from "./screens/experiences.js";
 import {
   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
@@ -77,6 +77,8 @@ const renderers = {
   login: loginScreen,
   profiles: profilesScreen,
   "create-profile": createProfileScreen,
+  "account-signin": accountSignInScreen,
+  "account-signup": accountSignUpScreen,
   home: homeScreen,
   apps: appsScreen,
   browser: browserScreen,
@@ -331,6 +333,8 @@ function render(route) {
     cleanupScreen = activateCreator();
   } else if (route === "community") {
     cleanupScreen = activateCommunity();
+  } else if (route === "messages") {
+    cleanupScreen = activateMessages({ focus });
   } else if (route === "parastore") {
     cleanupScreen = activateParaStore();
   } else if (route === "store-product") {
@@ -359,6 +363,8 @@ function render(route) {
     activateNetwork();
   } else if (route === "health") {
     activateHealth();
+  } else if (route === "account") {
+    activateAccount();
   } else if (route === "controller") {
     updateControllerScreen(controllerStatus);
     cleanupScreen = activateControllerScreen();
@@ -737,6 +743,35 @@ function launchStoreGameDirect(storeId) {
   return transitionIntoGame(source, storeGameTitle(id));
 }
 
+function rememberAccountReturn(route = "account") {
+  sessionStorage.setItem("para.account.return", route);
+}
+
+function accountReturnRoute() {
+  const route = sessionStorage.getItem("para.account.return") || "account";
+  sessionStorage.removeItem("para.account.return");
+  return renderers[route] ? route : "account";
+}
+
+function accountStatus(message = "", kind = "") {
+  const node = document.querySelector("[data-account-auth-status]");
+  if (!node) return;
+  node.textContent = message;
+  node.dataset.kind = kind;
+}
+
+async function finishCloudAccountAuth(result, target) {
+  const user = result?.user;
+  if (!user) return false;
+  const name = String(user.display_name || user.email?.split("@")[0] || "PARA User").trim().slice(0,24) || "PARA User";
+  if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
+  setState({ activeProfile: name, setupChoices: { accountMode: "online", profileName: name } });
+  await hydrateProfile(name);
+  toast("PARA Account connected", name);
+  navigate(accountReturnRoute(), { replace: true }, target);
+  return true;
+}
+
 async function handleAction(action, target) {
   const state = getState();
   switch (action) {
@@ -764,6 +799,73 @@ async function handleAction(action, target) {
     case "setup-network-later":
       setSetupChoice("networkChoice", "later");
       toast("Network", "Set up later");
+      break;
+    case "setup-account-signin":
+      rememberAccountReturn("setup");
+      navigate("account-signin", {}, target);
+      break;
+    case "setup-account-signup":
+      rememberAccountReturn("setup");
+      navigate("account-signup", {}, target);
+      break;
+    case "account-auth-back":
+      navigate(accountReturnRoute(), { replace: true }, target);
+      break;
+    case "account-signin-submit": {
+      const email = document.querySelector("[data-account-email]")?.value || "";
+      const password = document.querySelector("[data-account-password]")?.value || "";
+      accountStatus("Signing in…");
+      target.disabled = true;
+      try {
+        const result = await paraApi.authSignIn(email, password);
+        await finishCloudAccountAuth(result, target);
+      } catch (error) {
+        accountStatus(error?.message || "Sign in failed.", "error");
+        toast("Couldn’t sign in", error?.message || "Check your account details.");
+      } finally { if (target?.isConnected) target.disabled = false; }
+      break;
+    }
+    case "account-signup-submit": {
+      const displayName = document.querySelector("[data-account-display-name]")?.value || "";
+      const email = document.querySelector("[data-account-email]")?.value || "";
+      const password = document.querySelector("[data-account-password]")?.value || "";
+      const confirmation = document.querySelector("[data-account-password-confirm]")?.value || "";
+      if (password !== confirmation) { accountStatus("Passwords do not match.", "error"); break; }
+      accountStatus("Creating your PARA Account…");
+      target.disabled = true;
+      try {
+        const result = await paraApi.authSignUp(displayName, email, password);
+        if (result.signed_in) await finishCloudAccountAuth(result, target);
+        else {
+          accountStatus("Account created. Check your email to confirm it, then sign in.", "success");
+          toast("PARA Account created", "Check your email to confirm your account.");
+        }
+      } catch (error) {
+        accountStatus(error?.message || "Account creation failed.", "error");
+        toast("Couldn’t create account", error?.message || "Try again.");
+      } finally { if (target?.isConnected) target.disabled = false; }
+      break;
+    }
+    case "account-cloud-signout":
+      try { await paraApi.authSignOut(); } catch { /* local sign-out still wins */ }
+      setState({ setupChoices: { accountMode: "offline" } });
+      toast("PARA Account signed out");
+      if (router.current() === "account") rerender();
+      break;
+    case "account-update-profile": {
+      const displayName = document.querySelector("[data-account-new-display-name]")?.value || "";
+      try { const result = await paraApi.authUpdateProfile(displayName); toast("Display name updated", result?.user?.display_name || displayName); rerender(); }
+      catch (error) { toast("Couldn’t update account", error?.message || "Try again."); }
+      break;
+    }
+    case "account-update-password": {
+      const password = document.querySelector("[data-account-new-password]")?.value || "";
+      try { await paraApi.authUpdatePassword(password); toast("Password updated", "Your PARA Account password has changed."); const input=document.querySelector("[data-account-new-password]"); if(input) input.value=""; }
+      catch (error) { toast("Couldn’t update password", error?.message || "Use at least 8 characters."); }
+      break;
+    }
+    case "account-refresh":
+      activateAccount();
       break;
     case "setup-account-offline": {
       const profile = state.setupChoices.profileName?.trim() || "P1";
@@ -904,7 +1006,29 @@ async function handleAction(action, target) {
     case "network-recovery": toast("Network Recovery", "PARA Network recovery check started."); break;
     case "rollback-update": toast("Roll Back Update", "Rollback requires a previous verified system image."); break;
     case "safe-mode": toast("Safe Mode", "Safe Mode will load core PARA services only in the native build."); break;
-    case "open-save-history": toast("Save History", "Local restore points are protected. Cloud restore will appear when PARA Cloud is connected."); break;
+    case "open-save-history": {
+      const { listSaveData } = await import("./services/save-data.js");
+      const entry = listSaveData().find((item) => item.gameId === target.dataset.saveId);
+      if (!entry) { toast("Save data unavailable"); break; }
+      overlayReturnFocus = target;
+      const versions = entry.versions || [];
+      overlay.innerHTML = `<div class="media-viewer-scrim" data-action="close-control-center"></div><section class="save-history-dialog" role="dialog" aria-modal="true" aria-label="Save history"><header><div><span>SAVE HISTORY</span><strong>${entry.title}</strong></div><button type="button" data-action="close-control-center" aria-label="Close">×</button></header><div class="save-history-current"><span>Current save</span><strong>${new Date(entry.updatedAt).toLocaleString()}</strong><small>${entry.syncState || "Local"}</small></div><div class="save-history-list">${versions.length ? versions.map((version, index) => `<button type="button" data-action="restore-save-version" data-save-id="${entry.gameId}" data-version-index="${index}" ${index === 0 ? "data-autofocus='true'" : ""}><span>Restore point ${index + 1}</span><strong>${new Date(version.updatedAt || 0).toLocaleString()}</strong><small>${version.device || "Local"}</small></button>`).join("") : `<p>No older restore points yet.</p>`}</div><footer><button type="button" class="danger" data-action="delete-save-data" data-save-id="${entry.gameId}">Delete save data</button></footer></section>`;
+      overlay.hidden = false; overlay.classList.remove("is-closing"); requestAnimationFrame(() => focus.focusFirst());
+      break;
+    }
+    case "restore-save-version": {
+      const { restoreSaveVersion } = await import("./services/save-data.js");
+      const ok = restoreSaveVersion(target.dataset.saveId, Number(target.dataset.versionIndex));
+      closeControlCenter(false); toast(ok ? "Save restored" : "Restore failed");
+      if (router.current() === "saved-data") rerender();
+      break;
+    }
+    case "delete-save-data": {
+      const { deleteSaveData } = await import("./services/save-data.js");
+      deleteSaveData(target.dataset.saveId); closeControlCenter(false); toast("Save data deleted");
+      if (router.current() === "saved-data") rerender();
+      break;
+    }
     case "pause-download": pauseDownload(target.dataset.downloadId); toast("Download paused"); break;
     case "resume-download": resumeDownload(target.dataset.downloadId); toast("Download resumed"); break;
     case "cancel-download": cancelDownload(target.dataset.downloadId); toast("Download canceled"); break;
@@ -1208,6 +1332,14 @@ async function handleAction(action, target) {
         rerender();
       }
       break;
+    case "toggle-store-wishlist": {
+      const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
+      if (!id) break;
+      const added = toggleStoreWishlistItem(id);
+      toast(added ? "Added to Wishlist" : "Removed from Wishlist");
+      rerender();
+      break;
+    }
     case "checkout-store-cart": {
       try {
         const quote = await paraApi.storeCheckoutQuote(currentStoreCartIds());
@@ -1264,9 +1396,15 @@ async function handleAction(action, target) {
       requestAnimationFrame(() => focus.focusFirst());
       break;
     }
-    case "store-more-info":
-      toast("More options", "Wishlist and sharing can plug in here next.");
+    case "store-more-info": {
+      const id = target.dataset.storeId || sessionStorage.getItem("para.store.product") || "";
+      overlayReturnFocus = target;
+      overlay.innerHTML = `<div class="media-viewer-scrim" data-action="close-control-center"></div><section class="store-more-menu" role="dialog" aria-modal="true" aria-label="More game options"><header><strong>More options</strong><button type="button" data-action="close-control-center" aria-label="Close">×</button></header><div><button type="button" data-action="toggle-store-wishlist" data-store-id="${id}" data-autofocus="true">♡ Toggle Wishlist</button><button type="button" data-route="downloads">↓ Open Downloads</button><button type="button" data-route="media-gallery">▣ Media Gallery</button></div></section>`;
+      overlay.hidden = false;
+      overlay.classList.remove("is-closing");
+      requestAnimationFrame(() => focus.focusFirst());
       break;
+    }
     case "paraboard-key":
       paraBoardInsert(target.dataset.key || "", overlay, focus);
       break;
@@ -1360,6 +1498,7 @@ document.addEventListener("click", (event) => {
   }
   const target = event.target.closest("[data-route], [data-action]");
   if (!target || target.disabled || target.getAttribute("aria-disabled") === "true") return;
+  if (target.closest("form")) event.preventDefault();
   if (target.matches("[data-continue-item]") && target.dataset.storeId) {
     launchStoreGameDirect(target.dataset.storeId);
     return;

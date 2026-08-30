@@ -224,53 +224,63 @@ export class FocusManager {
   }
 
   onKeyDown(event) {
-    const direction = DIRECTION_KEYS[event.key];
-    const textEditing = event.target.matches?.("input:not([type='range']),textarea,select");
-    if (textEditing && (direction || event.key === "Enter" || (!event.ctrlKey && !event.metaKey && event.key.length === 1))) return;
+    // Native keydown events always include `key`, but embedded runtimes and
+    // controller/IME bridges can occasionally dispatch incomplete keyboard-like
+    // events. Never let one malformed event crash the entire PARA shell.
+    const key = typeof event?.key === "string" ? event.key : "";
+    if (!key) return;
+
+    const direction = DIRECTION_KEYS[key];
+    const target = event?.target;
+    const textEditing = Boolean(target?.matches?.("input:not([type='range']),textarea,select"));
+    if (textEditing && (direction || key === "Enter" || (!event.ctrlKey && !event.metaKey && key.length === 1))) return;
     if (direction) {
-      event.preventDefault();
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       if (!event.repeat) this.startDirection(direction);
-    } else if (event.key === "Enter" && this.current) {
-      event.preventDefault();
+    } else if (key === "Enter" && this.current) {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.handlers.confirm(this.current);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
+    } else if (key === "Escape") {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.handlers.back();
-    } else if (event.key.toLowerCase() === "p" && !this.paraKeyDown) {
-      event.preventDefault();
+    } else if (key.toLowerCase() === "p" && !this.paraKeyDown) {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.paraKeyDown = true;
       this.paraHoldTimer = setTimeout(() => {
         this.paraHoldTimer = null;
         if (this.paraKeyDown) this.handlers.paraHold();
       }, 650);
-    } else if (event.key === "PageUp") {
-      event.preventDefault();
+    } else if (key === "PageUp") {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.handlers.shoulder(-1);
-    } else if (event.key === "PageDown") {
-      event.preventDefault();
+    } else if (key === "PageDown") {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.handlers.shoulder(1);
-    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-      event.preventDefault();
+    } else if (key === "ContextMenu" || (event.shiftKey && key === "F10")) {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.handlers.secondary();
-    } else if (event.key.toLowerCase() === "y" && !event.target.matches("input,textarea")) {
-      event.preventDefault();
+    } else if (key.toLowerCase() === "y" && !target?.matches?.("input,textarea")) {
+      event.preventDefault?.();
       this.setInputDevice("keyboard");
       this.handlers.options();
     }
   }
 
   onKeyUp(event) {
-    const direction = DIRECTION_KEYS[event.key];
+    const key = typeof event?.key === "string" ? event.key : "";
+    if (!key) return;
+
+    const direction = DIRECTION_KEYS[key];
     if (direction) this.stopDirection(direction);
-    if (event.key.toLowerCase() !== "p" || !this.paraKeyDown) return;
-    event.preventDefault();
+    if (key.toLowerCase() !== "p" || !this.paraKeyDown) return;
+    event.preventDefault?.();
     this.paraKeyDown = false;
     if (this.paraHoldTimer) {
       clearTimeout(this.paraHoldTimer);

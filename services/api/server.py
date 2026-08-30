@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 import io
 import zipfile
+from http.cookies import SimpleCookie
 from pathlib import Path
 import sys
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +25,152 @@ HOME_ROOT = REPO_ROOT / "apps" / "para-home"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import system_layer  # noqa: E402
 
+
+
+AUTH_ACCESS_COOKIE = "para_access_token"
+AUTH_REFRESH_COOKIE = "para_refresh_token"
+
+
+def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
+    """Call Supabase Auth without exposing the publishable key or session tokens to PARA Home."""
+    base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
+    if not base or not key:
+        return 503, {"error": "account_not_configured", "message": "PARA Account is not configured on this system."}
+    headers = {"apikey": key, "Accept": "application/json"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(f"{base}{path}", data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            body = response.read().decode("utf-8")
+            return response.status, json.loads(body) if body else {}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = {"message": "PARA Account request failed."}
+        if not isinstance(parsed, dict):
+            parsed = {"message": "PARA Account request failed."}
+        return error.code, parsed
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return 502, {"error": "account_unavailable", "message": "PARA Account could not reach the account service."}
+
+
+def _public_auth_user(user: object) -> dict | None:
+    if not isinstance(user, dict) or not user.get("id"):
+        return None
+    metadata = user.get("user_metadata") if isinstance(user.get("user_metadata"), dict) else {}
+    email = str(user.get("email") or "")
+    display_name = str(metadata.get("display_name") or metadata.get("name") or (email.split("@", 1)[0] if email else "PARA User"))
+    return {
+        "id": str(user.get("id")),
+        "email": email,
+        "display_name": display_name[:32],
+        "email_confirmed": bool(user.get("email_confirmed_at") or user.get("confirmed_at")),
+        "created_at": user.get("created_at"),
+    }
+
+
+def _auth_message(payload: object, fallback: str) -> str:
+    if not isinstance(payload, dict):
+        return fallback
+    for key in ("msg", "message", "error_description", "error"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            text = value.strip()
+            # Do not leak internal URLs or raw server traces into the console UI.
+            return text[:240]
+    return fallback
+
+
+def auth_sign_up(email: str, password: str, display_name: str) -> tuple[int, dict, dict | None]:
+    email = str(email or "").strip().lower()
+    display_name = str(display_name or "").strip()[:32]
+    if "@" not in email or len(email) > 254:
+        return 400, {"error": "invalid_email", "message": "Enter a valid email address."}, None
+    if len(str(password or "")) < 8:
+        return 400, {"error": "weak_password", "message": "Password must be at least 8 characters."}, None
+    if not display_name:
+        return 400, {"error": "invalid_display_name", "message": "Choose a display name."}, None
+    status, payload = _supabase_auth_request(
+        "/auth/v1/signup",
+        payload={"email": email, "password": password, "data": {"display_name": display_name, "client": "PARA Console"}},
+    )
+    if status >= 400:
+        return status, {"error": "signup_failed", "message": _auth_message(payload, "Could not create the PARA Account.")}, None
+    user = _public_auth_user(payload.get("user") if isinstance(payload, dict) else None)
+    tokens = None
+    if isinstance(payload, dict) and payload.get("access_token") and payload.get("refresh_token"):
+        tokens = {"access_token": payload["access_token"], "refresh_token": payload["refresh_token"], "expires_in": int(payload.get("expires_in") or 3600)}
+    return 201, {"signed_in": bool(tokens), "requires_confirmation": not bool(tokens), "user": user}, tokens
+
+
+def auth_sign_in(email: str, password: str) -> tuple[int, dict, dict | None]:
+    email = str(email or "").strip().lower()
+    if not email or not password:
+        return 400, {"error": "credentials_required", "message": "Enter your email and password."}, None
+    status, payload = _supabase_auth_request(
+        "/auth/v1/token?grant_type=password",
+        payload={"email": email, "password": password},
+    )
+    if status >= 400:
+        return status, {"error": "signin_failed", "message": _auth_message(payload, "Email or password was not accepted.")}, None
+    user = _public_auth_user(payload.get("user") if isinstance(payload, dict) else None)
+    if not isinstance(payload, dict) or not payload.get("access_token") or not payload.get("refresh_token"):
+        return 502, {"error": "session_missing", "message": "PARA Account did not return a usable session."}, None
+    tokens = {"access_token": payload["access_token"], "refresh_token": payload["refresh_token"], "expires_in": int(payload.get("expires_in") or 3600)}
+    return 200, {"signed_in": True, "user": user}, tokens
+
+
+def auth_refresh(refresh_token: str) -> tuple[int, dict, dict | None]:
+    if not refresh_token:
+        return 401, {"signed_in": False}, None
+    status, payload = _supabase_auth_request("/auth/v1/token?grant_type=refresh_token", payload={"refresh_token": refresh_token})
+    if status >= 400 or not isinstance(payload, dict) or not payload.get("access_token"):
+        return 401, {"signed_in": False}, None
+    user = _public_auth_user(payload.get("user"))
+    tokens = {
+        "access_token": payload.get("access_token"),
+        "refresh_token": payload.get("refresh_token") or refresh_token,
+        "expires_in": int(payload.get("expires_in") or 3600),
+    }
+    return 200, {"signed_in": True, "user": user}, tokens
+
+
+def auth_user(access_token: str) -> tuple[int, dict]:
+    if not access_token:
+        return 401, {"signed_in": False}
+    status, payload = _supabase_auth_request("/auth/v1/user", method="GET", bearer=access_token)
+    if status >= 400:
+        return status, {"signed_in": False}
+    return 200, {"signed_in": True, "user": _public_auth_user(payload)}
+
+
+def auth_update_user(access_token: str, *, display_name: str | None = None, password: str | None = None) -> tuple[int, dict]:
+    if not access_token:
+        return 401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}
+    body: dict = {}
+    if display_name is not None:
+        clean = str(display_name).strip()[:32]
+        if not clean:
+            return 400, {"error": "invalid_display_name", "message": "Choose a display name."}
+        body["data"] = {"display_name": clean}
+    if password is not None:
+        if len(str(password)) < 8:
+            return 400, {"error": "weak_password", "message": "Password must be at least 8 characters."}
+        body["password"] = str(password)
+    if not body:
+        return 400, {"error": "nothing_to_update", "message": "Nothing changed."}
+    status, payload = _supabase_auth_request("/auth/v1/user", method="PUT", payload=body, bearer=access_token)
+    if status >= 400:
+        return status, {"error": "account_update_failed", "message": _auth_message(payload, "Could not update the PARA Account.")}
+    return 200, {"signed_in": True, "user": _public_auth_user(payload)}
 
 
 def _attach_store_pricing(items: list[dict]) -> list[dict]:
@@ -2224,14 +2371,53 @@ class ParaHandler(SimpleHTTPRequestHandler):
         self.send_error(404, "Directory listing is disabled")
         return None
 
-    def _send_json(self, status: int, payload: dict) -> None:
+    def _send_json(self, status: int, payload: dict, extra_headers: list[tuple[str, str]] | None = None) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        for key, value in extra_headers or []:
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _cookies(self) -> dict[str, str]:
+        jar = SimpleCookie()
+        try:
+            jar.load(self.headers.get("Cookie", ""))
+        except Exception:
+            return {}
+        return {key: morsel.value for key, morsel in jar.items()}
+
+    def _auth_cookie_headers(self, tokens: dict | None = None, *, clear: bool = False) -> list[tuple[str, str]]:
+        secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        suffix = "; Path=/; HttpOnly; SameSite=Strict" + ("; Secure" if secure else "")
+        if clear:
+            return [("Set-Cookie", f"{AUTH_ACCESS_COOKIE}=; Max-Age=0{suffix}"), ("Set-Cookie", f"{AUTH_REFRESH_COOKIE}=; Max-Age=0{suffix}")]
+        if not tokens:
+            return []
+        access = str(tokens.get("access_token") or "")
+        refresh = str(tokens.get("refresh_token") or "")
+        access_age = max(60, min(int(tokens.get("expires_in") or 3600), 86_400))
+        return [
+            ("Set-Cookie", f"{AUTH_ACCESS_COOKIE}={access}; Max-Age={access_age}{suffix}"),
+            ("Set-Cookie", f"{AUTH_REFRESH_COOKIE}={refresh}; Max-Age=2592000{suffix}"),
+        ]
+
+    def _auth_session(self) -> tuple[int, dict, list[tuple[str, str]]]:
+        cookies = self._cookies()
+        access = cookies.get(AUTH_ACCESS_COOKIE, "")
+        refresh = cookies.get(AUTH_REFRESH_COOKIE, "")
+        if access:
+            status, payload = auth_user(access)
+            if status == 200:
+                return status, payload, []
+        if refresh:
+            status, payload, tokens = auth_refresh(refresh)
+            if status == 200 and tokens:
+                return status, payload, self._auth_cookie_headers(tokens)
+        return 200, {"signed_in": False, "user": None}, self._auth_cookie_headers(clear=True) if access or refresh else []
 
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         try:
@@ -2263,6 +2449,10 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path == "/api/v1/auth/session":
+            status, payload, headers = self._auth_session()
+            self._send_json(status, payload, headers)
+            return
         if request.path == "/api/v1/backgrounds/custom":
             profile = parse_qs(request.query).get("profile", [""])[0]
             path, content_type = system_layer.custom_background_path(profile)
@@ -2330,6 +2520,40 @@ class ParaHandler(SimpleHTTPRequestHandler):
         payload = self._read_json()
         if payload is None:
             self._send_json(400, {"error": "invalid_request"})
+            return
+        if request.path == "/api/v1/auth/signup":
+            status, result, tokens = auth_sign_up(str(payload.get("email", "")), str(payload.get("password", "")), str(payload.get("display_name", "")))
+            self._send_json(status, result, self._auth_cookie_headers(tokens))
+            return
+        if request.path == "/api/v1/auth/signin":
+            status, result, tokens = auth_sign_in(str(payload.get("email", "")), str(payload.get("password", "")))
+            self._send_json(status, result, self._auth_cookie_headers(tokens))
+            return
+        if request.path == "/api/v1/auth/signout":
+            cookies = self._cookies()
+            access = cookies.get(AUTH_ACCESS_COOKIE, "")
+            if access:
+                _supabase_auth_request("/auth/v1/logout", method="POST", bearer=access)
+            self._send_json(200, {"signed_in": False, "user": None}, self._auth_cookie_headers(clear=True))
+            return
+        if request.path in {"/api/v1/auth/profile", "/api/v1/auth/password"}:
+            session_status, session, refreshed_headers = self._auth_session()
+            if session_status != 200 or not session.get("signed_in"):
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
+                return
+            cookies = self._cookies()
+            access = cookies.get(AUTH_ACCESS_COOKIE, "")
+            if refreshed_headers:
+                # A refresh happened; parse the newly issued access token directly from the header.
+                for key, value in refreshed_headers:
+                    if key.lower() == "set-cookie" and value.startswith(AUTH_ACCESS_COOKIE + "="):
+                        access = value.split(";", 1)[0].split("=", 1)[1]
+                        break
+            if request.path == "/api/v1/auth/profile":
+                status, result = auth_update_user(access, display_name=str(payload.get("display_name", "")))
+            else:
+                status, result = auth_update_user(access, password=str(payload.get("password", "")))
+            self._send_json(status, result, refreshed_headers)
             return
         if request.path == "/api/v1/apps/launch":
             status, result = system_layer.launch_application(str(payload.get("id", "")))
