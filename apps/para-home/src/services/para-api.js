@@ -11,6 +11,12 @@ async function request(path, options = {}) {
 
 export const paraApi = {
   capabilities: () => request("/api/v1/capabilities"),
+  authSession: () => request("/api/v1/auth/session"),
+  authSignIn: (email, password) => request("/api/v1/auth/signin", { method: "POST", body: JSON.stringify({ email, password }), signal: AbortSignal.timeout(12_000) }),
+  authSignUp: (displayName, email, password) => request("/api/v1/auth/signup", { method: "POST", body: JSON.stringify({ display_name: displayName, email, password }), signal: AbortSignal.timeout(12_000) }),
+  authSignOut: () => request("/api/v1/auth/signout", { method: "POST", body: JSON.stringify({}) }),
+  authUpdateProfile: (displayName) => request("/api/v1/auth/profile", { method: "POST", body: JSON.stringify({ display_name: displayName }) }),
+  authUpdatePassword: (password) => request("/api/v1/auth/password", { method: "POST", body: JSON.stringify({ password }) }),
   applications: () => request("/api/v1/apps"),
   storeCatalog: () => request("/api/v1/store/catalog"),
   storeProduct: (id) => request(`/api/v1/store/product?id=${encodeURIComponent(id)}`),

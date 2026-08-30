@@ -6,6 +6,8 @@ export const screens = [
   { id: "login", label: "Login", group: "identity" },
   { id: "profiles", label: "Profile selection", group: "identity" },
   { id: "create-profile", label: "Create profile", group: "identity" },
+  { id: "account-signin", label: "PARA Account sign in", group: "identity" },
+  { id: "account-signup", label: "PARA Account sign up", group: "identity" },
   { id: "home", label: "PARA Home", group: "home" },
   { id: "apps", label: "Apps library", group: "library" },
   { id: "browser", label: "PARA Browser", group: "apps" },

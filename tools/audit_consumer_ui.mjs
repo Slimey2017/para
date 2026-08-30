@@ -1,4 +1,5 @@
 globalThis.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
+globalThis.sessionStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
 globalThis.document = { documentElement: { dataset: {}, style: { setProperty() {} } } };
 
 const { readFile } = await import("node:fs/promises");
@@ -13,6 +14,7 @@ const system = await import("../apps/para-home/src/screens/system.js");
 const personalization = await import("../apps/para-home/src/screens/personalization.js");
 const experiences = await import("../apps/para-home/src/screens/experiences.js");
 const media = await import("../apps/para-home/src/screens/media.js");
+const browser = await import("../apps/para-home/src/screens/browser.js");
 
 const renderers = {
   startup: boot.startupScreen,
@@ -22,6 +24,7 @@ const renderers = {
   login: auth.loginScreen,
   home: home.homeScreen,
   apps: libraries.appsScreen,
+  browser: browser.browserScreen,
   games: experiences.gamesScreen,
   "media-gallery": media.mediaGalleryScreen,
   achievements: media.achievementsScreen,
@@ -29,6 +32,7 @@ const renderers = {
   parastore: experiences.paraStoreScreen,
   creator: experiences.creatorScreen,
   community: experiences.communityScreen,
+  messages: experiences.messagesScreen,
   marks: experiences.marksScreen,
   "demo-pong": () => experiences.gameScreen("demo-pong"),
   "demo-racer": () => experiences.gameScreen("demo-racer"),

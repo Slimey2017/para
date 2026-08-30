@@ -10,6 +10,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_para_account_auth_is_real_and_first_boot_buttons_are_enabled(self):
+        auth = (ROOT / "apps/para-home/src/screens/auth.js").read_text(encoding="utf-8")
+        boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn('data-action="setup-account-signin"', boot)
+        self.assertIn('data-action="setup-account-signup"', boot)
+        self.assertIn('data-account-signin-form', auth)
+        self.assertIn('data-account-signup-form', auth)
+        self.assertIn('/api/v1/auth/signin', api)
+        self.assertIn('/auth/v1/token?grant_type=password', server)
+        self.assertIn('HttpOnly; SameSite=Strict', server)
+
     def test_frontend_routes_have_renderers(self):
         manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
