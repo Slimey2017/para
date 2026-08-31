@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
+import server  # noqa: E402
 from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account  # noqa: E402
 import system_layer  # noqa: E402
 
@@ -185,7 +186,7 @@ class ApiContractTests(unittest.TestCase):
         url = steam_openid_login_url("state-token")
         parsed = urllib.parse.urlparse(url)
         query = urllib.parse.parse_qs(parsed.query)
-        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", "https://steamcommunity.com/openid/")
+        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", "https://steamcommunity.com/openid/login")
         self.assertEqual(query["openid.mode"], ["checkid_setup"])
         self.assertEqual(query["openid.realm"], ["https://para-wjvx.onrender.com/"])
         self.assertEqual(

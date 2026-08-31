@@ -68,8 +68,9 @@ PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"
 PARA_ACCOUNT_SUPABASE_URL = f"https://{PARA_ACCOUNT_SUPABASE_PROJECT_REF}.supabase.co"
 PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY"
 PARA_ACCOUNT_PUBLIC_URL = "https://para-wjvx.onrender.com/"
-STEAM_OPENID_ENDPOINT = "https://steamcommunity.com/openid/"
-STEAM_OPENID_VERIFY_URL = "https://steamcommunity.com/openid/login"
+STEAM_OPENID_DISCOVERY_URL = "https://steamcommunity.com/openid/"
+STEAM_OPENID_LOGIN_URL = "https://steamcommunity.com/openid/login"
+STEAM_OPENID_VERIFY_URL = STEAM_OPENID_LOGIN_URL
 STEAM_OPENID_STATE_COOKIE = "para_steam_openid_state"
 STEAM_OPENID_STATE_TTL_SECONDS = 10 * 60
 _email_verifications: dict[str, dict] = {}
@@ -167,7 +168,7 @@ def steam_openid_login_url(state: str) -> str:
         "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
     }
-    return f"{STEAM_OPENID_ENDPOINT}?{urllib.parse.urlencode(params)}"
+    return f"{STEAM_OPENID_LOGIN_URL}?{urllib.parse.urlencode(params)}"
 
 
 def verify_steam_openid(query: dict[str, list[str]], state: str) -> tuple[int, dict]:
