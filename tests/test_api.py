@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -155,6 +155,22 @@ class ApiContractTests(unittest.TestCase):
         self.assertTrue(payload["persisted"])
         self.assertEqual(payload["user"]["id"], "new-user")
         self.assertIsNone(tokens)
+
+    def test_para_account_recovery_requests_supabase_recover_without_enumerating(self):
+        with patch("server._supabase_auth_request", return_value=(200, {})) as request:
+            status, payload = auth_request_password_recovery("Player@Example.com")
+        self.assertEqual(status, 202)
+        self.assertTrue(payload["requested"])
+        request.assert_called_once_with("/auth/v1/recover", payload={"email": "player@example.com"})
+
+    def test_para_account_recovery_updates_password_with_recovery_session(self):
+        remote = {"id": "user-1", "email": "player@example.com", "user_metadata": {"display_name": "Player"}}
+        with patch("server._supabase_auth_request", return_value=(200, remote)) as request:
+            status, payload, tokens = auth_complete_password_recovery("recovery-access", "recovery-refresh", 3600, "newpassword123")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["password_updated"])
+        self.assertEqual(tokens["refresh_token"], "recovery-refresh")
+        request.assert_called_once_with("/auth/v1/user", method="PUT", payload={"password": "newpassword123"}, bearer="recovery-access")
 
     def test_para_account_signin_normalizes_supabase_session(self):
         remote = {

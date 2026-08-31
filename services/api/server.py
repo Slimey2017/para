@@ -188,6 +188,38 @@ def auth_sign_in(email: str, password: str) -> tuple[int, dict, dict | None]:
     return 200, {"signed_in": True, "user": user}, tokens
 
 
+
+def auth_request_password_recovery(email: str) -> tuple[int, dict]:
+    email = _normalize_verification_email(email)
+    if not email:
+        return 400, {"error": "invalid_email", "message": "Enter a valid email address."}
+    status, payload = _supabase_auth_request("/auth/v1/recover", payload={"email": email})
+    if status >= 400:
+        return status, {"error": "recovery_failed", "message": _auth_message(payload, "Could not request password recovery.")}
+    # Keep the response account-enumeration safe. Supabase intentionally does the same.
+    return 202, {"requested": True, "message": "If that email has a PARA Account, a recovery link is on the way."}
+
+
+def auth_complete_password_recovery(access_token: str, refresh_token: str, expires_in: object, password: str) -> tuple[int, dict, dict | None]:
+    access_token = str(access_token or "").strip()
+    refresh_token = str(refresh_token or "").strip()
+    if not access_token:
+        return 401, {"error": "recovery_session_missing", "message": "This recovery link is missing or expired. Request a new one."}, None
+    if len(str(password or "")) < 8:
+        return 400, {"error": "weak_password", "message": "Password must be at least 8 characters."}, None
+    status, payload = _supabase_auth_request("/auth/v1/user", method="PUT", payload={"password": str(password)}, bearer=access_token)
+    if status >= 400:
+        return status, {"error": "recovery_update_failed", "message": _auth_message(payload, "Could not update the PARA Account password.")}, None
+    user = _public_auth_user(payload)
+    if not user:
+        return 502, {"error": "recovery_user_missing", "message": "PARA Account recovery did not return a usable account."}, None
+    try:
+        ttl = int(expires_in or 3600)
+    except (TypeError, ValueError):
+        ttl = 3600
+    tokens = {"access_token": access_token, "refresh_token": refresh_token, "expires_in": ttl}
+    return 200, {"signed_in": True, "password_updated": True, "user": user}, tokens
+
 def auth_refresh(refresh_token: str) -> tuple[int, dict, dict | None]:
     if not refresh_token:
         return 401, {"signed_in": False}, None
@@ -2756,6 +2788,19 @@ class ParaHandler(SimpleHTTPRequestHandler):
             return
         if request.path == "/api/v1/auth/signin":
             status, result, tokens = auth_sign_in(str(payload.get("email", "")), str(payload.get("password", "")))
+            self._send_json(status, result, self._auth_cookie_headers(tokens))
+            return
+        if request.path == "/api/v1/auth/recovery/request":
+            status, result = auth_request_password_recovery(str(payload.get("email", "")))
+            self._send_json(status, result)
+            return
+        if request.path == "/api/v1/auth/recovery/complete":
+            status, result, tokens = auth_complete_password_recovery(
+                str(payload.get("access_token", "")),
+                str(payload.get("refresh_token", "")),
+                payload.get("expires_in", 3600),
+                str(payload.get("password", "")),
+            )
             self._send_json(status, result, self._auth_cookie_headers(tokens))
             return
         if request.path == "/api/v1/auth/verification/request":

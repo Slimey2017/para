@@ -7,6 +7,8 @@ export const screens = [
   { id: "profiles", label: "Profile selection", group: "identity" },
   { id: "create-profile", label: "Create profile", group: "identity" },
   { id: "account-signin", label: "PARA Account sign in", group: "identity" },
+  { id: "account-recovery", label: "PARA Account recovery", group: "identity" },
+  { id: "account-reset-password", label: "PARA Account reset password", group: "identity" },
   { id: "account-signup", label: "PARA Account sign up", group: "identity" },
   { id: "account-verify", label: "PARA Account email verification", group: "identity" },
   { id: "home", label: "PARA Home", group: "home" },

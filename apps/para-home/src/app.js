@@ -10,7 +10,7 @@ import {
   SETUP_CHAPTERS, startupScreen, introScreen, setupScreen, activateIntro,
   activateSetupChapter, playSetupAudioTest, updateSetupControllerStatus,
 } from "./screens/boot.js";
-import { accountSignInScreen, accountSignUpScreen, accountVerifyScreen, createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
+import { accountSignInScreen, accountSignUpScreen, accountRecoveryScreen, accountResetPasswordScreen, accountVerifyScreen, createProfileScreen, profilesScreen, loginScreen } from "./screens/auth.js";
 import { homeScreen, activateHome } from "./screens/home.js";
 import {
   appsScreen, activateApps, filterApps, launchSystemApplication,
@@ -79,6 +79,8 @@ const renderers = {
   profiles: profilesScreen,
   "create-profile": createProfileScreen,
   "account-signin": accountSignInScreen,
+  "account-recovery": accountRecoveryScreen,
+  "account-reset-password": accountResetPasswordScreen,
   "account-signup": accountSignUpScreen,
   "account-verify": accountVerifyScreen,
   home: homeScreen,
@@ -138,6 +140,21 @@ const GAME_RETURN_TRANSITION_KEY = "para.game.transition.return";
 const SHELL_PARAMS = new URLSearchParams(location.search);
 const IS_SUSPENDED_GAME_SHELL = window.parent !== window && SHELL_PARAMS.get("para_suspended_shell") === "1";
 const SUSPENDED_GAME_ID = SHELL_PARAMS.get("para_suspended_game") || "";
+let pendingAccountRecovery = null;
+
+function captureAccountRecoveryFromUrl() {
+  const raw = location.hash.replace(/^#/, "");
+  if (!raw || raw.startsWith("/")) return false;
+  const params = new URLSearchParams(raw);
+  if (params.get("type") !== "recovery" || !params.get("access_token")) return false;
+  pendingAccountRecovery = {
+    accessToken: params.get("access_token") || "",
+    refreshToken: params.get("refresh_token") || "",
+    expiresIn: Number(params.get("expires_in") || 3600),
+  };
+  history.replaceState({}, "", `${location.pathname}${location.search}#/account-reset-password`);
+  return true;
+}
 
 function sendSuspendedGameCommand(command, detail = {}) {
   if (!IS_SUSPENDED_GAME_SHELL) return false;
@@ -861,12 +878,50 @@ async function handleAction(action, target) {
         const result = await paraApi.authSignIn(email, password);
         await finishCloudAccountAuth(result, target);
       } catch (error) {
-        const ref = error?.payload?.project_ref ? ` · Supabase ${error.payload.project_ref}` : "";
-        accountStatus(`${error?.message || "Sign in failed."}${ref}`, "error");
-        toast("Couldn’t sign in", error?.message || "Check your account details.");
+        sessionStorage.setItem("para.account.recovery.email", String(email || "").trim().toLowerCase());
+        const message = error?.code === "signin_failed" ? "Email or password is incorrect. Try again or reset your password." : (error?.message || "Sign in failed.");
+        accountStatus(message, "error");
+        toast("Couldn’t sign in", message);
+        if (error?.payload?.project_ref) console.warn("PARA auth project", error.payload.project_ref);
       } finally { if (target?.isConnected) target.disabled = false; }
       break;
     }
+    case "account-recovery-submit": {
+      const email = document.querySelector("[data-account-email]")?.value || "";
+      const clean = String(email).trim().toLowerCase();
+      sessionStorage.setItem("para.account.recovery.email", clean);
+      accountStatus("Sending secure recovery link…");
+      target.disabled = true;
+      try {
+        await paraApi.authRequestPasswordRecovery(clean);
+        accountStatus("If that email has a PARA Account, a recovery link is on the way. Check your inbox and spam folder.", "success");
+        toast("Recovery link requested", "Check your email to continue.");
+      } catch (error) {
+        accountStatus(error?.message || "Couldn’t request password recovery.", "error");
+        toast("Recovery request failed", error?.message || "Try again in a moment.");
+      } finally { if (target?.isConnected) target.disabled = false; }
+      break;
+    }
+    case "account-recovery-complete": {
+      const password = document.querySelector("[data-account-new-password]")?.value || "";
+      const confirmation = document.querySelector("[data-account-new-password-confirm]")?.value || "";
+      if (!pendingAccountRecovery?.accessToken) { accountStatus("This recovery link is missing or expired. Request a new one.", "error"); break; }
+      if (password !== confirmation) { accountStatus("Passwords do not match.", "error"); break; }
+      if (password.length < 8) { accountStatus("Password must be at least 8 characters.", "error"); break; }
+      accountStatus("Updating password…");
+      target.disabled = true;
+      try {
+        const result = await paraApi.authCompletePasswordRecovery(pendingAccountRecovery.accessToken, pendingAccountRecovery.refreshToken, pendingAccountRecovery.expiresIn, password);
+        pendingAccountRecovery = null;
+        accountStatus("Password updated. Signing you in…", "success");
+        toast("Password updated", "Your PARA Account is ready.");
+        await finishCloudAccountAuth(result, target);
+      } catch (error) {
+        accountStatus(error?.message || "Couldn’t update the password. Request a new recovery link.", "error");
+      } finally { if (target?.isConnected) target.disabled = false; }
+      break;
+    }
+
     case "account-signup-submit": {
       const displayName = document.querySelector("[data-account-display-name]")?.value || "";
       const email = document.querySelector("[data-account-email]")?.value || "";
@@ -1779,6 +1834,8 @@ window.addEventListener("keydown", (event) => {
     navigate("para-lab");
   }
 });
+
+captureAccountRecoveryFromUrl();
 
 if (new URLSearchParams(location.search).get("reset") === "1") {
   resetState();
