@@ -33,7 +33,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('/auth/v1/token?grant_type=password', server)
         self.assertIn('PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"', server)
         self.assertIn('sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY', server)
-        self.assertIn('HttpOnly; SameSite=Strict', server)
+        self.assertIn('HttpOnly; SameSite=Lax', server)
 
     def test_frontend_routes_have_renderers(self):
         manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
@@ -259,7 +259,8 @@ class RepositoryTests(unittest.TestCase):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         migration = (ROOT / "supabase/secure_gaming_account_links.sql").read_text(encoding="utf-8")
         self.assertIn('data-action="setup-connect-provider"', boot)
-        self.assertIn('data-provider="steam"', boot)
+        self.assertIn('["steam", "Steam"]', boot)
+        self.assertIn('data-provider="${id}"', boot)
         self.assertIn('Coming soon', boot)
         self.assertIn('window.location.assign("/api/v1/integrations/steam/connect")', app)
         self.assertIn('steamStatus:', api)
@@ -270,6 +271,29 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("SameSite=Lax", server)
         self.assertIn("gaming_accounts_select_own", migration)
         self.assertIn("auth.uid()", migration)
+
+    def test_google_youtube_setup_uses_real_oauth_connection_flow(self):
+        boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        migration = (ROOT / "supabase/secure_external_account_links.sql").read_text(encoding="utf-8")
+        self.assertIn('["google", "Google / YouTube"]', boot)
+        self.assertIn('data-provider="${id}"', boot)
+        self.assertIn('window.location.assign("/api/v1/integrations/google/connect")', app)
+        self.assertIn('googleStatus:', api)
+        self.assertIn('googleDisconnect:', api)
+        self.assertIn('GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"', server)
+        self.assertIn('"https://www.googleapis.com/auth/youtube.readonly"', server)
+        self.assertNotIn('"https://www.googleapis.com/auth/youtube.upload",\n)', server)
+        self.assertIn('"/api/v1/integrations/google/callback"', server)
+        self.assertIn('GOOGLE_YOUTUBE_CHANNELS_URL', server)
+        self.assertIn('PARA_GOOGLE_CLIENT_ID', render)
+        self.assertIn('PARA_GOOGLE_CLIENT_SECRET', render)
+        self.assertIn('external_accounts_select_own', migration)
+        self.assertIn('OAuth access/refresh tokens are intentionally NOT stored', migration)
+        self.assertIn('auth.uid()', migration)
 
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")

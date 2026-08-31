@@ -162,20 +162,31 @@ function captureIntegrationReturnFromUrl() {
   const separator = raw.indexOf("?");
   if (separator < 0 || raw.slice(0, separator) !== "setup") return false;
   const params = new URLSearchParams(raw.slice(separator + 1));
-  if (params.get("integration") !== "steam") return false;
+  const integration = params.get("integration") || "";
+  if (!["steam", "google"].includes(integration)) return false;
+  const group = integration === "steam" ? "gamingAccounts" : "otherAccounts";
+  const label = integration === "steam" ? "Steam" : "Google / YouTube";
   const status = params.get("status") || "";
   if (status === "connected") {
-    setSetupAccountChoice("gamingAccounts", "steam", "connected");
-    pendingIntegrationNotice = { title: "Steam connected", message: "Your Steam account is linked to this PARA Account." };
+    setSetupAccountChoice(group, integration, "connected");
+    pendingIntegrationNotice = {
+      title: `${label} connected`,
+      message: integration === "google"
+        ? (params.get("youtube") === "none" ? "Your Google account is linked. No YouTube channel was found on it." : "Your Google account and YouTube channel are linked to this PARA Account.")
+        : "Your Steam account is linked to this PARA Account.",
+    };
   } else if (status === "cancelled") {
-    setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
-    pendingIntegrationNotice = { title: "Steam connection cancelled", message: "Nothing was changed." };
+    setSetupAccountChoice(group, integration, "disconnected");
+    pendingIntegrationNotice = { title: `${label} connection cancelled`, message: "Nothing was changed." };
   } else if (status === "signin_required") {
-    setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
-    pendingIntegrationNotice = { title: "Sign in to PARA first", message: "A PARA Account is required before Steam can be linked." };
+    setSetupAccountChoice(group, integration, "disconnected");
+    pendingIntegrationNotice = { title: "Sign in to PARA first", message: `A PARA Account is required before ${label} can be linked.` };
+  } else if (status === "config_required" && integration === "google") {
+    setSetupAccountChoice(group, integration, "disconnected");
+    pendingIntegrationNotice = { title: "Google setup required", message: "Add PARA's Google OAuth client ID and secret on Render, then try again." };
   } else if (status === "error") {
-    setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
-    pendingIntegrationNotice = { title: "Steam connection failed", message: "PARA could not verify or save that Steam account. Try again." };
+    setSetupAccountChoice(group, integration, "disconnected");
+    pendingIntegrationNotice = { title: `${label} connection failed`, message: `PARA could not verify or save that ${label} account. Try again.` };
   }
   history.replaceState({}, "", `${location.pathname}${location.search}#/setup`);
   return true;
@@ -1066,30 +1077,35 @@ async function handleAction(action, target) {
     }
     case "setup-connect-provider": {
       const provider = target.dataset.provider;
-      if (provider !== "steam") {
-        toast("Coming soon", "That gaming service is not supported yet.");
+      if (!["steam", "google"].includes(provider)) {
+        toast("Coming soon", "That account service is not supported yet.");
         break;
       }
       if (state.setupChoices.accountMode !== "online") {
-        toast("Sign in to PARA first", "Connect your PARA Account before linking Steam.");
+        toast("Sign in to PARA first", "Connect your PARA Account before linking another service.");
         break;
       }
-      setSetupAccountChoice("gamingAccounts", "steam", "connecting");
+      const group = provider === "steam" ? "gamingAccounts" : "otherAccounts";
+      setSetupAccountChoice(group, provider, "connecting");
       target.disabled = true;
-      window.location.assign("/api/v1/integrations/steam/connect");
+      if (provider === "steam") window.location.assign("/api/v1/integrations/steam/connect");
+      else window.location.assign("/api/v1/integrations/google/connect");
       break;
     }
     case "setup-disconnect-provider": {
       const provider = target.dataset.provider;
-      if (provider !== "steam") break;
+      if (!["steam", "google"].includes(provider)) break;
+      const group = provider === "steam" ? "gamingAccounts" : "otherAccounts";
+      const label = provider === "steam" ? "Steam" : "Google / YouTube";
       target.disabled = true;
       try {
-        await paraApi.steamDisconnect();
-        setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
-        toast("Steam disconnected", "The Steam account link was removed from PARA.");
+        if (provider === "steam") await paraApi.steamDisconnect();
+        else await paraApi.googleDisconnect();
+        setSetupAccountChoice(group, provider, "disconnected");
+        toast(`${label} disconnected`, `The ${label} account link was removed from PARA.`);
         rerender();
       } catch (error) {
-        toast("Couldn’t disconnect Steam", error?.message || "Try again in a moment.");
+        toast(`Couldn’t disconnect ${label}`, error?.message || "Try again in a moment.");
       } finally {
         if (target?.isConnected) target.disabled = false;
       }

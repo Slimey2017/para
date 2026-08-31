@@ -9,8 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-import server  # noqa: E402
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -164,14 +163,6 @@ class ApiContractTests(unittest.TestCase):
         self.assertTrue(payload["requested"])
         request.assert_called_once_with("/auth/v1/recover?redirect_to=https%3A%2F%2Fpara-wjvx.onrender.com%2F", payload={"email": "player@example.com"})
 
-    def test_para_account_recovery_never_falls_back_to_localhost(self):
-        with patch("server._supabase_auth_request", return_value=(200, {})) as request:
-            status, _ = auth_request_password_recovery("player@example.com")
-        self.assertEqual(status, 202)
-        recovery_path = request.call_args.args[0]
-        self.assertIn("para-wjvx.onrender.com", recovery_path)
-        self.assertNotIn("localhost", recovery_path)
-
     def test_para_account_recovery_updates_password_with_recovery_session(self):
         remote = {"id": "user-1", "email": "player@example.com", "user_metadata": {"display_name": "Player"}}
         with patch("server._supabase_auth_request", return_value=(200, remote)) as request:
@@ -240,6 +231,82 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(kwargs["bearer"], "user-jwt")
         self.assertEqual(kwargs["payload"]["para_user_id"], "11111111-1111-1111-1111-111111111111")
         self.assertEqual(kwargs["payload"]["provider_user_id"], "76561198000000000")
+
+    def test_google_oauth_login_requests_identity_and_youtube_readonly(self):
+        import urllib.parse
+        with patch("server.GOOGLE_OAUTH_CLIENT_ID", "google-client"), patch("server.GOOGLE_OAUTH_CLIENT_SECRET", "google-secret"):
+            url = google_oauth_login_url("state-token")
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", "https://accounts.google.com/o/oauth2/v2/auth")
+        self.assertEqual(query["client_id"], ["google-client"])
+        self.assertEqual(query["redirect_uri"], ["https://para-wjvx.onrender.com/api/v1/integrations/google/callback"])
+        self.assertEqual(query["state"], ["state-token"])
+        scopes = query["scope"][0].split()
+        self.assertIn("openid", scopes)
+        self.assertIn("email", scopes)
+        self.assertIn("profile", scopes)
+        self.assertIn("https://www.googleapis.com/auth/youtube.readonly", scopes)
+        self.assertNotIn("https://www.googleapis.com/auth/youtube.upload", scopes)
+
+    def test_youtube_channel_reads_authenticated_channel_and_creator_snapshot(self):
+        payload = {
+            "items": [{
+                "id": "UC123",
+                "snippet": {
+                    "title": "PARA Creator",
+                    "customUrl": "@paracreator",
+                    "thumbnails": {"high": {"url": "https://yt.example/avatar.jpg"}},
+                },
+                "statistics": {
+                    "subscriberCount": "5000",
+                    "viewCount": "1234567",
+                    "videoCount": "42",
+                    "hiddenSubscriberCount": False,
+                },
+            }]
+        }
+        with patch("server._google_bearer_json", return_value=(200, payload)) as request:
+            status, channel = youtube_channel("google-access")
+        self.assertEqual(status, 200)
+        self.assertTrue(channel["found"])
+        self.assertEqual(channel["youtube_channel_id"], "UC123")
+        self.assertEqual(channel["youtube_channel_title"], "PARA Creator")
+        self.assertEqual(channel["youtube_subscriber_count"], 5000)
+        self.assertEqual(channel["youtube_view_count"], 1234567)
+        self.assertEqual(channel["youtube_video_count"], 42)
+        self.assertIn("mine=true", request.call_args.args[0])
+        self.assertIn("part=snippet%2Cstatistics", request.call_args.args[0])
+
+    def test_google_link_persists_identity_and_youtube_metadata_without_oauth_token(self):
+        identity = {
+            "provider_user_id": "google-user-1",
+            "email": "creator@example.com",
+            "display_name": "Creator",
+            "avatar_url": "https://google.example/avatar.jpg",
+        }
+        channel = {
+            "found": True,
+            "youtube_channel_id": "UC123",
+            "youtube_channel_title": "PARA Creator",
+            "youtube_custom_url": "@paracreator",
+            "youtube_avatar_url": "https://yt.example/avatar.jpg",
+            "youtube_subscriber_count": 5000,
+            "youtube_view_count": 1234567,
+            "youtube_video_count": 42,
+            "youtube_hidden_subscriber_count": False,
+        }
+        with patch("server._supabase_account_rest_request", return_value=(201, [{"provider": "google"}])) as request:
+            status, payload = connect_external_account("user-jwt", "11111111-1111-1111-1111-111111111111", identity, channel)
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["connected"])
+        args, kwargs = request.call_args
+        self.assertIn("external_accounts?on_conflict=para_user_id,provider", args[0])
+        self.assertEqual(kwargs["bearer"], "user-jwt")
+        self.assertEqual(kwargs["payload"]["youtube_channel_id"], "UC123")
+        self.assertEqual(kwargs["payload"]["youtube_subscriber_count"], 5000)
+        self.assertNotIn("access_token", kwargs["payload"])
+        self.assertNotIn("refresh_token", kwargs["payload"])
 
     def test_para_account_signin_normalizes_supabase_session(self):
         remote = {

@@ -73,6 +73,20 @@ STEAM_OPENID_LOGIN_URL = "https://steamcommunity.com/openid/login"
 STEAM_OPENID_VERIFY_URL = STEAM_OPENID_LOGIN_URL
 STEAM_OPENID_STATE_COOKIE = "para_steam_openid_state"
 STEAM_OPENID_STATE_TTL_SECONDS = 10 * 60
+GOOGLE_OAUTH_CLIENT_ID = _env_config("PARA_GOOGLE_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = _env_config("PARA_GOOGLE_CLIENT_SECRET", "")
+GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_YOUTUBE_CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
+GOOGLE_OAUTH_STATE_COOKIE = "para_google_oauth_state"
+GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60
+GOOGLE_OAUTH_SCOPES = (
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/youtube.readonly",
+)
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
@@ -277,6 +291,235 @@ def disconnect_gaming_account(access_token: str, provider: str = "steam") -> tup
     )
     if status >= 400:
         return status, {"error": "gaming_account_disconnect_failed", "message": "PARA could not disconnect that Steam account."}
+    return 200, {"provider": provider, "connected": False}
+
+
+def google_oauth_configured() -> bool:
+    return bool(GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET)
+
+
+def _google_callback_url() -> str:
+    return PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/api/v1/integrations/google/callback"
+
+
+def google_oauth_login_url(state: str) -> str:
+    """Build the Google OAuth consent URL for identity + YouTube read-only access."""
+    if not google_oauth_configured():
+        return ""
+    params = {
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "redirect_uri": _google_callback_url(),
+        "response_type": "code",
+        "scope": " ".join(GOOGLE_OAUTH_SCOPES),
+        "state": str(state),
+        "include_granted_scopes": "true",
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    return f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
+
+
+def exchange_google_oauth_code(code: str) -> tuple[int, dict]:
+    if not google_oauth_configured():
+        return 503, {"error": "google_not_configured", "message": "Google / YouTube connection is not configured yet."}
+    code = str(code or "").strip()
+    if not code:
+        return 400, {"error": "google_code_missing", "message": "Google did not return an authorization code."}
+    payload = urllib.parse.urlencode({
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": _google_callback_url(),
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        GOOGLE_OAUTH_TOKEN_URL,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            body = response.read().decode("utf-8")
+            result = json.loads(body) if body else {}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            result = json.loads(body)
+        except json.JSONDecodeError:
+            result = {}
+        message = str(result.get("error_description") or result.get("error") or "Google rejected the account connection.")
+        return error.code, {"error": "google_token_exchange_failed", "message": message[:240]}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return 502, {"error": "google_unavailable", "message": "PARA could not reach Google sign-in."}
+    access_token = str(result.get("access_token") or "") if isinstance(result, dict) else ""
+    if not access_token:
+        return 502, {"error": "google_token_missing", "message": "Google did not return a usable account session."}
+    # V41 deliberately uses the access token only during this callback. It is not
+    # persisted in public.external_accounts or returned to PARA Home.
+    return 200, {"access_token": access_token, "scope": str(result.get("scope") or "")}
+
+
+def _google_bearer_json(url: str, access_token: str) -> tuple[int, dict]:
+    request = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            body = response.read().decode("utf-8")
+            payload = json.loads(body) if body else {}
+            return response.status, payload if isinstance(payload, dict) else {}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            payload = {}
+        return error.code, payload if isinstance(payload, dict) else {}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return 502, {}
+
+
+def google_identity(access_token: str) -> tuple[int, dict]:
+    status, payload = _google_bearer_json(GOOGLE_USERINFO_URL, access_token)
+    provider_user_id = str(payload.get("sub") or "") if isinstance(payload, dict) else ""
+    if status >= 400 or not provider_user_id:
+        return status if status >= 400 else 502, {"error": "google_identity_failed", "message": "PARA could not read the connected Google account."}
+    return 200, {
+        "provider_user_id": provider_user_id,
+        "email": str(payload.get("email") or ""),
+        "display_name": str(payload.get("name") or payload.get("email") or "Google User")[:120],
+        "avatar_url": str(payload.get("picture") or "")[:1000],
+    }
+
+
+def youtube_channel(access_token: str) -> tuple[int, dict]:
+    query = urllib.parse.urlencode({"part": "snippet,statistics", "mine": "true", "maxResults": "1"})
+    status, payload = _google_bearer_json(f"{GOOGLE_YOUTUBE_CHANNELS_URL}?{query}", access_token)
+    if status >= 400:
+        return status, {"error": "youtube_channel_failed", "message": "PARA could not read this account's YouTube channel. Make sure the YouTube Data API is enabled."}
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not items:
+        return 200, {"found": False}
+    channel = items[0] if isinstance(items[0], dict) else {}
+    snippet = channel.get("snippet") if isinstance(channel.get("snippet"), dict) else {}
+    statistics = channel.get("statistics") if isinstance(channel.get("statistics"), dict) else {}
+    thumbnails = snippet.get("thumbnails") if isinstance(snippet.get("thumbnails"), dict) else {}
+    avatar = ""
+    for size in ("high", "medium", "default"):
+        candidate = thumbnails.get(size) if isinstance(thumbnails.get(size), dict) else {}
+        if candidate.get("url"):
+            avatar = str(candidate.get("url"))
+            break
+    def number(name: str) -> int | None:
+        value = statistics.get(name)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+    return 200, {
+        "found": True,
+        "youtube_channel_id": str(channel.get("id") or ""),
+        "youtube_channel_title": str(snippet.get("title") or "")[:120],
+        "youtube_custom_url": str(snippet.get("customUrl") or "")[:240],
+        "youtube_avatar_url": avatar[:1000],
+        "youtube_subscriber_count": number("subscriberCount"),
+        "youtube_view_count": number("viewCount"),
+        "youtube_video_count": number("videoCount"),
+        "youtube_hidden_subscriber_count": bool(statistics.get("hiddenSubscriberCount", False)),
+    }
+
+
+def external_account_status(access_token: str, provider: str = "google") -> tuple[int, dict]:
+    if provider != "google":
+        return 400, {"error": "provider_unsupported", "message": "That external account provider is not supported yet."}
+    quoted = urllib.parse.quote(provider, safe="")
+    select = "provider,provider_user_id,email,display_name,avatar_url,youtube_channel_id,youtube_channel_title,youtube_custom_url,youtube_subscriber_count,youtube_view_count,youtube_video_count,youtube_hidden_subscriber_count,connected_at,updated_at"
+    status, payload = _supabase_account_rest_request(
+        f"/rest/v1/external_accounts?select={select}&provider=eq.{quoted}&limit=1",
+        bearer=access_token,
+    )
+    if status >= 400:
+        return status, {"error": "external_account_storage_failed", "message": "PARA could not read connected external accounts."}
+    rows = payload if isinstance(payload, list) else []
+    if not rows:
+        return 200, {"provider": provider, "connected": False, "configured": google_oauth_configured()}
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    return 200, {
+        "provider": provider,
+        "connected": True,
+        "configured": google_oauth_configured(),
+        "provider_user_id": str(row.get("provider_user_id") or ""),
+        "email": row.get("email"),
+        "display_name": row.get("display_name"),
+        "avatar_url": row.get("avatar_url"),
+        "youtube_channel_id": row.get("youtube_channel_id"),
+        "youtube_channel_title": row.get("youtube_channel_title"),
+        "youtube_custom_url": row.get("youtube_custom_url"),
+        "youtube_subscriber_count": row.get("youtube_subscriber_count"),
+        "youtube_view_count": row.get("youtube_view_count"),
+        "youtube_video_count": row.get("youtube_video_count"),
+        "youtube_hidden_subscriber_count": row.get("youtube_hidden_subscriber_count"),
+        "connected_at": row.get("connected_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def connect_external_account(access_token: str, para_user_id: str, identity: dict, channel: dict) -> tuple[int, dict]:
+    provider_user_id = str(identity.get("provider_user_id") or "")
+    if not provider_user_id:
+        return 400, {"error": "google_identity_missing", "message": "Google did not return a usable account identity."}
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    channel = channel if isinstance(channel, dict) else {}
+    record = {
+        "para_user_id": str(para_user_id),
+        "provider": "google",
+        "provider_user_id": provider_user_id,
+        "email": str(identity.get("email") or "") or None,
+        "display_name": str(identity.get("display_name") or "") or None,
+        "avatar_url": str(channel.get("youtube_avatar_url") or identity.get("avatar_url") or "") or None,
+        "youtube_channel_id": str(channel.get("youtube_channel_id") or "") or None,
+        "youtube_channel_title": str(channel.get("youtube_channel_title") or "") or None,
+        "youtube_custom_url": str(channel.get("youtube_custom_url") or "") or None,
+        "youtube_subscriber_count": channel.get("youtube_subscriber_count"),
+        "youtube_view_count": channel.get("youtube_view_count"),
+        "youtube_video_count": channel.get("youtube_video_count"),
+        "youtube_hidden_subscriber_count": channel.get("youtube_hidden_subscriber_count"),
+        "connected_at": timestamp,
+        "updated_at": timestamp,
+    }
+    status, payload = _supabase_account_rest_request(
+        "/rest/v1/external_accounts?on_conflict=para_user_id,provider",
+        method="POST",
+        payload=record,
+        bearer=access_token,
+        prefer="resolution=merge-duplicates,return=representation",
+    )
+    if status >= 400:
+        return status, {"error": "external_account_link_failed", "message": "PARA could not save the Google / YouTube account connection."}
+    return 200, {
+        "provider": "google",
+        "connected": True,
+        "provider_user_id": provider_user_id,
+        "youtube_channel_id": record["youtube_channel_id"],
+        "youtube_channel_title": record["youtube_channel_title"],
+    }
+
+
+def disconnect_external_account(access_token: str, provider: str = "google") -> tuple[int, dict]:
+    if provider != "google":
+        return 400, {"error": "provider_unsupported", "message": "That external account provider is not supported yet."}
+    quoted = urllib.parse.quote(provider, safe="")
+    status, _ = _supabase_account_rest_request(
+        f"/rest/v1/external_accounts?provider=eq.{quoted}",
+        method="DELETE",
+        bearer=access_token,
+        prefer="return=minimal",
+    )
+    if status >= 400:
+        return status, {"error": "external_account_disconnect_failed", "message": "PARA could not disconnect that Google / YouTube account."}
     return 200, {"provider": provider, "connected": False}
 
 
@@ -2840,6 +3083,13 @@ class ParaHandler(SimpleHTTPRequestHandler):
             return [("Set-Cookie", f"{STEAM_OPENID_STATE_COOKIE}=; Max-Age=0{suffix}")]
         return [("Set-Cookie", f"{STEAM_OPENID_STATE_COOKIE}={state}; Max-Age={STEAM_OPENID_STATE_TTL_SECONDS}{suffix}")]
 
+    def _google_state_cookie_headers(self, state: str = "", *, clear: bool = False) -> list[tuple[str, str]]:
+        secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        suffix = "; Path=/api/v1/integrations/google/callback; HttpOnly; SameSite=Lax" + ("; Secure" if secure else "")
+        if clear:
+            return [("Set-Cookie", f"{GOOGLE_OAUTH_STATE_COOKIE}=; Max-Age=0{suffix}")]
+        return [("Set-Cookie", f"{GOOGLE_OAUTH_STATE_COOKIE}={state}; Max-Age={GOOGLE_OAUTH_STATE_TTL_SECONDS}{suffix}")]
+
     def _cookies(self) -> dict[str, str]:
         jar = SimpleCookie()
         try:
@@ -2923,6 +3173,67 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path == "/api/v1/integrations/google/connect":
+            status, _, _, refreshed_headers = self._authenticated_access()
+            destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"
+            if status != 200:
+                self._send_redirect(destination_base + "&status=signin_required", extra_headers=refreshed_headers)
+                return
+            if not google_oauth_configured():
+                self._send_redirect(destination_base + "&status=config_required", extra_headers=refreshed_headers)
+                return
+            state = secrets.token_urlsafe(32)
+            headers = [*refreshed_headers, *self._google_state_cookie_headers(state)]
+            self._send_redirect(google_oauth_login_url(state), extra_headers=headers)
+            return
+        if request.path == "/api/v1/integrations/google/callback":
+            query = parse_qs(request.query, keep_blank_values=True)
+            state = str(query.get("state", [""])[0] or "")
+            cookie_state = self._cookies().get(GOOGLE_OAUTH_STATE_COOKIE, "")
+            clear_state = self._google_state_cookie_headers(clear=True)
+            destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"
+            if not state or not cookie_state or not hmac.compare_digest(state, cookie_state):
+                self._send_redirect(destination_base + "&status=error&reason=state", extra_headers=clear_state)
+                return
+            status, session, access, refreshed_headers = self._authenticated_access()
+            callback_headers = [*refreshed_headers, *clear_state]
+            if status != 200:
+                self._send_redirect(destination_base + "&status=signin_required", extra_headers=callback_headers)
+                return
+            oauth_error = str(query.get("error", [""])[0] or "")
+            if oauth_error:
+                result_status = "cancelled" if oauth_error in {"access_denied", "interaction_required"} else "error"
+                self._send_redirect(destination_base + f"&status={result_status}&reason=oauth", extra_headers=callback_headers)
+                return
+            token_status, token_payload = exchange_google_oauth_code(str(query.get("code", [""])[0] or ""))
+            if token_status != 200:
+                self._send_redirect(destination_base + "&status=error&reason=token", extra_headers=callback_headers)
+                return
+            google_access = str(token_payload.get("access_token") or "")
+            identity_status, identity = google_identity(google_access)
+            if identity_status != 200:
+                self._send_redirect(destination_base + "&status=error&reason=identity", extra_headers=callback_headers)
+                return
+            youtube_status, channel = youtube_channel(google_access)
+            if youtube_status != 200:
+                self._send_redirect(destination_base + "&status=error&reason=youtube", extra_headers=callback_headers)
+                return
+            user_id = str(session.get("user", {}).get("id") or "")
+            save_status, _ = connect_external_account(access, user_id, identity, channel)
+            if save_status != 200:
+                self._send_redirect(destination_base + "&status=error&reason=storage", extra_headers=callback_headers)
+                return
+            channel_state = "found" if channel.get("found") else "none"
+            self._send_redirect(destination_base + f"&status=connected&youtube={channel_state}", extra_headers=callback_headers)
+            return
+        if request.path == "/api/v1/integrations/google/status":
+            status, _, access, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "provider": "google", "connected": False, "configured": google_oauth_configured()}, refreshed_headers)
+                return
+            account_status, result = external_account_status(access, "google")
+            self._send_json(account_status, result, refreshed_headers)
+            return
         if request.path == "/api/v1/integrations/steam/connect":
             status, session, _, refreshed_headers = self._authenticated_access()
             if status != 200:
@@ -3038,6 +3349,14 @@ class ParaHandler(SimpleHTTPRequestHandler):
         payload = self._read_json()
         if payload is None:
             self._send_json(400, {"error": "invalid_request"})
+            return
+        if request.path == "/api/v1/integrations/google/disconnect":
+            status, _, access, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
+                return
+            disconnect_status, result = disconnect_external_account(access, "google")
+            self._send_json(disconnect_status, result, refreshed_headers)
             return
         if request.path == "/api/v1/integrations/steam/disconnect":
             status, _, access, refreshed_headers = self._authenticated_access()

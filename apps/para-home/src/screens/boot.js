@@ -32,7 +32,8 @@ const GAMING_PROVIDERS = Object.freeze([
   ["xbox", "Xbox"],
   ["nintendo", "Nintendo"],
 ]);
-const OTHER_PROVIDERS = Object.freeze([["google", "Google"]]);
+const OTHER_PROVIDERS = Object.freeze([["google", "Google / YouTube"]]);
+const CONNECTED_PROVIDER_DETAILS = { google: null };
 
 const LANGUAGE_OPTIONS = Object.freeze([
   ["en", "English"],
@@ -164,18 +165,22 @@ function accountProviderRows(providers, group, values, accountMode = "offline") 
     const skipped = value === "skipped";
     const connected = value === "connected";
     const steam = group === "gamingAccounts" && id === "steam";
+    const google = group === "otherAccounts" && id === "google";
+    const supported = steam || google;
     let primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="${escapeHtml(name)} integration is not available yet">Coming soon</button>`;
-    if (steam && connected) {
-      primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="Steam account connected">Connected</button>`;
-    } else if (steam && accountMode === "online") {
-      primary = `<button type="button" class="action-button action-button--ghost" data-action="setup-connect-provider" data-provider-group="${group}" data-provider="steam" aria-label="Connect Steam account">Connect</button>`;
-    } else if (steam) {
-      primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="Sign in to a PARA Account before connecting Steam">Sign in first</button>`;
+    if (supported && connected) {
+      primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="${escapeHtml(name)} account connected">Connected</button>`;
+    } else if (supported && accountMode === "online") {
+      primary = `<button type="button" class="action-button action-button--ghost" data-action="setup-connect-provider" data-provider-group="${group}" data-provider="${id}" aria-label="Connect ${escapeHtml(name)} account">Connect</button>`;
+    } else if (supported) {
+      primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="Sign in to a PARA Account before connecting ${escapeHtml(name)}">Sign in first</button>`;
     }
     const secondary = connected
       ? `<button type="button" class="action-button" data-action="setup-disconnect-provider" data-provider-group="${group}" data-provider="${id}" aria-label="Disconnect ${escapeHtml(name)} account">Disconnect</button>`
       : `<button type="button" class="action-button ${skipped ? "action-button--ghost" : ""}" data-action="setup-skip-provider" data-provider-group="${group}" data-provider="${id}" aria-label="${skipped ? "Skipped" : "Skip"} ${escapeHtml(name)} account connection">${skipped ? "Skipped" : "Skip"}</button>`;
-    return `<div class="setup-provider"><span aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span><strong>${escapeHtml(name)}</strong>${primary}${secondary}</div>`;
+    const channelTitle = google && connected ? String(CONNECTED_PROVIDER_DETAILS.google?.youtube_channel_title || "") : "";
+    const providerCopy = `<div class="setup-provider__identity"><strong>${escapeHtml(name)}</strong>${channelTitle ? `<small>YouTube · ${escapeHtml(channelTitle)}</small>` : ""}</div>`;
+    return `<div class="setup-provider"><span aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span>${providerCopy}${primary}${secondary}</div>`;
   }).join("");
 }
 
@@ -364,6 +369,22 @@ async function activateSetupGamingAccounts(changed) {
   }
 }
 
+async function activateSetupOtherAccounts(changed) {
+  if (getState().setupChoices.accountMode !== "online") return;
+  try {
+    const status = await paraApi.googleStatus();
+    const current = getState().setupChoices.otherAccounts?.google || "";
+    const next = status?.connected ? "connected" : (current === "skipped" ? "skipped" : "disconnected");
+    const previousChannel = CONNECTED_PROVIDER_DETAILS.google?.youtube_channel_title || "";
+    CONNECTED_PROVIDER_DETAILS.google = status?.connected ? status : null;
+    const detailChanged = previousChannel !== (CONNECTED_PROVIDER_DETAILS.google?.youtube_channel_title || "");
+    if (current !== next) setSetupAccountChoice("otherAccounts", "google", next);
+    if (current !== next || detailChanged) changed();
+  } catch {
+    // Google / YouTube remains optional when OAuth is not configured or unavailable.
+  }
+}
+
 export function activateSetupBackground({ focus, changed }) {
   const input = document.querySelector("[data-setup-background-input]");
   const custom = document.querySelector("[data-setup-custom-background]");
@@ -405,6 +426,7 @@ export function activateSetupChapter({ controller, focus, changed }) {
   if (step === 0) updateSetupControllerStatus(controller);
   if (step === 3) void activateSetupNetwork();
   if (step === 5) void activateSetupGamingAccounts(changed);
+  if (step === 6) void activateSetupOtherAccounts(changed);
   if (step === 9) void activateSetupAudio();
   if (step === 11) return activateSetupBackground({ focus, changed });
   if (step === 12) void activateSetupStorage();

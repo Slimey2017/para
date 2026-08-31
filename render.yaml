@@ -22,3 +22,7 @@ services:
         sync: false
       - key: PARA_EMAILJS_ORIGIN
         sync: false
+      - key: PARA_GOOGLE_CLIENT_ID
+        sync: false
+      - key: PARA_GOOGLE_CLIENT_SECRET
+        sync: false
