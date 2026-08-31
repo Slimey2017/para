@@ -569,6 +569,21 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'self'", server)
 
 
+    def test_v43_account_settings_are_real_account_hub(self):
+        system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        for label in ["Your PARA identity", "Password & recovery", "Connected services", "PARA activity and privacy"]:
+            self.assertIn(label, system)
+        self.assertIn("paraApi.steamStatus()", system)
+        self.assertIn("paraApi.googleStatus()", system)
+        self.assertIn('data-action="account-send-password-reset"', system)
+        self.assertIn('case "account-send-password-reset"', app)
+        self.assertIn('para.integration.return', app)
+        self.assertIn(".account-service-grid", css)
+        self.assertIn(".account-shortcut-grid", css)
+
+
 if __name__ == "__main__":
     unittest.main()
 

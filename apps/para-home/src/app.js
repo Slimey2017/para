@@ -188,7 +188,9 @@ function captureIntegrationReturnFromUrl() {
     setSetupAccountChoice(group, integration, "disconnected");
     pendingIntegrationNotice = { title: `${label} connection failed`, message: `PARA could not verify or save that ${label} account. Try again.` };
   }
-  history.replaceState({}, "", `${location.pathname}${location.search}#/setup`);
+  const returnRoute = sessionStorage.getItem("para.integration.return") === "account" ? "account" : "setup";
+  sessionStorage.removeItem("para.integration.return");
+  history.replaceState({}, "", `${location.pathname}${location.search}#/${returnRoute}`);
   return true;
 }
 
@@ -1055,6 +1057,19 @@ async function handleAction(action, target) {
       catch (error) { toast("Couldn’t update password", error?.message || "Use at least 8 characters."); }
       break;
     }
+    case "account-send-password-reset": {
+      const email = target.dataset.accountEmail || getState().setupChoices.accountEmail || "";
+      target.disabled = true;
+      try {
+        await paraApi.authRequestPasswordRecovery(email);
+        toast("Reset email sent", "Check your inbox for the secure PARA password reset link.");
+      } catch (error) {
+        toast("Couldn’t send reset email", error?.message || "Try again in a moment.");
+      } finally {
+        if (target?.isConnected) target.disabled = false;
+      }
+      break;
+    }
 
     case "account-send-verification": {
       const email = target.dataset.accountEmail || "";
@@ -1087,6 +1102,8 @@ async function handleAction(action, target) {
       }
       const group = provider === "steam" ? "gamingAccounts" : "otherAccounts";
       setSetupAccountChoice(group, provider, "connecting");
+      if (router.current() === "account") sessionStorage.setItem("para.integration.return", "account");
+      else sessionStorage.removeItem("para.integration.return");
       target.disabled = true;
       if (provider === "steam") window.location.assign("/api/v1/integrations/steam/connect");
       else window.location.assign("/api/v1/integrations/google/connect");

@@ -1,0 +1,120 @@
+--- a/apps/para-home/src/screens/system.js
++++ b/apps/para-home/src/screens/system.js
+@@ -235,7 +235,23 @@
+     markParaAccountConnected(user);
+     const initials = String(user.display_name || user.email || "P").split(/\s+/).filter(Boolean).slice(0,2).map((part)=>part[0]).join("").toUpperCase();
+     const verified = Boolean(user.email_verified || user.para_email_verified || user.email_confirmed);
+-    host.innerHTML = `<section class="account-hero panel"><span class="avatar">${escapeHtml(initials)}</span><div><span class="eyebrow">PARA Account</span><h2>${escapeHtml(user.display_name || "PARA User")}</h2><p>${escapeHtml(user.email || "")} · ${verified ? "Email verified" : "Email verification pending"}</p></div><span class="status-ok">Connected</span></section>${verified ? "" : `<section class="panel account-verification-prompt"><div><span class="eyebrow">PARA Protection Services</span><h3>Verify this email</h3><p>Send a 6-digit code to ${escapeHtml(user.email || "your email")}.</p></div><button class="action-button" data-action="account-send-verification" data-account-email="${escapeHtml(user.email || "")}">Send Code</button></section>`}<div class="account-manage-grid"><section class="panel account-manage-card"><span class="eyebrow">Display name</span><h3>How you appear on PARA</h3><div class="account-inline-form"><input type="text" maxlength="32" value="${escapeHtml(user.display_name || "")}" data-account-new-display-name /><button class="action-button action-button--ghost" data-action="account-update-profile">Save</button></div></section><section class="panel account-manage-card"><span class="eyebrow">Security</span><h3>Change password</h3><div class="account-inline-form"><input type="password" minlength="8" autocomplete="new-password" placeholder="New password" data-account-new-password /><button class="action-button action-button--ghost" data-action="account-update-password">Update</button></div></section></div><div class="tile-grid tile-grid--wide account-actions">${tile({ title: "Marks", meta: "Milestones earned on PARA", route: "marks", icon: "◇" })}${tile({ title: "Sign out of PARA Account", meta: "Keep the local profile on this console", action: "account-cloud-signout", icon: "↗" })}</div>`;
++    const settled = await Promise.allSettled([paraApi.steamStatus(), paraApi.googleStatus()]);
++    const steam = settled[0]?.status === "fulfilled" ? settled[0].value : { connected: false };
++    const google = settled[1]?.status === "fulfilled" ? settled[1].value : { connected: false, configured: true };
++    const prettyCount = (value) => Number.isFinite(Number(value)) ? new Intl.NumberFormat(undefined, { notation: Number(value) >= 1000000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(Number(value)) : "—";
++    const youtubeTitle = google?.youtube_channel_title || google?.display_name || "Google / YouTube";
++    const youtubeMeta = google?.youtube_channel_id
++      ? `${prettyCount(google.youtube_subscriber_count)} subscribers · ${prettyCount(google.youtube_view_count)} views · ${prettyCount(google.youtube_video_count)} videos`
++      : (google?.connected ? "Google connected · No YouTube channel detected" : "Link your Google identity and YouTube channel to PARA Creator.");
++    const googleAction = google?.connected
++      ? `<button class="action-button action-button--ghost" data-action="setup-disconnect-provider" data-provider="google">Disconnect</button>`
++      : (google?.configured === false
++        ? `<button class="action-button action-button--ghost" disabled title="Google OAuth is not configured on this PARA deployment.">Setup required</button>`
++        : `<button class="action-button" data-action="setup-connect-provider" data-provider="google">Connect</button>`);
++    const steamAction = steam?.connected
++      ? `<button class="action-button action-button--ghost" data-action="setup-disconnect-provider" data-provider="steam">Disconnect</button>`
++      : `<button class="action-button" data-action="setup-connect-provider" data-provider="steam">Connect</button>`;
++    host.innerHTML = `<section class="account-hero account-hero--settings panel"><span class="avatar account-avatar">${escapeHtml(initials)}</span><div class="account-hero__identity"><span class="eyebrow">PARA Account</span><h2>${escapeHtml(user.display_name || "PARA User")}</h2><p>${escapeHtml(user.email || "")}</p><div class="account-hero__badges"><span class="status-ok">Connected</span><span class="account-badge ${verified ? "account-badge--ok" : "account-badge--warn"}">${verified ? "Email verified" : "Verification needed"}</span></div></div><div class="account-hero__console"><span class="eyebrow">Current profile</span><strong>${escapeHtml(profile)}</strong><small>Available offline on this console</small></div></section>${verified ? "" : `<section class="panel account-verification-prompt"><div><span class="eyebrow">PARA Protection Services</span><h3>Finish securing this account</h3><p>Verify ${escapeHtml(user.email || "your email")} with a 6-digit code.</p></div><button class="action-button" data-action="account-send-verification" data-account-email="${escapeHtml(user.email || "")}">Send Code</button></section>`}<div class="account-settings-stack"><section class="panel account-settings-section"><div class="account-section-heading"><div><span class="eyebrow">Profile</span><h2>Your PARA identity</h2><p>Manage the name and account details shown across PARA.</p></div></div><div class="account-profile-grid"><label class="account-setting-field"><span>Display name</span><small>Shown to people and services across PARA</small><div class="account-inline-form"><input type="text" maxlength="32" value="${escapeHtml(user.display_name || "")}" data-account-new-display-name /><button class="action-button action-button--ghost" data-action="account-update-profile">Save</button></div></label><div class="account-setting-field account-setting-field--readonly"><span>Email address</span><small>Your sign-in email</small><strong>${escapeHtml(user.email || "")}</strong><em class="${verified ? "is-good" : "is-warn"}">${verified ? "Verified" : "Not verified"}</em></div></div></section><section class="panel account-settings-section"><div class="account-section-heading"><div><span class="eyebrow">Security</span><h2>Password & recovery</h2><p>Keep this PARA Account protected without leaving Settings.</p></div></div><div class="account-security-grid"><label class="account-setting-field"><span>Change password</span><small>Use at least 8 characters</small><div class="account-inline-form"><input type="password" minlength="8" autocomplete="new-password" placeholder="New password" data-account-new-password /><button class="action-button action-button--ghost" data-action="account-update-password">Update</button></div></label><div class="account-setting-field account-setting-field--action"><span>Password recovery</span><small>Send a secure reset link to ${escapeHtml(user.email || "your email")}</small><button class="action-button action-button--ghost" data-action="account-send-password-reset" data-account-email="${escapeHtml(user.email || "")}">Send reset email</button></div></div></section><section class="panel account-settings-section"><div class="account-section-heading"><div><span class="eyebrow">Connections</span><h2>Connected services</h2><p>Control which outside accounts are attached to your PARA Account.</p></div><span class="account-section-count">${Number(Boolean(steam?.connected)) + Number(Boolean(google?.connected))} connected</span></div><div class="account-service-grid"><article class="account-service-card ${steam?.connected ? "is-connected" : ""}"><span class="account-service-icon">S</span><div class="account-service-copy"><div><strong>Steam</strong><span>${steam?.connected ? "Connected" : "Not connected"}</span></div><p>${steam?.connected ? "Steam identity linked to this PARA Account." : "Connect Steam for your gaming identity and future library features."}</p></div>${steamAction}</article><article class="account-service-card ${google?.connected ? "is-connected" : ""}"><span class="account-service-icon account-service-icon--google">G</span><div class="account-service-copy"><div><strong>${escapeHtml(youtubeTitle)}</strong><span>${google?.connected ? "Google / YouTube connected" : "Google / YouTube"}</span></div><p>${escapeHtml(youtubeMeta)}</p></div>${googleAction}</article></div></section><section class="panel account-settings-section"><div class="account-section-heading"><div><span class="eyebrow">Account & data</span><h2>PARA activity and privacy</h2><p>Jump to the parts of your account that belong to you.</p></div></div><div class="account-shortcut-grid"><button class="account-shortcut" data-route="marks"><span>◇</span><div><strong>PARA Marks</strong><small>Achievements and milestones earned across PARA</small></div><b>›</b></button><a class="account-shortcut" href="/privacy" target="_blank" rel="noopener"><span>⌁</span><div><strong>Privacy Policy</strong><small>See how PARA handles account and connected-service data</small></div><b>↗</b></a><button class="account-shortcut" data-route="profiles"><span>◉</span><div><strong>Local profiles</strong><small>Switch or manage profiles stored on this console</small></div><b>›</b></button></div></section><section class="panel account-settings-section account-danger-zone"><div class="account-section-heading"><div><span class="eyebrow">Session</span><h2>Sign out</h2><p>Signing out disconnects this console session. Your PARA Account and local profile remain intact.</p></div><button class="action-button action-button--ghost" data-action="account-cloud-signout">Sign out of PARA Account</button></div></section></div>`;
+   } catch (error) {
+     host.innerHTML = `<section class="panel account-cloud"><div class="account-cloud__body"><span class="eyebrow">PARA Account</span><h2>Account service unavailable</h2><p>${escapeHtml(error?.message || "PARA could not reach the account service.")}</p><div class="account-cloud__actions"><button class="action-button" data-action="account-refresh" data-autofocus="true">Try Again</button></div></div></section>`;
+   }
+--- a/apps/para-home/src/app.js
++++ b/apps/para-home/src/app.js
+@@ -188,7 +188,9 @@
+     setSetupAccountChoice(group, integration, "disconnected");
+     pendingIntegrationNotice = { title: `${label} connection failed`, message: `PARA could not verify or save that ${label} account. Try again.` };
+   }
+-  history.replaceState({}, "", `${location.pathname}${location.search}#/setup`);
++  const returnRoute = sessionStorage.getItem("para.integration.return") === "account" ? "account" : "setup";
++  sessionStorage.removeItem("para.integration.return");
++  history.replaceState({}, "", `${location.pathname}${location.search}#/${returnRoute}`);
+   return true;
+ }
+ 
+@@ -1055,6 +1057,19 @@
+       catch (error) { toast("Couldn’t update password", error?.message || "Use at least 8 characters."); }
+       break;
+     }
++    case "account-send-password-reset": {
++      const email = target.dataset.accountEmail || getState().setupChoices.accountEmail || "";
++      target.disabled = true;
++      try {
++        await paraApi.authRequestPasswordRecovery(email);
++        toast("Reset email sent", "Check your inbox for the secure PARA password reset link.");
++      } catch (error) {
++        toast("Couldn’t send reset email", error?.message || "Try again in a moment.");
++      } finally {
++        if (target?.isConnected) target.disabled = false;
++      }
++      break;
++    }
+ 
+     case "account-send-verification": {
+       const email = target.dataset.accountEmail || "";
+@@ -1087,6 +1102,8 @@
+       }
+       const group = provider === "steam" ? "gamingAccounts" : "otherAccounts";
+       setSetupAccountChoice(group, provider, "connecting");
++      if (router.current() === "account") sessionStorage.setItem("para.integration.return", "account");
++      else sessionStorage.removeItem("para.integration.return");
+       target.disabled = true;
+       if (provider === "steam") window.location.assign("/api/v1/integrations/steam/connect");
+       else window.location.assign("/api/v1/integrations/google/connect");
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -2080,3 +2080,8 @@
+ @media (max-width: 700px) {
+   .para-public-footer span { display: none; }
+ }
++
++/* ===================== PARA ACCOUNT SETTINGS V43 ===================== */
++.account-hero--settings{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:20px;padding:24px 26px}.account-avatar{width:76px;height:76px;font-size:30px}.account-hero__identity h2{font-size:28px;margin:3px 0 5px}.account-hero__identity p{color:var(--muted);margin:0}.account-hero__badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}.account-badge{display:inline-flex;align-items:center;min-height:26px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:800;color:var(--muted);background:rgba(255,255,255,.035)}.account-badge--ok{color:#85f0bd;border-color:rgba(80,230,160,.22);background:rgba(50,200,130,.09)}.account-badge--warn{color:#ffd58c;border-color:rgba(255,190,95,.24);background:rgba(255,170,70,.08)}.account-hero__console{min-width:190px;padding:13px 15px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025)}.account-hero__console strong,.account-hero__console small{display:block}.account-hero__console strong{font-size:17px;margin-top:4px}.account-hero__console small{color:var(--muted);margin-top:4px;line-height:1.35}.account-settings-stack{display:grid;gap:16px;margin-top:18px}.account-settings-section{padding:22px}.account-section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:18px}.account-section-heading h2{font-size:21px;margin:4px 0}.account-section-heading p{color:var(--muted);max-width:690px;line-height:1.5}.account-section-count{padding:6px 10px;border-radius:999px;background:rgba(157,91,255,.1);border:1px solid rgba(157,91,255,.2);color:#d4b5ff;font-size:12px;font-weight:800;white-space:nowrap}.account-profile-grid,.account-security-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);gap:14px}.account-setting-field{display:block;padding:16px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.022)}.account-setting-field>span,.account-setting-field>small{display:block}.account-setting-field>span{font-weight:800}.account-setting-field>small{color:var(--muted);margin:4px 0 12px;line-height:1.35}.account-setting-field--readonly{position:relative}.account-setting-field--readonly strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px}.account-setting-field--readonly em{display:inline-flex;margin-top:9px;padding:4px 8px;border-radius:999px;font-style:normal;font-size:11px;font-weight:800}.account-setting-field--readonly em.is-good{color:#83efba;background:rgba(58,205,137,.1)}.account-setting-field--readonly em.is-warn{color:#ffd48a;background:rgba(246,173,74,.1)}.account-setting-field--action .action-button{margin-top:1px}.account-service-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.account-service-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;padding:16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.02)}.account-service-card.is-connected{border-color:rgba(132,87,213,.32);background:linear-gradient(135deg,rgba(117,66,201,.09),rgba(255,255,255,.018))}.account-service-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;background:#211033;color:#cfa8ff;font-weight:900}.account-service-icon--google{background:linear-gradient(145deg,#252033,#18141f);color:#fff}.account-service-copy{min-width:0}.account-service-copy>div{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.account-service-copy strong{font-size:15px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-service-copy span{font-size:11px;font-weight:800;color:#b792ef}.account-service-copy p{margin-top:5px;color:var(--muted);font-size:12px;line-height:1.4}.account-shortcut-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.account-shortcut{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:15px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.02);color:var(--text);text-align:left;text-decoration:none;cursor:pointer;font:inherit}.account-shortcut:hover,.account-shortcut:focus-visible{border-color:rgba(164,112,255,.45);background:rgba(123,72,206,.08);outline:none}.account-shortcut>span{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:rgba(120,70,205,.16);color:#cda7ff;font-size:17px}.account-shortcut strong,.account-shortcut small{display:block}.account-shortcut small{color:var(--muted);margin-top:3px;line-height:1.35}.account-shortcut>b{color:#b993ed;font-size:21px}.account-danger-zone{border-color:rgba(255,255,255,.09)}.account-danger-zone .account-section-heading{align-items:center;margin-bottom:0}.account-danger-zone .account-section-heading p{max-width:760px}
++@media(max-width:980px){.account-hero--settings{grid-template-columns:auto 1fr}.account-hero__console{grid-column:1/-1}.account-service-grid,.account-shortcut-grid{grid-template-columns:1fr}.account-profile-grid,.account-security-grid{grid-template-columns:1fr}}
++@media(max-width:640px){.account-hero--settings{grid-template-columns:1fr;align-items:flex-start}.account-settings-section{padding:17px}.account-section-heading,.account-danger-zone .account-section-heading{flex-direction:column}.account-service-card{grid-template-columns:auto 1fr}.account-service-card .action-button{grid-column:1/-1;width:100%}.account-inline-form{flex-direction:column}.account-inline-form .action-button{width:100%}}
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -569,6 +569,21 @@
+         self.assertIn("frame-ancestors 'self'", server)
+ 
+ 
++    def test_v43_account_settings_are_real_account_hub(self):
++        system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
++        for label in ["Your PARA identity", "Password & recovery", "Connected services", "PARA activity and privacy"]:
++            self.assertIn(label, system)
++        self.assertIn("paraApi.steamStatus()", system)
++        self.assertIn("paraApi.googleStatus()", system)
++        self.assertIn('data-action="account-send-password-reset"', system)
++        self.assertIn('case "account-send-password-reset"', app)
++        self.assertIn('para.integration.return', app)
++        self.assertIn(".account-service-grid", css)
++        self.assertIn(".account-shortcut-grid", css)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+ 
+--- /dev/null
++++ b/PARA_ACCOUNT_SETTINGS_HUB_V43.md
+@@ -0,0 +1,13 @@
++# PARA Account Settings Hub V43
++
++- Rebuilds the Account screen from a sparse profile/password page into a full account settings hub.
++- Keeps the PARA Account hero, but adds clear connection, verification, and current-local-profile status.
++- Adds a real Profile section with display-name editing and email verification state.
++- Expands Security with both in-session password changes and password-recovery email delivery.
++- Adds Connected Services directly to Account settings. Steam and Google / YouTube status are loaded from the existing signed-in integration APIs and can be connected or disconnected in place.
++- Google / YouTube cards show the linked channel and channel statistics when available.
++- Adds shortcuts for PARA Marks, the public Privacy Policy, and local profile management.
++- Gives sign-out its own clear session section instead of presenting it as an equal-sized random tile.
++- Remembers when an integration was launched from Account settings so Steam/Google callbacks return to Account instead of dumping the user back into first-run setup.
++- Adds responsive styling for desktop, tablet, and narrow screens.
++- No new account secrets are stored in the browser and no new backend credential surface is introduced.
