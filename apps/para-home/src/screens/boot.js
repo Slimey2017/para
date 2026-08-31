@@ -3,7 +3,7 @@ import { paraApi, escapeHtml, formatBytes } from "../services/para-api.js";
 import { applyBrowserBackground, saveBrowserBackground } from "../services/profile-assets.js";
 import {
   BACKGROUND_OPTIONS, BUILT_IN_BACKGROUND_IDS, getProfilePreferences, getState,
-  setProfilePreferences,
+  setProfilePreferences, setSetupAccountChoice,
 } from "../state.js";
 import {
   beginStartupSignals, finishStartupSignals, STARTUP_TIMELINE_MS, updateStartupSignals,
@@ -158,10 +158,24 @@ function choiceButton({ title, meta, action, value = "", selected = false, disab
   return `<button type="button" class="setup-choice ${selected ? "is-selected" : ""}" data-action="${action}" aria-pressed="${selected}" ${value ? `data-value="${escapeHtml(value)}"` : ""} ${extra} ${disabled ? "disabled aria-disabled='true'" : ""} ${autofocus && !disabled ? "data-autofocus='true'" : ""}><span class="setup-choice__icon" aria-hidden="true">${icon}</span><span><strong>${title}</strong><small>${meta}</small></span><i aria-hidden="true"></i></button>`;
 }
 
-function accountProviderRows(providers, group, values) {
+function accountProviderRows(providers, group, values, accountMode = "offline") {
   return providers.map(([id, name]) => {
-    const skipped = values[id] === "skipped";
-    return `<div class="setup-provider"><span aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span><strong>${escapeHtml(name)}</strong><button type="button" class="action-button action-button--ghost" disabled aria-label="Connect ${escapeHtml(name)} account">Connect</button><button type="button" class="action-button ${skipped ? "action-button--ghost" : ""}" data-action="setup-skip-provider" data-provider-group="${group}" data-provider="${id}" aria-label="${skipped ? "Skipped" : "Skip"} ${escapeHtml(name)} account connection">${skipped ? "Skipped" : "Skip"}</button></div>`;
+    const value = values?.[id] || "";
+    const skipped = value === "skipped";
+    const connected = value === "connected";
+    const steam = group === "gamingAccounts" && id === "steam";
+    let primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="${escapeHtml(name)} integration is not available yet">Coming soon</button>`;
+    if (steam && connected) {
+      primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="Steam account connected">Connected</button>`;
+    } else if (steam && accountMode === "online") {
+      primary = `<button type="button" class="action-button action-button--ghost" data-action="setup-connect-provider" data-provider-group="${group}" data-provider="steam" aria-label="Connect Steam account">Connect</button>`;
+    } else if (steam) {
+      primary = `<button type="button" class="action-button action-button--ghost" disabled aria-label="Sign in to a PARA Account before connecting Steam">Sign in first</button>`;
+    }
+    const secondary = connected
+      ? `<button type="button" class="action-button" data-action="setup-disconnect-provider" data-provider-group="${group}" data-provider="${id}" aria-label="Disconnect ${escapeHtml(name)} account">Disconnect</button>`
+      : `<button type="button" class="action-button ${skipped ? "action-button--ghost" : ""}" data-action="setup-skip-provider" data-provider-group="${group}" data-provider="${id}" aria-label="${skipped ? "Skipped" : "Skip"} ${escapeHtml(name)} account connection">${skipped ? "Skipped" : "Skip"}</button>`;
+    return `<div class="setup-provider"><span aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span><strong>${escapeHtml(name)}</strong>${primary}${secondary}</div>`;
   }).join("");
 }
 
@@ -187,8 +201,8 @@ function setupBody(step) {
     `<div class="setup-question"><span class="eyebrow">Display Area</span><h1>Can you see all four corners?</h1><p class="lede">Adjust the boundary until every corner sits comfortably inside your screen.</p><div class="setup-display-frame" style="--setup-inset:${Number(choices.safeArea) || 0}%"><i></i><i></i><i></i><i></i><strong>PARA</strong></div><label class="setup-slider"><span><strong>Screen boundary</strong><output data-safe-area-value>${Number(choices.safeArea) || 0}%</output></span><input type="range" min="0" max="8" step="1" value="${Number(choices.safeArea) || 0}" data-setup-safe-area /></label><div class="display-readout"><div><strong data-display-resolution>Reading…</strong><span>Resolution</span></div><div><strong data-refresh-rate>Reading…</strong><span>Refresh rate</span></div><div><strong data-hdr-status>Reading…</strong><span>Color range</span></div></div><div class="setup-choice-grid setup-choice-grid--two">${choiceButton({ title: "Living room", meta: "Larger interface for TVs", action: "select-tv", selected: state.displayMode === "Living room", autofocus: true, icon: "▭" })}${choiceButton({ title: "Desk", meta: "More room for monitors", action: "select-monitor", selected: state.displayMode === "Desk", icon: "□" })}</div></div>`,
     `<div class="setup-question"><span class="eyebrow">Internet</span><h1>Connect to the internet?</h1><p class="lede">Use a connection already available to PARA, or set this up later.</p><div class="choice-stack" data-setup-network><div class="library-loading"><span></span><strong>Checking connections…</strong></div></div><div class="setup-inline-actions"><button class="action-button action-button--ghost" data-action="setup-network-later">Set Up Later</button></div></div>`,
     `<div class="setup-question"><span class="eyebrow">PARA Account</span><h1>How would you like to enter PARA?</h1><p class="lede">Sign in for your PARA identity and connected services, create a new account, or keep using an offline profile.</p><div class="setup-account-actions"><button class="action-button action-button--ghost" data-action="setup-account-signin">Log In</button><button class="action-button action-button--ghost" data-action="setup-account-signup">Create Account</button><button class="action-button" data-action="setup-account-offline" data-autofocus="true">Continue Offline</button></div><label class="setup-profile-name"><span>Offline profile name</span><input type="text" maxlength="32" value="${escapeHtml(choices.profileName)}" data-setup-setting="profileName" autocomplete="off" /></label>${choices.accountMode === "online" ? `<p class="setup-account-connected">✓ PARA Account connected as ${escapeHtml(choices.profileName)}</p>` : (["created","verified"].includes(choices.accountMode) ? `<p class="setup-account-connected">✓ PARA Account ${choices.accountMode === "verified" ? "created and verified" : "created"}${choices.accountEmail ? ` for ${escapeHtml(choices.accountEmail)}` : ""}. Sign in to connect it to this console.</p>` : "")}</div>`,
-    `<div class="setup-question"><span class="eyebrow">Gaming Accounts</span><h1>Connect your gaming accounts?</h1><p class="lede">This step is optional. Only supported libraries and services will be available through PARA.</p><div class="setup-provider-list">${accountProviderRows(GAMING_PROVIDERS, "gamingAccounts", choices.gamingAccounts)}</div></div>`,
-    `<div class="setup-question"><span class="eyebrow">Other Accounts</span><h1>Connect another service?</h1><p class="lede">You can skip this and continue setting up PARA.</p><div class="setup-provider-list">${accountProviderRows(OTHER_PROVIDERS, "otherAccounts", choices.otherAccounts)}</div></div>`,
+    `<div class="setup-question"><span class="eyebrow">Gaming Accounts</span><h1>Connect your gaming accounts?</h1><p class="lede">This step is optional. Only supported libraries and services will be available through PARA.</p><div class="setup-provider-list">${accountProviderRows(GAMING_PROVIDERS, "gamingAccounts", choices.gamingAccounts, choices.accountMode)}</div></div>`,
+    `<div class="setup-question"><span class="eyebrow">Other Accounts</span><h1>Connect another service?</h1><p class="lede">You can skip this and continue setting up PARA.</p><div class="setup-provider-list">${accountProviderRows(OTHER_PROVIDERS, "otherAccounts", choices.otherAccounts, choices.accountMode)}</div></div>`,
     `<div class="setup-question"><span class="eyebrow">Privacy</span><h1>Choose what PARA can use</h1><p class="lede">These optional services remain off unless you choose to enable them.</p><div class="setup-fixed-list">${privacyRow("diagnostics", "Diagnostics", "Share reliability and performance information", Boolean(choices.privacy?.diagnostics))}${privacyRow("personalization", "Personalization", "Use activity to tailor suggestions", Boolean(choices.privacy?.personalization))}${privacyRow("location", "Location services", "Allow apps to request your location", Boolean(choices.privacy?.location))}</div></div>`,
     `<div class="setup-question"><span class="eyebrow">Accessibility</span><h1>What would make PARA more comfortable?</h1><p class="lede">These display choices take effect immediately.</p><div class="choice-stack">${toggleRow({ title: "Larger text", meta: "Increase text throughout PARA", icon: "Aa", action: "toggle-large", value: state.largeText, autofocus: true })}${toggleRow({ title: "Reduce motion", meta: "Use calmer transitions", icon: "≈", action: "toggle-reduced", value: state.reducedMotion })}${toggleRow({ title: "High contrast", meta: "Strengthen text and edges", icon: "◐", action: "toggle-contrast", value: state.highContrast })}</div><div class="setup-system-access"><strong>Screen reader</strong><span>PARA follows your system accessibility settings.</span></div></div>`,
     `<div class="setup-question"><span class="eyebrow">Audio</span><h1>Can you hear PARA clearly?</h1><p class="lede">PARA will use the current system audio output.</p><div class="setup-audio-state" data-setup-audio><div class="library-loading"><span></span><strong>Checking audio…</strong></div></div><button class="action-button" data-action="setup-audio-test" data-autofocus="true">Play Test Sound</button></div>`,
@@ -335,6 +349,21 @@ export async function activateSetupStorage() {
   }
 }
 
+async function activateSetupGamingAccounts(changed) {
+  if (getState().setupChoices.accountMode !== "online") return;
+  try {
+    const status = await paraApi.steamStatus();
+    const current = getState().setupChoices.gamingAccounts?.steam || "";
+    const next = status?.connected ? "connected" : (current === "skipped" ? "skipped" : "disconnected");
+    if (current !== next) {
+      setSetupAccountChoice("gamingAccounts", "steam", next);
+      changed();
+    }
+  } catch {
+    // Setup remains usable offline or before the gaming_accounts migration is reachable.
+  }
+}
+
 export function activateSetupBackground({ focus, changed }) {
   const input = document.querySelector("[data-setup-background-input]");
   const custom = document.querySelector("[data-setup-custom-background]");
@@ -375,6 +404,7 @@ export function activateSetupChapter({ controller, focus, changed }) {
   const step = getState().setupStep;
   if (step === 0) updateSetupControllerStatus(controller);
   if (step === 3) void activateSetupNetwork();
+  if (step === 5) void activateSetupGamingAccounts(changed);
   if (step === 9) void activateSetupAudio();
   if (step === 11) return activateSetupBackground({ focus, changed });
   if (step === 12) void activateSetupStorage();

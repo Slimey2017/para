@@ -27,6 +27,8 @@ export const paraApi = {
   authUpdatePassword: (password) => request("/api/v1/auth/password", { method: "POST", body: JSON.stringify({ password }) }),
   authRequestVerification: (email) => request("/api/v1/auth/verification/request", { method: "POST", body: JSON.stringify({ email }), signal: AbortSignal.timeout(12_000) }),
   authVerifyEmail: (email, code) => request("/api/v1/auth/verification/verify", { method: "POST", body: JSON.stringify({ email, code }), signal: AbortSignal.timeout(12_000) }),
+  steamStatus: () => request("/api/v1/integrations/steam/status", { signal: AbortSignal.timeout(12_000) }),
+  steamDisconnect: () => request("/api/v1/integrations/steam/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
   applications: () => request("/api/v1/apps"),
   storeCatalog: () => request("/api/v1/store/catalog"),
   storeProduct: (id) => request(`/api/v1/store/product?id=${encodeURIComponent(id)}`),

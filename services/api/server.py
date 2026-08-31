@@ -15,6 +15,7 @@ import secrets
 import threading
 import time
 import platform
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -67,6 +68,10 @@ PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"
 PARA_ACCOUNT_SUPABASE_URL = f"https://{PARA_ACCOUNT_SUPABASE_PROJECT_REF}.supabase.co"
 PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY"
 PARA_ACCOUNT_PUBLIC_URL = "https://para-wjvx.onrender.com/"
+STEAM_OPENID_ENDPOINT = "https://steamcommunity.com/openid/"
+STEAM_OPENID_VERIFY_URL = "https://steamcommunity.com/openid/login"
+STEAM_OPENID_STATE_COOKIE = "para_steam_openid_state"
+STEAM_OPENID_STATE_TTL_SECONDS = 10 * 60
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
@@ -99,6 +104,179 @@ def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | N
         return error.code, parsed
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         return 502, {"error": "account_unavailable", "message": "PARA Account could not reach the account service."}
+
+
+def _supabase_account_rest_request(
+    path: str,
+    *,
+    method: str = "GET",
+    payload: object | None = None,
+    bearer: str = "",
+    prefer: str = "",
+) -> tuple[int, object]:
+    """Read or write account-owned public tables with the signed-in user's JWT."""
+    if not bearer:
+        return 401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}
+    headers = {
+        "apikey": PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": f"Bearer {bearer}",
+        "Accept": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(f"{PARA_ACCOUNT_SUPABASE_URL}{path}", data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            body = response.read().decode("utf-8")
+            if not body:
+                return response.status, {}
+            try:
+                return response.status, json.loads(body)
+            except json.JSONDecodeError:
+                return response.status, {"raw": body[:240]}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = {"message": "Connected account storage request failed."}
+        if not isinstance(parsed, (dict, list)):
+            parsed = {"message": "Connected account storage request failed."}
+        return error.code, parsed
+    except (urllib.error.URLError, TimeoutError):
+        return 502, {"error": "account_storage_unavailable", "message": "PARA could not reach connected account storage."}
+
+
+def _steam_callback_url(state: str) -> str:
+    base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/")
+    return f"{base}/api/v1/integrations/steam/callback?state={urllib.parse.quote(str(state), safe='')}"
+
+
+def steam_openid_login_url(state: str) -> str:
+    """Build the browser redirect to Steam's documented OpenID 2.0 provider."""
+    callback = _steam_callback_url(state)
+    params = {
+        "openid.ns": "http://specs.openid.net/auth/2.0",
+        "openid.mode": "checkid_setup",
+        "openid.return_to": callback,
+        "openid.realm": PARA_ACCOUNT_PUBLIC_URL,
+        "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+        "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+    }
+    return f"{STEAM_OPENID_ENDPOINT}?{urllib.parse.urlencode(params)}"
+
+
+def verify_steam_openid(query: dict[str, list[str]], state: str) -> tuple[int, dict]:
+    """Verify Steam's signed OpenID response server-side and return SteamID64."""
+    fields = {key: values[0] for key, values in query.items() if key.startswith("openid.") and values}
+    mode = str(fields.get("openid.mode") or "")
+    if mode == "cancel":
+        return 400, {"error": "steam_cancelled", "message": "Steam account connection was cancelled."}
+    if mode != "id_res":
+        return 400, {"error": "steam_invalid_response", "message": "Steam returned an invalid sign-in response."}
+    if fields.get("openid.ns") != "http://specs.openid.net/auth/2.0":
+        return 400, {"error": "steam_invalid_namespace", "message": "Steam returned an invalid OpenID namespace."}
+    if fields.get("openid.return_to") != _steam_callback_url(state):
+        return 400, {"error": "steam_return_mismatch", "message": "Steam returned to an unexpected PARA address."}
+    op_endpoint = str(fields.get("openid.op_endpoint") or "")
+    parsed_endpoint = urllib.parse.urlparse(op_endpoint)
+    if parsed_endpoint.scheme != "https" or parsed_endpoint.hostname != "steamcommunity.com" or not parsed_endpoint.path.startswith("/openid/"):
+        return 400, {"error": "steam_endpoint_mismatch", "message": "Steam returned an unexpected OpenID provider."}
+
+    claimed_id = str(fields.get("openid.claimed_id") or "")
+    identity = str(fields.get("openid.identity") or "")
+    if claimed_id != identity:
+        return 400, {"error": "steam_identity_mismatch", "message": "Steam identity verification did not match."}
+    match = re.fullmatch(r"https?://steamcommunity\.com/openid/id/([0-9]{17})", claimed_id)
+    if not match:
+        return 400, {"error": "steam_id_invalid", "message": "Steam did not return a valid SteamID."}
+
+    verification = dict(fields)
+    verification["openid.mode"] = "check_authentication"
+    body = urllib.parse.urlencode(verification).encode("utf-8")
+    request = urllib.request.Request(
+        STEAM_OPENID_VERIFY_URL,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "text/plain"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            result = response.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return 502, {"error": "steam_unavailable", "message": "PARA could not verify the Steam sign-in."}
+    checks = {}
+    for line in result.splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            checks[key.strip()] = value.strip()
+    if checks.get("is_valid") != "true":
+        return 401, {"error": "steam_verification_failed", "message": "Steam could not verify this account connection."}
+    return 200, {"verified": True, "provider": "steam", "provider_user_id": match.group(1)}
+
+
+def gaming_account_status(access_token: str, provider: str = "steam") -> tuple[int, dict]:
+    if provider != "steam":
+        return 400, {"error": "provider_unsupported", "message": "That gaming account provider is not supported yet."}
+    quoted = urllib.parse.quote(provider, safe="")
+    status, payload = _supabase_account_rest_request(
+        f"/rest/v1/gaming_accounts?select=provider,provider_user_id,display_name,avatar_url,connected_at&provider=eq.{quoted}&limit=1",
+        bearer=access_token,
+    )
+    if status >= 400:
+        return status, {"error": "gaming_account_storage_failed", "message": "PARA could not read connected gaming accounts."}
+    rows = payload if isinstance(payload, list) else []
+    if not rows:
+        return 200, {"provider": provider, "connected": False}
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    return 200, {
+        "provider": provider,
+        "connected": True,
+        "provider_user_id": str(row.get("provider_user_id") or ""),
+        "display_name": row.get("display_name"),
+        "avatar_url": row.get("avatar_url"),
+        "connected_at": row.get("connected_at"),
+    }
+
+
+def connect_gaming_account(access_token: str, para_user_id: str, provider: str, provider_user_id: str) -> tuple[int, dict]:
+    if provider != "steam":
+        return 400, {"error": "provider_unsupported", "message": "That gaming account provider is not supported yet."}
+    record = {
+        "para_user_id": str(para_user_id),
+        "provider": provider,
+        "provider_user_id": str(provider_user_id),
+        "connected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    status, payload = _supabase_account_rest_request(
+        "/rest/v1/gaming_accounts?on_conflict=para_user_id,provider",
+        method="POST",
+        payload=record,
+        bearer=access_token,
+        prefer="resolution=merge-duplicates,return=representation",
+    )
+    if status >= 400:
+        return status, {"error": "gaming_account_link_failed", "message": "PARA could not save the Steam account connection."}
+    return 200, {"provider": provider, "connected": True, "provider_user_id": str(provider_user_id)}
+
+
+def disconnect_gaming_account(access_token: str, provider: str = "steam") -> tuple[int, dict]:
+    if provider != "steam":
+        return 400, {"error": "provider_unsupported", "message": "That gaming account provider is not supported yet."}
+    quoted = urllib.parse.quote(provider, safe="")
+    status, _ = _supabase_account_rest_request(
+        f"/rest/v1/gaming_accounts?provider=eq.{quoted}",
+        method="DELETE",
+        bearer=access_token,
+        prefer="return=minimal",
+    )
+    if status >= 400:
+        return status, {"error": "gaming_account_disconnect_failed", "message": "PARA could not disconnect that Steam account."}
+    return 200, {"provider": provider, "connected": False}
 
 
 def _public_auth_user(user: object) -> dict | None:
@@ -2645,6 +2823,22 @@ class ParaHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_redirect(self, location: str, *, status: int = 302, extra_headers: list[tuple[str, str]] | None = None) -> None:
+        self.send_response(status)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        for key, value in extra_headers or []:
+            self.send_header(key, value)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _steam_state_cookie_headers(self, state: str = "", *, clear: bool = False) -> list[tuple[str, str]]:
+        secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        suffix = "; Path=/api/v1/integrations/steam/callback; HttpOnly; SameSite=Lax" + ("; Secure" if secure else "")
+        if clear:
+            return [("Set-Cookie", f"{STEAM_OPENID_STATE_COOKIE}=; Max-Age=0{suffix}")]
+        return [("Set-Cookie", f"{STEAM_OPENID_STATE_COOKIE}={state}; Max-Age={STEAM_OPENID_STATE_TTL_SECONDS}{suffix}")]
+
     def _cookies(self) -> dict[str, str]:
         jar = SimpleCookie()
         try:
@@ -2655,7 +2849,9 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def _auth_cookie_headers(self, tokens: dict | None = None, *, clear: bool = False) -> list[tuple[str, str]]:
         secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
-        suffix = "; Path=/; HttpOnly; SameSite=Strict" + ("; Secure" if secure else "")
+        # Lax keeps the HttpOnly session available on top-level authentication
+        # callbacks such as Steam OpenID while still withholding it from cross-site POSTs.
+        suffix = "; Path=/; HttpOnly; SameSite=Lax" + ("; Secure" if secure else "")
         if clear:
             return [("Set-Cookie", f"{AUTH_ACCESS_COOKIE}=; Max-Age=0{suffix}"), ("Set-Cookie", f"{AUTH_REFRESH_COOKIE}=; Max-Age=0{suffix}")]
         if not tokens:
@@ -2681,6 +2877,20 @@ class ParaHandler(SimpleHTTPRequestHandler):
             if status == 200 and tokens:
                 return status, payload, self._auth_cookie_headers(tokens)
         return 200, {"signed_in": False, "user": None}, self._auth_cookie_headers(clear=True) if access or refresh else []
+
+    def _authenticated_access(self) -> tuple[int, dict, str, list[tuple[str, str]]]:
+        status, session, refreshed_headers = self._auth_session()
+        if status != 200 or not session.get("signed_in") or not isinstance(session.get("user"), dict):
+            return 401, {"signed_in": False, "user": None}, "", refreshed_headers
+        access = self._cookies().get(AUTH_ACCESS_COOKIE, "")
+        if refreshed_headers:
+            for key, value in refreshed_headers:
+                if key.lower() == "set-cookie" and value.startswith(AUTH_ACCESS_COOKIE + "="):
+                    access = value.split(";", 1)[0].split("=", 1)[1]
+                    break
+        if not access:
+            return 401, {"signed_in": False, "user": None}, "", refreshed_headers
+        return 200, session, access, refreshed_headers
 
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         try:
@@ -2712,6 +2922,50 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path == "/api/v1/integrations/steam/connect":
+            status, session, _, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                destination = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=steam&status=signin_required"
+                self._send_redirect(destination, extra_headers=refreshed_headers)
+                return
+            state = secrets.token_urlsafe(32)
+            headers = [*refreshed_headers, *self._steam_state_cookie_headers(state)]
+            self._send_redirect(steam_openid_login_url(state), extra_headers=headers)
+            return
+        if request.path == "/api/v1/integrations/steam/callback":
+            query = parse_qs(request.query, keep_blank_values=True)
+            state = str(query.get("state", [""])[0] or "")
+            cookie_state = self._cookies().get(STEAM_OPENID_STATE_COOKIE, "")
+            clear_state = self._steam_state_cookie_headers(clear=True)
+            destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=steam"
+            if not state or not cookie_state or not hmac.compare_digest(state, cookie_state):
+                self._send_redirect(destination_base + "&status=error&reason=state", extra_headers=clear_state)
+                return
+            status, session, access, refreshed_headers = self._authenticated_access()
+            callback_headers = [*refreshed_headers, *clear_state]
+            if status != 200:
+                self._send_redirect(destination_base + "&status=signin_required", extra_headers=callback_headers)
+                return
+            verify_status, verified = verify_steam_openid(query, state)
+            if verify_status != 200:
+                result_status = "cancelled" if verified.get("error") == "steam_cancelled" else "error"
+                self._send_redirect(destination_base + f"&status={result_status}&reason=verification", extra_headers=callback_headers)
+                return
+            user_id = str(session.get("user", {}).get("id") or "")
+            save_status, _ = connect_gaming_account(access, user_id, "steam", str(verified.get("provider_user_id") or ""))
+            if save_status != 200:
+                self._send_redirect(destination_base + "&status=error&reason=storage", extra_headers=callback_headers)
+                return
+            self._send_redirect(destination_base + "&status=connected", extra_headers=callback_headers)
+            return
+        if request.path == "/api/v1/integrations/steam/status":
+            status, _, access, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "provider": "steam", "connected": False}, refreshed_headers)
+                return
+            account_status, result = gaming_account_status(access, "steam")
+            self._send_json(account_status, result, refreshed_headers)
+            return
         if request.path == "/api/v1/auth/session":
             status, payload, headers = self._auth_session()
             self._send_json(status, payload, headers)
@@ -2783,6 +3037,14 @@ class ParaHandler(SimpleHTTPRequestHandler):
         payload = self._read_json()
         if payload is None:
             self._send_json(400, {"error": "invalid_request"})
+            return
+        if request.path == "/api/v1/integrations/steam/disconnect":
+            status, _, access, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
+                return
+            disconnect_status, result = disconnect_gaming_account(access, "steam")
+            self._send_json(disconnect_status, result, refreshed_headers)
             return
         if request.path == "/api/v1/auth/signup":
             status, result, tokens = auth_sign_up(str(payload.get("email", "")), str(payload.get("password", "")), str(payload.get("display_name", "")))

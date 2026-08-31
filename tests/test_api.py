@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -179,6 +179,66 @@ class ApiContractTests(unittest.TestCase):
         self.assertTrue(payload["password_updated"])
         self.assertEqual(tokens["refresh_token"], "recovery-refresh")
         request.assert_called_once_with("/auth/v1/user", method="PUT", payload={"password": "newpassword123"}, bearer="recovery-access")
+
+    def test_steam_openid_login_url_uses_official_provider_and_para_callback(self):
+        import urllib.parse
+        url = steam_openid_login_url("state-token")
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", "https://steamcommunity.com/openid/")
+        self.assertEqual(query["openid.mode"], ["checkid_setup"])
+        self.assertEqual(query["openid.realm"], ["https://para-wjvx.onrender.com/"])
+        self.assertEqual(
+            query["openid.return_to"],
+            ["https://para-wjvx.onrender.com/api/v1/integrations/steam/callback?state=state-token"],
+        )
+
+    def test_steam_openid_verifies_signed_response_and_extracts_steamid64(self):
+        import server
+        state = "state-token"
+        steam_id = "76561198000000000"
+        query = {
+            "openid.ns": ["http://specs.openid.net/auth/2.0"],
+            "openid.mode": ["id_res"],
+            "openid.op_endpoint": ["https://steamcommunity.com/openid/login"],
+            "openid.claimed_id": [f"https://steamcommunity.com/openid/id/{steam_id}"],
+            "openid.identity": [f"https://steamcommunity.com/openid/id/{steam_id}"],
+            "openid.return_to": [f"https://para-wjvx.onrender.com/api/v1/integrations/steam/callback?state={state}"],
+            "openid.response_nonce": ["2026-08-31T00:00:00Znonce"],
+            "openid.assoc_handle": ["123"],
+            "openid.signed": ["signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle"],
+            "openid.sig": ["signature"],
+        }
+
+        class FakeResponse:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def read(self):
+                return b"ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"
+
+        with patch("server.urllib.request.urlopen", return_value=FakeResponse()) as opener:
+            status, payload = verify_steam_openid(query, state)
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["verified"])
+        self.assertEqual(payload["provider_user_id"], steam_id)
+        request = opener.call_args.args[0]
+        self.assertEqual(request.full_url, server.STEAM_OPENID_VERIFY_URL)
+        self.assertIn(b"openid.mode=check_authentication", request.data)
+
+    def test_steam_link_upserts_only_for_signed_in_para_user(self):
+        with patch("server._supabase_account_rest_request", return_value=(201, [{"provider": "steam"}])) as request:
+            status, payload = connect_gaming_account("user-jwt", "11111111-1111-1111-1111-111111111111", "steam", "76561198000000000")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["connected"])
+        args, kwargs = request.call_args
+        self.assertIn("on_conflict=para_user_id,provider", args[0])
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertEqual(kwargs["bearer"], "user-jwt")
+        self.assertEqual(kwargs["payload"]["para_user_id"], "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(kwargs["payload"]["provider_user_id"], "76561198000000000")
 
     def test_para_account_signin_normalizes_supabase_session(self):
         remote = {

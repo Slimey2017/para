@@ -141,6 +141,7 @@ const SHELL_PARAMS = new URLSearchParams(location.search);
 const IS_SUSPENDED_GAME_SHELL = window.parent !== window && SHELL_PARAMS.get("para_suspended_shell") === "1";
 const SUSPENDED_GAME_ID = SHELL_PARAMS.get("para_suspended_game") || "";
 let pendingAccountRecovery = null;
+let pendingIntegrationNotice = null;
 
 function captureAccountRecoveryFromUrl() {
   const raw = location.hash.replace(/^#/, "");
@@ -153,6 +154,30 @@ function captureAccountRecoveryFromUrl() {
     expiresIn: Number(params.get("expires_in") || 3600),
   };
   history.replaceState({}, "", `${location.pathname}${location.search}#/account-reset-password`);
+  return true;
+}
+
+function captureIntegrationReturnFromUrl() {
+  const raw = location.hash.replace(/^#\/?/, "");
+  const separator = raw.indexOf("?");
+  if (separator < 0 || raw.slice(0, separator) !== "setup") return false;
+  const params = new URLSearchParams(raw.slice(separator + 1));
+  if (params.get("integration") !== "steam") return false;
+  const status = params.get("status") || "";
+  if (status === "connected") {
+    setSetupAccountChoice("gamingAccounts", "steam", "connected");
+    pendingIntegrationNotice = { title: "Steam connected", message: "Your Steam account is linked to this PARA Account." };
+  } else if (status === "cancelled") {
+    setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
+    pendingIntegrationNotice = { title: "Steam connection cancelled", message: "Nothing was changed." };
+  } else if (status === "signin_required") {
+    setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
+    pendingIntegrationNotice = { title: "Sign in to PARA first", message: "A PARA Account is required before Steam can be linked." };
+  } else if (status === "error") {
+    setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
+    pendingIntegrationNotice = { title: "Steam connection failed", message: "PARA could not verify or save that Steam account. Try again." };
+  }
+  history.replaceState({}, "", `${location.pathname}${location.search}#/setup`);
   return true;
 }
 
@@ -1039,6 +1064,37 @@ async function handleAction(action, target) {
       toast("Offline profile ready", profile);
       break;
     }
+    case "setup-connect-provider": {
+      const provider = target.dataset.provider;
+      if (provider !== "steam") {
+        toast("Coming soon", "That gaming service is not supported yet.");
+        break;
+      }
+      if (state.setupChoices.accountMode !== "online") {
+        toast("Sign in to PARA first", "Connect your PARA Account before linking Steam.");
+        break;
+      }
+      setSetupAccountChoice("gamingAccounts", "steam", "connecting");
+      target.disabled = true;
+      window.location.assign("/api/v1/integrations/steam/connect");
+      break;
+    }
+    case "setup-disconnect-provider": {
+      const provider = target.dataset.provider;
+      if (provider !== "steam") break;
+      target.disabled = true;
+      try {
+        await paraApi.steamDisconnect();
+        setSetupAccountChoice("gamingAccounts", "steam", "disconnected");
+        toast("Steam disconnected", "The Steam account link was removed from PARA.");
+        rerender();
+      } catch (error) {
+        toast("Couldn’t disconnect Steam", error?.message || "Try again in a moment.");
+      } finally {
+        if (target?.isConnected) target.disabled = false;
+      }
+      break;
+    }
     case "setup-skip-provider":
       setSetupAccountChoice(target.dataset.providerGroup, target.dataset.provider, "skipped");
       rerender();
@@ -1836,6 +1892,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 captureAccountRecoveryFromUrl();
+captureIntegrationReturnFromUrl();
 
 if (new URLSearchParams(location.search).get("reset") === "1") {
   resetState();
@@ -1853,6 +1910,10 @@ async function start() {
   window.setInterval(() => refreshDemoDownloads(), 500);
   resetIdleSleep();
   router.resolve();
+  if (pendingIntegrationNotice) {
+    toast(pendingIntegrationNotice.title, pendingIntegrationNotice.message);
+    pendingIntegrationNotice = null;
+  }
 }
 
 start();

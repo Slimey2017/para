@@ -252,6 +252,24 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('<select data-setup-setting="language"><option value="en" selected>English</option></select>', boot)
         self.assertNotIn('<select data-setup-setting="keyboardLayout"><option value="system" selected>System default</option></select>', boot)
 
+    def test_steam_setup_uses_real_openid_connection_flow(self):
+        boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        migration = (ROOT / "supabase/secure_gaming_account_links.sql").read_text(encoding="utf-8")
+        self.assertIn('data-action="setup-connect-provider"', boot)
+        self.assertIn('data-provider="steam"', boot)
+        self.assertIn('Coming soon', boot)
+        self.assertIn('window.location.assign("/api/v1/integrations/steam/connect")', app)
+        self.assertIn('steamStatus:', api)
+        self.assertIn('STEAM_OPENID_ENDPOINT = "https://steamcommunity.com/openid/"', server)
+        self.assertIn('"/api/v1/integrations/steam/callback"', server)
+        self.assertIn("check_authentication", server)
+        self.assertIn("SameSite=Lax", server)
+        self.assertIn("gaming_accounts_select_own", migration)
+        self.assertIn("auth.uid()", migration)
+
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
