@@ -27,6 +27,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('data-account-signup-form', auth)
         self.assertIn('/api/v1/auth/signin', api)
         self.assertIn('/auth/v1/token?grant_type=password', server)
+        self.assertIn('PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"', server)
+        self.assertIn('sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY', server)
         self.assertIn('HttpOnly; SameSite=Strict', server)
 
     def test_frontend_routes_have_renderers(self):

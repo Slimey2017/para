@@ -123,6 +123,39 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_email")
         self.assertIsNone(tokens)
 
+    def test_para_account_signup_rejects_supabase_duplicate_obfuscated_user(self):
+        remote = {
+            "user": {
+                "id": "obfuscated-user",
+                "email": "player@example.com",
+                "identities": [],
+                "user_metadata": {"display_name": "Player"},
+            }
+        }
+        with patch("server._supabase_auth_request", return_value=(200, remote)):
+            status, payload, tokens = auth_sign_up("player@example.com", "password123", "Player")
+        self.assertEqual(status, 409)
+        self.assertEqual(payload["error"], "account_exists")
+        self.assertIsNone(tokens)
+
+    def test_para_account_signup_accepts_real_supabase_identity(self):
+        remote = {
+            "user": {
+                "id": "new-user",
+                "email": "new@example.com",
+                "identities": [{"id": "identity-1", "provider": "email"}],
+                "user_metadata": {"display_name": "New Player"},
+                "created_at": "2026-08-30T00:00:00Z",
+            }
+        }
+        with patch("server._supabase_auth_request", return_value=(200, remote)):
+            status, payload, tokens = auth_sign_up("new@example.com", "password123", "New Player")
+        self.assertEqual(status, 201)
+        self.assertTrue(payload["account_created"])
+        self.assertTrue(payload["persisted"])
+        self.assertEqual(payload["user"]["id"], "new-user")
+        self.assertIsNone(tokens)
+
     def test_para_account_signin_normalizes_supabase_session(self):
         remote = {
             "access_token": "access", "refresh_token": "refresh", "expires_in": 3600,

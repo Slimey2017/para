@@ -5,7 +5,13 @@ async function request(path, options = {}) {
     ...options,
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.message || payload.error || `Request failed: ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(payload.message || payload.error || `Request failed: ${response.status}`);
+    error.code = payload.error || "request_failed";
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
   return payload;
 }
 

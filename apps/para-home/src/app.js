@@ -861,7 +861,8 @@ async function handleAction(action, target) {
         const result = await paraApi.authSignIn(email, password);
         await finishCloudAccountAuth(result, target);
       } catch (error) {
-        accountStatus(error?.message || "Sign in failed.", "error");
+        const ref = error?.payload?.project_ref ? ` · Supabase ${error.payload.project_ref}` : "";
+        accountStatus(`${error?.message || "Sign in failed."}${ref}`, "error");
         toast("Couldn’t sign in", error?.message || "Check your account details.");
       } finally { if (target?.isConnected) target.disabled = false; }
       break;
@@ -894,8 +895,15 @@ async function handleAction(action, target) {
           }
         }
       } catch (error) {
-        accountStatus(error?.message || "Account creation failed.", "error");
-        toast("Couldn’t create account", error?.message || "Try again.");
+        if (error?.code === "account_exists") {
+          sessionStorage.setItem("para.account.signin.email", email.trim().toLowerCase());
+          accountStatus("That PARA Account already exists. Opening Sign In…", "error");
+          toast("Account already exists", "Sign in with that email instead.");
+          window.setTimeout(() => navigate("account-signin", { replace: true }, target), 650);
+        } else {
+          accountStatus(error?.message || "Account creation failed.", "error");
+          toast("Couldn’t create account", error?.message || "Try again.");
+        }
       } finally { if (target?.isConnected) target.disabled = false; }
       break;
     }

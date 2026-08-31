@@ -58,6 +58,14 @@ EMAIL_VERIFICATION_RESEND_SECONDS = 45
 EMAIL_VERIFICATION_MAX_ATTEMPTS = 6
 EMAIL_VERIFICATION_CLIENT_WINDOW_SECONDS = 10 * 60
 EMAIL_VERIFICATION_CLIENT_MAX_SENDS = 5
+
+# PARA Account auth is intentionally pinned to the production PARA Supabase
+# project. Supabase publishable keys are public client credentials; pinning them
+# here prevents a stale Render environment variable from authenticating against
+# a different project while the rest of PARA still appears healthy.
+PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"
+PARA_ACCOUNT_SUPABASE_URL = f"https://{PARA_ACCOUNT_SUPABASE_PROJECT_REF}.supabase.co"
+PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY"
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
@@ -65,10 +73,8 @@ _email_verification_lock = threading.Lock()
 
 def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
     """Call Supabase Auth without exposing the publishable key or session tokens to PARA Home."""
-    base = os.environ.get("PARA_SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("PARA_SUPABASE_PUBLISHABLE_KEY", "")
-    if not base or not key:
-        return 503, {"error": "account_not_configured", "message": "PARA Account is not configured on this system."}
+    base = PARA_ACCOUNT_SUPABASE_URL
+    key = PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY
     headers = {"apikey": key, "Accept": "application/json"}
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
@@ -140,11 +146,25 @@ def auth_sign_up(email: str, password: str, display_name: str) -> tuple[int, dic
     )
     if status >= 400:
         return status, {"error": "signup_failed", "message": _auth_message(payload, "Could not create the PARA Account.")}, None
-    user = _public_auth_user(payload.get("user") if isinstance(payload, dict) else None)
+    raw_user = payload.get("user") if isinstance(payload, dict) else None
+    if not isinstance(raw_user, dict) or not raw_user.get("id"):
+        return 502, {"error": "signup_user_missing", "message": "Supabase did not create a usable PARA Account."}, None
+
+    # Supabase may intentionally return an obfuscated, success-shaped user for an
+    # email that already exists. In that response the identities array is empty.
+    # Never tell the console that a new account was created in that case.
+    identities = raw_user.get("identities")
+    if isinstance(identities, list) and len(identities) == 0:
+        return 409, {"error": "account_exists", "message": "That email already has a PARA Account. Sign in instead."}, None
+
+    user = _public_auth_user(raw_user)
+    if not user:
+        return 502, {"error": "signup_user_invalid", "message": "Supabase returned an invalid PARA Account record."}, None
+
     tokens = None
     if isinstance(payload, dict) and payload.get("access_token") and payload.get("refresh_token"):
         tokens = {"access_token": payload["access_token"], "refresh_token": payload["refresh_token"], "expires_in": int(payload.get("expires_in") or 3600)}
-    return 201, {"signed_in": bool(tokens), "requires_confirmation": not bool(tokens), "user": user}, tokens
+    return 201, {"account_created": True, "persisted": True, "signed_in": bool(tokens), "requires_confirmation": not bool(tokens), "user": user}, tokens
 
 
 def auth_sign_in(email: str, password: str) -> tuple[int, dict, dict | None]:
@@ -156,7 +176,11 @@ def auth_sign_in(email: str, password: str) -> tuple[int, dict, dict | None]:
         payload={"email": email, "password": password},
     )
     if status >= 400:
-        return status, {"error": "signin_failed", "message": _auth_message(payload, "Email or password was not accepted.")}, None
+        return status, {
+            "error": "signin_failed",
+            "message": _auth_message(payload, "Email or password was not accepted."),
+            "project_ref": PARA_ACCOUNT_SUPABASE_PROJECT_REF,
+        }, None
     user = _public_auth_user(payload.get("user") if isinstance(payload, dict) else None)
     if not isinstance(payload, dict) or not payload.get("access_token") or not payload.get("refresh_token"):
         return 502, {"error": "session_missing", "message": "PARA Account did not return a usable session."}, None

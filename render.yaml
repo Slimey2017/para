@@ -9,9 +9,9 @@ services:
 
     envVars:
       - key: PARA_SUPABASE_URL
-        sync: false
+        value: https://fqkbvxutsijruyawzxxo.supabase.co
       - key: PARA_SUPABASE_PUBLISHABLE_KEY
-        sync: false
+        value: sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY
       - key: PARA_EMAILJS_SERVICE_ID
         value: service_rozuv2c
       - key: PARA_EMAILJS_TEMPLATE_ID
