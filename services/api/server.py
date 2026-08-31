@@ -66,6 +66,7 @@ EMAIL_VERIFICATION_CLIENT_MAX_SENDS = 5
 PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"
 PARA_ACCOUNT_SUPABASE_URL = f"https://{PARA_ACCOUNT_SUPABASE_PROJECT_REF}.supabase.co"
 PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY"
+PARA_ACCOUNT_PUBLIC_URL = "https://para-wjvx.onrender.com/"
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
@@ -193,7 +194,8 @@ def auth_request_password_recovery(email: str) -> tuple[int, dict]:
     email = _normalize_verification_email(email)
     if not email:
         return 400, {"error": "invalid_email", "message": "Enter a valid email address."}
-    status, payload = _supabase_auth_request("/auth/v1/recover", payload={"email": email})
+    recovery_path = "/auth/v1/recover?" + urllib.parse.urlencode({"redirect_to": PARA_ACCOUNT_PUBLIC_URL})
+    status, payload = _supabase_auth_request(recovery_path, payload={"email": email})
     if status >= 400:
         return status, {"error": "recovery_failed", "message": _auth_message(payload, "Could not request password recovery.")}
     # Keep the response account-enumeration safe. Supabase intentionally does the same.

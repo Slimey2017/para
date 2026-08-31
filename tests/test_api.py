@@ -161,7 +161,15 @@ class ApiContractTests(unittest.TestCase):
             status, payload = auth_request_password_recovery("Player@Example.com")
         self.assertEqual(status, 202)
         self.assertTrue(payload["requested"])
-        request.assert_called_once_with("/auth/v1/recover", payload={"email": "player@example.com"})
+        request.assert_called_once_with("/auth/v1/recover?redirect_to=https%3A%2F%2Fpara-wjvx.onrender.com%2F", payload={"email": "player@example.com"})
+
+    def test_para_account_recovery_never_falls_back_to_localhost(self):
+        with patch("server._supabase_auth_request", return_value=(200, {})) as request:
+            status, _ = auth_request_password_recovery("player@example.com")
+        self.assertEqual(status, 202)
+        recovery_path = request.call_args.args[0]
+        self.assertIn("para-wjvx.onrender.com", recovery_path)
+        self.assertNotIn("localhost", recovery_path)
 
     def test_para_account_recovery_updates_password_with_recovery_session(self):
         remote = {"id": "user-1", "email": "player@example.com", "user_metadata": {"display_name": "Player"}}
