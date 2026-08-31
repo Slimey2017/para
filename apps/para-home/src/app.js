@@ -41,6 +41,7 @@ import {
   resetControlCenterData, showControlCenterContext,
 } from "./ui/control-center.js";
 import { paraApi } from "./services/para-api.js";
+import { knownParaAccount, markParaAccountConnected, markParaAccountDisconnected, markParaAccountVerified, rememberParaAccount } from "./services/account-memory.js";
 import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
 import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, suspendMenuMusic } from "./services/menu-music.js";
 import { mediaSessionAction, setMediaVolume, setGameMediaBalance, mediaSessionState } from "./services/media-session.js";
@@ -784,11 +785,32 @@ async function finishCloudAccountAuth(result, target) {
   if (!user) return false;
   const name = String(user.display_name || user.email?.split("@")[0] || "PARA User").trim().slice(0,24) || "PARA User";
   if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
-  setState({ activeProfile: name, setupChoices: { accountMode: "online", profileName: name } });
+  markParaAccountConnected(user);
+  setState({ activeProfile: name, setupChoices: { accountMode: "online", accountEmail: user.email || "", profileName: name } });
   await hydrateProfile(name);
   toast("PARA Account connected", name);
   navigate(accountReturnRoute(), { replace: true }, target);
   return true;
+}
+
+async function syncCloudAccountSession() {
+  try {
+    const session = await paraApi.authSession();
+    if (session?.signed_in && session?.user) {
+      const user = session.user;
+      const name = String(user.display_name || user.email?.split("@")[0] || "PARA User").trim().slice(0,24) || "PARA User";
+      if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
+      markParaAccountConnected(user);
+      setState({ activeProfile: name, setupChoices: { accountMode: "online", accountEmail: user.email || "", profileName: name } });
+      return session;
+    }
+  } catch { /* offline/local PARA remains usable */ }
+  const known = knownParaAccount();
+  if (known) {
+    markParaAccountDisconnected();
+    setState({ setupChoices: { accountMode: known.verified ? "verified" : "created", accountEmail: known.email, profileName: known.displayName || getState().setupChoices.profileName } });
+  }
+  return null;
 }
 
 async function handleAction(action, target) {
@@ -854,6 +876,8 @@ async function handleAction(action, target) {
       target.disabled = true;
       try {
         const result = await paraApi.authSignUp(displayName, email, password);
+        rememberParaAccount({ email, displayName: result?.user?.display_name || displayName, verified: Boolean(result?.user?.email_verified), connected: Boolean(result?.signed_in) });
+        setState({ setupChoices: { accountMode: result?.signed_in ? "online" : "created", accountEmail: email, profileName: result?.user?.display_name || displayName } });
         rememberVerificationEmail(email);
         try {
           await sendVerificationCode(email);
@@ -885,11 +909,16 @@ async function handleAction(action, target) {
       try {
         const result = await paraApi.authVerifyEmail(email, code);
         sessionStorage.removeItem("para.account.verify.email");
-        accountStatus("Email verified.", "success");
-        toast("Email verified", "PARA Protection Services confirmed your email.");
+        const known = markParaAccountVerified(email);
+        setState({ setupChoices: { accountMode: "verified", accountEmail: email, profileName: known?.displayName || getState().setupChoices.profileName } });
+        accountStatus("Account created and email verified.", "success");
+        toast("PARA Account created", "Email verified. Sign in to connect this console.");
         const session = await paraApi.authSession();
         if (session?.signed_in && session?.user) await finishCloudAccountAuth(session, target);
-        else navigate("account-signin", { replace: true }, target);
+        else {
+          sessionStorage.setItem("para.account.signin.email", email);
+          navigate("account-signin", { replace: true }, target);
+        }
       } catch (error) {
         accountStatus(error?.message || "That verification code was not accepted.", "error");
       } finally { if (target?.isConnected) target.disabled = false; }
@@ -910,8 +939,9 @@ async function handleAction(action, target) {
     }
     case "account-cloud-signout":
       try { await paraApi.authSignOut(); } catch { /* local sign-out still wins */ }
-      setState({ setupChoices: { accountMode: "offline" } });
-      toast("PARA Account signed out");
+      const known = markParaAccountDisconnected();
+      setState({ setupChoices: { accountMode: known?.verified ? "verified" : (known ? "created" : "offline"), accountEmail: known?.email || "" } });
+      toast("PARA Account signed out", known ? "Your account still exists. Sign in again anytime." : "");
       if (router.current() === "account") rerender();
       break;
     case "account-update-profile": {
@@ -1750,6 +1780,7 @@ if (new URLSearchParams(location.search).get("reset") === "1") {
 async function start() {
   applyPreferences();
   syncMenuMusic();
+  await syncCloudAccountSession();
   const state = getState();
   if (state.loggedIn && state.activeProfile) await hydrateProfile(state.activeProfile);
   gamepad.start();

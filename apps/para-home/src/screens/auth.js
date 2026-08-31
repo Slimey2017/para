@@ -1,6 +1,7 @@
 import { brand, hints, listRow, livingBackground } from "../ui/components.js";
 import { getState } from "../state.js";
 import { escapeHtml } from "../services/para-api.js";
+import { knownParaAccount } from "../services/account-memory.js";
 
 function initials(name) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P";
@@ -27,7 +28,11 @@ export function loginScreen() {
 
 
 export function accountSignInScreen() {
-  return `<section class="screen login-screen">${livingBackground()}<header class="profile-select__top">${brand()}<time data-clock>--:--</time></header><main class="login-card para-account-card"><span class="avatar login-avatar">P</span><span class="eyebrow">PARA Account</span><h1>Sign in</h1><p class="account-auth-copy">Use your PARA Account for identity, cloud-ready services, purchases, friends, and future cross-device sync.</p><form class="account-auth-form" data-account-signin-form><label><span>Email</span><input type="email" autocomplete="email" inputmode="email" data-account-email data-autofocus="true" required /></label><label><span>Password</span><input type="password" autocomplete="current-password" minlength="8" data-account-password required /></label><button type="submit" class="action-button login-continue" data-action="account-signin-submit">Sign In</button></form><p class="account-auth-status" data-account-auth-status aria-live="polite"></p><div class="login-options">${listRow({ title: "Create PARA Account", icon: "+", route: "account-signup" })}${listRow({ title: "Back", icon: "↻", action: "account-auth-back" })}</div></main>${hints({ context: false, options: false })}</section>`;
+  const known = knownParaAccount();
+  const rememberedEmail = sessionStorage.getItem("para.account.signin.email") || known?.email || "";
+  sessionStorage.removeItem("para.account.signin.email");
+  const createdCopy = known ? `<p class="account-created-notice">✓ PARA Account created${known.verified ? " and verified" : ""}. Sign in to connect it to this console.</p>` : "";
+  return `<section class="screen login-screen">${livingBackground()}<header class="profile-select__top">${brand()}<time data-clock>--:--</time></header><main class="login-card para-account-card"><span class="avatar login-avatar">P</span><span class="eyebrow">PARA Account</span><h1>Sign in</h1><p class="account-auth-copy">Use your PARA Account for identity, cloud-ready services, purchases, friends, and future cross-device sync.</p>${createdCopy}<form class="account-auth-form" data-account-signin-form><label><span>Email</span><input type="email" autocomplete="email" inputmode="email" value="${escapeHtml(rememberedEmail)}" data-account-email data-autofocus="true" required /></label><label><span>Password</span><input type="password" autocomplete="current-password" minlength="8" data-account-password required /></label><button type="submit" class="action-button login-continue" data-action="account-signin-submit">Sign In</button></form><p class="account-auth-status" data-account-auth-status aria-live="polite"></p><div class="login-options">${listRow({ title: "Create PARA Account", icon: "+", route: "account-signup" })}${listRow({ title: "Back", icon: "↻", action: "account-auth-back" })}</div></main>${hints({ context: false, options: false })}</section>`;
 }
 
 export function accountSignUpScreen() {

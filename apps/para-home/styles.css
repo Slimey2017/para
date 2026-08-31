@@ -2033,3 +2033,6 @@ html[data-modal-owner] #para-app { overflow:hidden; }
 }
 .account-verification-prompt h3, .account-verification-prompt p { margin: .25rem 0; }
 @media (max-width: 720px) { .account-verification-prompt { align-items: stretch; flex-direction: column; } }
+
+/* V33 account existence/session clarity */
+.account-created-notice{margin:0 0 18px;padding:12px 14px;border:1px solid rgba(156,103,255,.38);border-radius:12px;background:rgba(90,42,153,.16);color:#d9c8f4;font-size:.82rem;line-height:1.45}
