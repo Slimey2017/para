@@ -136,6 +136,20 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(tokens["refresh_token"], "refresh")
 
 
+
+    def test_emailjs_config_values_strip_dashboard_quotes_and_spaces(self):
+        import server
+        self.assertEqual(server._clean_config_value('  "template_xd50wdh"  '), 'template_xd50wdh')
+        self.assertEqual(server._clean_config_value(" 'service_rozuv2c' "), 'service_rozuv2c')
+
+    def test_emailjs_diagnostic_summary_masks_public_key(self):
+        import server
+        summary = server._emailjs_config_summary()
+        self.assertEqual(summary["template_id"], server.EMAILJS_TEMPLATE_ID)
+        self.assertEqual(summary["service_id"], server.EMAILJS_SERVICE_ID)
+        self.assertEqual(summary["public_key_length"], len(server.EMAILJS_PUBLIC_KEY))
+        self.assertNotIn(server.EMAILJS_PUBLIC_KEY, str(summary))
+
     def test_para_email_verification_sends_emailjs_code_without_returning_code(self):
         import server
         server._email_verifications.clear()

@@ -12,3 +12,13 @@ services:
         sync: false
       - key: PARA_SUPABASE_PUBLISHABLE_KEY
         sync: false
+      - key: PARA_EMAILJS_SERVICE_ID
+        value: service_rozuv2c
+      - key: PARA_EMAILJS_TEMPLATE_ID
+        value: template_xd50wdh
+      - key: PARA_EMAILJS_PUBLIC_KEY
+        value: Vcb2UJ9zNsxvhEajq
+      - key: PARA_EMAILJS_PRIVATE_KEY
+        sync: false
+      - key: PARA_EMAILJS_ORIGIN
+        sync: false

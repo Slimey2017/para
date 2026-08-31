@@ -34,11 +34,25 @@ import system_layer  # noqa: E402
 
 AUTH_ACCESS_COOKIE = "para_access_token"
 AUTH_REFRESH_COOKIE = "para_refresh_token"
-EMAILJS_SERVICE_ID = os.environ.get("PARA_EMAILJS_SERVICE_ID", "service_rozuv2c")
-EMAILJS_TEMPLATE_ID = os.environ.get("PARA_EMAILJS_TEMPLATE_ID", "template_hitoc7a")
-EMAILJS_PUBLIC_KEY = os.environ.get("PARA_EMAILJS_PUBLIC_KEY", "Vcb2UJ9zNsxvhEajq")
-EMAILJS_PRIVATE_KEY = os.environ.get("PARA_EMAILJS_PRIVATE_KEY", "")
-EMAILJS_ORIGIN = os.environ.get("PARA_EMAILJS_ORIGIN", "")
+
+
+def _clean_config_value(value: str | None, fallback: str = "") -> str:
+    """Normalize dashboard/env values copied with whitespace or wrapping quotes."""
+    text = str(value if value is not None else fallback).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"\"", "'"}:
+        text = text[1:-1].strip()
+    return text
+
+
+def _env_config(name: str, fallback: str = "") -> str:
+    return _clean_config_value(os.environ.get(name), fallback)
+
+
+EMAILJS_SERVICE_ID = _env_config("PARA_EMAILJS_SERVICE_ID", "service_rozuv2c")
+EMAILJS_TEMPLATE_ID = _env_config("PARA_EMAILJS_TEMPLATE_ID", "template_xd50wdh")
+EMAILJS_PUBLIC_KEY = _env_config("PARA_EMAILJS_PUBLIC_KEY", "Vcb2UJ9zNsxvhEajq")
+EMAILJS_PRIVATE_KEY = _env_config("PARA_EMAILJS_PRIVATE_KEY", "")
+EMAILJS_ORIGIN = _env_config("PARA_EMAILJS_ORIGIN", "")
 EMAIL_VERIFICATION_TTL_SECONDS = 15 * 60
 EMAIL_VERIFICATION_RESEND_SECONDS = 45
 EMAIL_VERIFICATION_MAX_ATTEMPTS = 6
@@ -217,6 +231,18 @@ def _verification_digest(code: str, salt: str) -> str:
     return hashlib.sha256(f"{salt}:{code}".encode("utf-8")).hexdigest()
 
 
+def _emailjs_config_summary() -> dict:
+    suffix = EMAILJS_PUBLIC_KEY[-4:] if EMAILJS_PUBLIC_KEY else ""
+    return {
+        "service_id": EMAILJS_SERVICE_ID,
+        "template_id": EMAILJS_TEMPLATE_ID,
+        "public_key_length": len(EMAILJS_PUBLIC_KEY),
+        "public_key_suffix": suffix,
+        "private_key_enabled": bool(EMAILJS_PRIVATE_KEY),
+        "origin": EMAILJS_ORIGIN or None,
+    }
+
+
 def _emailjs_error_text(raw: bytes | str) -> str:
     if isinstance(raw, bytes):
         text = raw.decode("utf-8", "replace")
@@ -229,7 +255,7 @@ def _emailjs_error_text(raw: bytes | str) -> str:
 
 def _emailjs_send_verification(email: str, code: str) -> tuple[int, dict]:
     if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
-        return 503, {"error": "verification_not_configured", "message": "PARA Protection Services email is not configured."}
+        return 503, {"error": "verification_not_configured", "message": "PARA Protection Services email is not configured.", "emailjs_config": _emailjs_config_summary()}
     payload = {
         "service_id": EMAILJS_SERVICE_ID,
         "template_id": EMAILJS_TEMPLATE_ID,
@@ -268,13 +294,14 @@ def _emailjs_send_verification(email: str, code: str) -> tuple[int, dict]:
             "message": message,
             "emailjs_status": error.code,
             "emailjs_detail": detail,
+            "emailjs_config": _emailjs_config_summary(),
         }
     except (urllib.error.URLError, TimeoutError) as error:
         detail = _emailjs_error_text(getattr(error, "reason", error))
         message = "PARA Protection Services could not reach EmailJS."
         if detail:
             message += f" {detail}"
-        return 502, {"error": "verification_service_unavailable", "message": message}
+        return 502, {"error": "verification_service_unavailable", "message": message, "emailjs_config": _emailjs_config_summary()}
 
 
 def auth_request_email_verification(email: str, client_key: str = "local") -> tuple[int, dict]:
