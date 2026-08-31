@@ -35,6 +35,25 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY', server)
         self.assertIn('HttpOnly; SameSite=Lax', server)
 
+
+    def test_public_privacy_policy_covers_connected_accounts_and_google_data(self):
+        privacy = (ROOT / "apps/para-home/privacy/index.html").read_text(encoding="utf-8")
+        index = (ROOT / "apps/para-home/index.html").read_text(encoding="utf-8")
+        boot = (ROOT / "apps/para-home/src/screens/boot.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        for marker in [
+            "Google and YouTube data",
+            "youtube.readonly",
+            "Google API Services User Data Policy",
+            "PARA does not sell personal information",
+            "Steam OpenID",
+            "Retention, disconnecting, and deletion",
+        ]:
+            self.assertIn(marker, privacy)
+        self.assertIn('href="/privacy"', index)
+        self.assertGreaterEqual(boot.count('href="/privacy"'), 2)
+        self.assertIn('request.path in {"/privacy", "/privacy/"}', server)
+
     def test_frontend_routes_have_renderers(self):
         manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")

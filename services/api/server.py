@@ -3173,6 +3173,9 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path in {"/privacy", "/privacy/"}:
+            self._send_file(HOME_ROOT / "privacy" / "index.html", "text/html; charset=utf-8")
+            return
         if request.path == "/api/v1/integrations/google/connect":
             status, _, _, refreshed_headers = self._authenticated_access()
             destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"

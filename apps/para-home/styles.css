@@ -2037,3 +2037,46 @@ html[data-modal-owner] #para-app { overflow:hidden; }
 
 /* V33 account existence/session clarity */
 .account-created-notice{margin:0 0 18px;padding:12px 14px;border:1px solid rgba(156,103,255,.38);border-radius:12px;background:rgba(90,42,153,.16);color:#d9c8f4;font-size:.82rem;line-height:1.45}
+
+
+/* V42 public privacy/legal links */
+.para-public-footer {
+  position: fixed;
+  right: 18px;
+  bottom: 10px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(8, 6, 13, 0.58);
+  color: rgba(238, 231, 246, 0.56);
+  font-size: 10px;
+  line-height: 1.2;
+  backdrop-filter: blur(10px);
+}
+
+.para-public-footer a,
+.setup-legal-copy a {
+  color: #d6a7ff;
+  text-decoration: none;
+}
+
+.para-public-footer a:hover,
+.para-public-footer a:focus-visible,
+.setup-legal-copy a:hover,
+.setup-legal-copy a:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.setup-legal-copy {
+  margin: 14px 0 0;
+  color: rgba(230, 222, 239, 0.62);
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .para-public-footer span { display: none; }
+}
