@@ -34,6 +34,96 @@ const GAMING_PROVIDERS = Object.freeze([
 ]);
 const OTHER_PROVIDERS = Object.freeze([["google", "Google"]]);
 
+const LANGUAGE_OPTIONS = Object.freeze([
+  ["en", "English"],
+  ["en-GB", "English (United Kingdom)"],
+  ["es", "Español"],
+  ["fr", "Français"],
+  ["de", "Deutsch"],
+  ["pt", "Português"],
+  ["it", "Italiano"],
+  ["ja", "日本語"],
+  ["ko", "한국어"],
+  ["zh-CN", "简体中文"],
+  ["zh-TW", "繁體中文"],
+]);
+
+const FALLBACK_REGION_CODES = Object.freeze([
+  "US", "CA", "MX", "BR", "AR", "CL", "CO", "PE",
+  "GB", "IE", "FR", "DE", "ES", "IT", "PT", "NL", "BE", "CH", "AT",
+  "SE", "NO", "DK", "FI", "PL", "CZ", "RO", "GR", "UA",
+  "AU", "NZ", "JP", "KR", "CN", "TW", "HK", "IN", "SG", "PH", "ID", "MY", "TH", "VN",
+  "ZA", "NG", "KE", "AE", "SA", "IL",
+]);
+
+const KEYBOARD_LAYOUT_OPTIONS = Object.freeze([
+  ["system", "System default"],
+  ["us", "US · QWERTY"],
+  ["us-intl", "US International · QWERTY"],
+  ["uk", "United Kingdom · QWERTY"],
+  ["ca-multilingual", "Canadian Multilingual"],
+  ["es", "Spanish · QWERTY"],
+  ["fr", "French · AZERTY"],
+  ["de", "German · QWERTZ"],
+  ["pt", "Portuguese · QWERTY"],
+  ["jp", "Japanese"],
+  ["kr", "Korean"],
+  ["zh", "Chinese"],
+]);
+
+const FALLBACK_TIME_ZONES = Object.freeze([
+  "UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+  "America/Anchorage", "Pacific/Honolulu", "America/Toronto", "America/Vancouver", "America/Mexico_City",
+  "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome",
+  "Europe/Warsaw", "Europe/Athens", "Europe/Kyiv", "Africa/Johannesburg", "Africa/Lagos",
+  "Asia/Dubai", "Asia/Jerusalem", "Asia/Kolkata", "Asia/Singapore", "Asia/Bangkok", "Asia/Shanghai",
+  "Asia/Hong_Kong", "Asia/Tokyo", "Asia/Seoul", "Australia/Sydney", "Australia/Perth", "Pacific/Auckland",
+]);
+
+function optionMarkup(options, selected) {
+  return options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+}
+
+function languageOptions(selected) {
+  const values = LANGUAGE_OPTIONS.map(([value]) => value);
+  if (!selected || values.includes(selected)) return LANGUAGE_OPTIONS;
+  let label = selected;
+  try { label = new Intl.DisplayNames([selected, "en"], { type: "language" }).of(selected) || selected; } catch { /* locale code remains readable */ }
+  return [[selected, label], ...LANGUAGE_OPTIONS];
+}
+
+function regionOptions(selected, language) {
+  let names = null;
+  try { names = new Intl.DisplayNames([language || "en"], { type: "region" }); } catch { /* fallback list below */ }
+  let values = [...FALLBACK_REGION_CODES];
+  if (names) {
+    const discovered = [];
+    for (let first = 65; first <= 90; first += 1) {
+      for (let second = 65; second <= 90; second += 1) {
+        const code = String.fromCharCode(first, second);
+        let label = code;
+        try { label = names.of(code) || code; } catch { continue; }
+        if (label !== code) discovered.push(code);
+      }
+    }
+    if (discovered.length > values.length) values = discovered;
+  }
+  values = [selected, ...values].filter((value, index, all) => value && all.indexOf(value) === index);
+  return values.map((value) => [value, names?.of(value) || value]).sort((a, b) => {
+    if (a[0] === selected) return -1;
+    if (b[0] === selected) return 1;
+    return a[1].localeCompare(b[1], language || "en");
+  });
+}
+
+function timeZoneOptions(selected) {
+  let values = [];
+  try { values = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : []; } catch { /* fallback below */ }
+  if (!values.length) values = [...FALLBACK_TIME_ZONES];
+  values = [selected, ...values].filter((value, index, all) => value && all.indexOf(value) === index);
+  return values.map((value) => [value, value.replaceAll("_", " ")]);
+}
+
 export function startupScreen() {
   return `<section class="startup-black" aria-label="Starting PARA"></section>`;
 }
@@ -93,7 +183,7 @@ function setupBody(step) {
   const background = getProfilePreferences(profile).background.selection;
   const bodies = [
     `<div class="setup-question setup-question--center"><div class="setup-controller-symbol" aria-hidden="true"><i></i></div><span class="eyebrow">Controller</span><h1>How will you control PARA?</h1><p class="lede">Connect a PulseWave Controller by USB-C and press the PARA button, or continue with keyboard and mouse.</p><div class="setup-controller-state" data-setup-controller-status><strong>Waiting for a controller</strong><span>Keyboard and mouse are ready</span></div><div class="setup-choice-grid setup-choice-grid--two">${choiceButton({ title: "Connected controller", meta: "Press the PARA button to choose it", action: "setup-use-controller", selected: choices.inputMode === "controller", disabled: true, icon: "◉", extra: "data-setup-controller-choice" })}${choiceButton({ title: "Keyboard & mouse", meta: "Continue in PC mode", action: "setup-use-keyboard", selected: choices.inputMode === "keyboard", autofocus: true, icon: "⌨" })}</div></div>`,
-    `<div class="setup-question"><span class="eyebrow">Language & Region</span><h1>Where are you using PARA?</h1><p class="lede">Time and regional formats will follow these choices.</p><div class="setup-form-grid"><label><span>Language</span><select data-setup-setting="language"><option value="en" selected>English</option></select></label><label><span>Country or region</span><select data-setup-setting="region">${[choices.region, "US", "CA", "GB", "AU", "JP", "DE", "FR"].filter((value, index, all) => value && all.indexOf(value) === index).map((value) => `<option value="${escapeHtml(value)}" ${value === choices.region ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label><label><span>Time zone</span><select data-setup-setting="timeZone"><option value="${escapeHtml(choices.timeZone)}" selected>${escapeHtml(choices.timeZone)}</option></select></label><label><span>Keyboard layout</span><select data-setup-setting="keyboardLayout"><option value="system" selected>System default</option></select></label></div></div>`,
+    `<div class="setup-question"><span class="eyebrow">Language & Region</span><h1>Where are you using PARA?</h1><p class="lede">Time and regional formats will follow these choices.</p><div class="setup-form-grid"><label><span>Language</span><select data-setup-setting="language">${optionMarkup(languageOptions(choices.language), choices.language)}</select></label><label><span>Country or region</span><select data-setup-setting="region">${optionMarkup(regionOptions(choices.region, choices.language), choices.region)}</select></label><label><span>Time zone</span><select data-setup-setting="timeZone">${optionMarkup(timeZoneOptions(choices.timeZone), choices.timeZone)}</select></label><label><span>Keyboard layout</span><select data-setup-setting="keyboardLayout">${optionMarkup(KEYBOARD_LAYOUT_OPTIONS, choices.keyboardLayout)}</select></label></div></div>`,
     `<div class="setup-question"><span class="eyebrow">Display Area</span><h1>Can you see all four corners?</h1><p class="lede">Adjust the boundary until every corner sits comfortably inside your screen.</p><div class="setup-display-frame" style="--setup-inset:${Number(choices.safeArea) || 0}%"><i></i><i></i><i></i><i></i><strong>PARA</strong></div><label class="setup-slider"><span><strong>Screen boundary</strong><output data-safe-area-value>${Number(choices.safeArea) || 0}%</output></span><input type="range" min="0" max="8" step="1" value="${Number(choices.safeArea) || 0}" data-setup-safe-area /></label><div class="display-readout"><div><strong data-display-resolution>Reading…</strong><span>Resolution</span></div><div><strong data-refresh-rate>Reading…</strong><span>Refresh rate</span></div><div><strong data-hdr-status>Reading…</strong><span>Color range</span></div></div><div class="setup-choice-grid setup-choice-grid--two">${choiceButton({ title: "Living room", meta: "Larger interface for TVs", action: "select-tv", selected: state.displayMode === "Living room", autofocus: true, icon: "▭" })}${choiceButton({ title: "Desk", meta: "More room for monitors", action: "select-monitor", selected: state.displayMode === "Desk", icon: "□" })}</div></div>`,
     `<div class="setup-question"><span class="eyebrow">Internet</span><h1>Connect to the internet?</h1><p class="lede">Use a connection already available to PARA, or set this up later.</p><div class="choice-stack" data-setup-network><div class="library-loading"><span></span><strong>Checking connections…</strong></div></div><div class="setup-inline-actions"><button class="action-button action-button--ghost" data-action="setup-network-later">Set Up Later</button></div></div>`,
     `<div class="setup-question"><span class="eyebrow">PARA Account</span><h1>How would you like to enter PARA?</h1><p class="lede">Sign in for your PARA identity and connected services, create a new account, or keep using an offline profile.</p><div class="setup-account-actions"><button class="action-button action-button--ghost" data-action="setup-account-signin">Log In</button><button class="action-button action-button--ghost" data-action="setup-account-signup">Create Account</button><button class="action-button" data-action="setup-account-offline" data-autofocus="true">Continue Offline</button></div><label class="setup-profile-name"><span>Offline profile name</span><input type="text" maxlength="32" value="${escapeHtml(choices.profileName)}" data-setup-setting="profileName" autocomplete="off" /></label>${choices.accountMode === "online" ? `<p class="setup-account-connected">✓ PARA Account connected as ${escapeHtml(choices.profileName)}</p>` : (["created","verified"].includes(choices.accountMode) ? `<p class="setup-account-connected">✓ PARA Account ${choices.accountMode === "verified" ? "created and verified" : "created"}${choices.accountEmail ? ` for ${escapeHtml(choices.accountEmail)}` : ""}. Sign in to connect it to this console.</p>` : "")}</div>`,
