@@ -371,7 +371,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("data-video-status", player)
         self.assertIn("video.canPlayType", player)
         self.assertIn("playback did not advance", capture)
-        self.assertIn("video.canPlayType", capture)
+        self.assertIn("assertPlayableVideo", capture)
 
     def test_v47_webm_playback_uses_generic_blob_mime_and_direct_video_src(self):
         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
@@ -389,6 +389,25 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('<source src="${escapeAttr(src)}"', player)
         self.assertIn("player.dataset.mimeHint", player)
         self.assertNotIn("Unsupported media type", player)
+
+    def test_v48_capture_recorder_preflights_codec_flushes_final_chunk_and_rejects_bad_video(self):
+        capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
+        self.assertIn('"video/webm;codecs=vp8,opus"', capture)
+        self.assertLess(capture.index('"video/webm;codecs=vp8,opus"'), capture.index('"video/webm;codecs=vp9,opus"'))
+        self.assertIn("CAPTURE_CHUNK_MS = 1000", capture)
+        self.assertIn("recorder.start(timesliceMs)", capture)
+        self.assertIn("async function flushRecorderData", capture)
+        self.assertIn("async function finalizeRecorderSession", capture)
+        self.assertIn("final dataavailable event is queued", capture)
+        self.assertIn("async function probeRecorderMimeType", capture)
+        self.assertIn("async function selectRecorderMimeType", capture)
+        self.assertIn("MediaRecorder.isTypeSupported", capture)
+        self.assertIn("requestVideoFrameCallback", capture)
+        self.assertIn("playback did not advance", capture)
+        self.assertIn("Chrome rejected this capture's video stream.", capture)
+        self.assertIn("playbackVerified: true", capture)
+        self.assertIn("recorderMimeType", capture)
+        self.assertNotIn("function recorderMimeType()", capture)
 
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
