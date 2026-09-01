@@ -31,22 +31,55 @@ export const paraApi = {
   steamDisconnect: () => request("/api/v1/integrations/steam/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
   googleStatus: () => request("/api/v1/integrations/google/status", { signal: AbortSignal.timeout(12_000) }),
   googleDisconnect: () => request("/api/v1/integrations/google/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
-  youtubeUploadCapture: async (file, { title, description = "", privacy = "private", madeForKids } = {}) => {
+  youtubeUploadCapture: (file, { title, description = "", privacy = "private", madeForKids, tags = [], categoryId = "20", publishAt = "", thumbnailPending = false } = {}, onProgress = null) => new Promise((resolve, reject) => {
     const query = new URLSearchParams({
       title: String(title || ""),
       description: String(description || ""),
       privacy: String(privacy || "private"),
       made_for_kids: madeForKids ? "true" : "false",
+      tags: Array.isArray(tags) ? tags.join(",") : String(tags || ""),
+      category_id: String(categoryId || "20"),
+      publish_at: String(publishAt || ""),
+      thumbnail_pending: thumbnailPending ? "true" : "false",
     });
-    const response = await fetch(`/api/v1/integrations/google/youtube/upload?${query}`, {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/v1/integrations/google/youtube/upload?${query}`);
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Content-Type", file.type || "video/webm");
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.((event.loaded / event.total) * 100, event.loaded, event.total);
+    };
+    xhr.onerror = () => {
+      const error = new Error("The connection to PARA was interrupted during the YouTube upload.");
+      error.code = "youtube_upload_network_error";
+      reject(error);
+    };
+    xhr.onload = () => {
+      let payload = {};
+      try { payload = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const error = new Error(payload.message || payload.error || `YouTube upload failed: ${xhr.status}`);
+        error.code = payload.error || "youtube_upload_failed";
+        error.status = xhr.status;
+        error.payload = payload;
+        reject(error);
+        return;
+      }
+      onProgress?.(100, file.size, file.size);
+      resolve(payload);
+    };
+    xhr.send(file);
+  }),
+  youtubeSetThumbnail: async (videoId, imageBlob) => {
+    const response = await fetch(`/api/v1/integrations/google/youtube/thumbnail?video_id=${encodeURIComponent(String(videoId || ""))}`, {
       method: "POST",
-      headers: { "Accept": "application/json", "Content-Type": file.type || "video/webm" },
-      body: file,
+      headers: { "Accept": "application/json", "Content-Type": imageBlob?.type || "image/jpeg" },
+      body: imageBlob,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(payload.message || payload.error || `YouTube upload failed: ${response.status}`);
-      error.code = payload.error || "youtube_upload_failed";
+      const error = new Error(payload.message || payload.error || `Thumbnail upload failed: ${response.status}`);
+      error.code = payload.error || "youtube_thumbnail_failed";
       error.status = response.status;
       error.payload = payload;
       throw error;

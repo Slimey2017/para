@@ -15,6 +15,7 @@ import os
 import secrets
 import threading
 import time
+from datetime import datetime, timezone
 import platform
 import re
 import urllib.error
@@ -81,6 +82,7 @@ GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_YOUTUBE_CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 GOOGLE_YOUTUBE_UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+GOOGLE_YOUTUBE_THUMBNAIL_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_UPLOAD_SESSION_COOKIE = "para_youtube_upload_session"
 YOUTUBE_UPLOAD_SESSION_TTL_SECONDS = 45 * 60
@@ -479,15 +481,24 @@ def clear_youtube_upload_session(session_id: str) -> None:
         _youtube_upload_sessions.pop(str(session_id or ""), None)
 
 
-def begin_youtube_resumable_upload(access_token: str, *, title: str, description: str, privacy_status: str, made_for_kids: bool, content_type: str, content_length: int) -> tuple[int, dict]:
+def begin_youtube_resumable_upload(access_token: str, *, title: str, description: str, privacy_status: str, made_for_kids: bool, content_type: str, content_length: int, tags: list[str] | None = None, category_id: str = "20", publish_at: str = "") -> tuple[int, dict]:
     """Create a YouTube videos.insert resumable upload session and return its HTTPS Location."""
     privacy = str(privacy_status or "private").lower()
     if privacy not in {"private", "unlisted", "public"}:
         privacy = "private"
-    metadata = {
-        "snippet": {"title": str(title or "PARA Gameplay Capture")[:100], "description": str(description or "")[:5000]},
-        "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)},
+    clean_tags = [str(tag).strip()[:100] for tag in (tags or []) if str(tag).strip()][:40]
+    snippet = {
+        "title": str(title or "PARA Gameplay Capture")[:100],
+        "description": str(description or "")[:5000],
+        "categoryId": str(category_id or "20")[:8],
     }
+    if clean_tags:
+        snippet["tags"] = clean_tags
+    status_payload = {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)}
+    if publish_at:
+        status_payload["privacyStatus"] = "private"
+        status_payload["publishAt"] = str(publish_at)
+    metadata = {"snippet": snippet, "status": status_payload}
     query = urllib.parse.urlencode({"uploadType": "resumable", "part": "snippet,status", "notifySubscribers": "false"})
     data = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
@@ -507,7 +518,7 @@ def begin_youtube_resumable_upload(access_token: str, *, title: str, description
             location = str(response.headers.get("Location") or "")
             if not location:
                 return 502, {"error": "youtube_upload_session_missing", "message": "YouTube did not return an upload session."}
-            return response.status, {"location": location}
+            return response.status, {"location": location, "publish_at": str(publish_at or "")}
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", "replace")
         try:
@@ -519,7 +530,6 @@ def begin_youtube_resumable_upload(access_token: str, *, title: str, description
         return error.code, {"error": "youtube_upload_init_failed", "message": str(message or "YouTube rejected the upload request.")[:300]}
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         return 502, {"error": "youtube_unavailable", "message": "PARA could not start the YouTube upload."}
-
 
 def stream_youtube_resumable_upload(upload_url: str, source, *, content_type: str, content_length: int) -> tuple[int, dict]:
     """Stream the browser capture through PARA to a YouTube resumable upload URL."""
@@ -567,6 +577,59 @@ def stream_youtube_resumable_upload(upload_url: str, source, *, content_type: st
     finally:
         connection.close()
 
+
+
+def set_youtube_thumbnail(access_token: str, video_id: str, image_bytes: bytes, content_type: str = "image/jpeg") -> tuple[int, dict]:
+    video_id = str(video_id or "").strip()
+    if not video_id or not image_bytes:
+        return 400, {"error": "youtube_thumbnail_invalid", "message": "Choose a valid YouTube video and thumbnail image."}
+    query = urllib.parse.urlencode({"videoId": video_id, "uploadType": "media"})
+    request = urllib.request.Request(
+        f"{GOOGLE_YOUTUBE_THUMBNAIL_UPLOAD_URL}?{query}",
+        data=image_bytes,
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": content_type},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read().decode("utf-8", "replace")
+            payload = json.loads(body) if body else {}
+            return response.status, {"thumbnail_set": True, "video_id": video_id, "youtube": payload}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            payload = {}
+        detail = payload.get("error") if isinstance(payload, dict) else {}
+        message = detail.get("message") if isinstance(detail, dict) else ""
+        return error.code, {"error": "youtube_thumbnail_failed", "message": str(message or "YouTube could not set that custom thumbnail. Your channel may not be eligible for custom thumbnails.")[:300]}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return 502, {"error": "youtube_thumbnail_unavailable", "message": "PARA could not reach YouTube to set the thumbnail."}
+
+
+def refresh_external_youtube_stats(para_access_token: str, channel: dict) -> tuple[int, dict]:
+    if not isinstance(channel, dict) or not channel.get("found"):
+        return 200, {}
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    patch = {
+        "youtube_channel_id": str(channel.get("youtube_channel_id") or "") or None,
+        "youtube_channel_title": str(channel.get("youtube_channel_title") or "") or None,
+        "youtube_custom_url": str(channel.get("youtube_custom_url") or "") or None,
+        "youtube_subscriber_count": channel.get("youtube_subscriber_count"),
+        "youtube_view_count": channel.get("youtube_view_count"),
+        "youtube_video_count": channel.get("youtube_video_count"),
+        "youtube_hidden_subscriber_count": channel.get("youtube_hidden_subscriber_count"),
+        "updated_at": timestamp,
+    }
+    status, _ = _supabase_account_rest_request(
+        "/rest/v1/external_accounts?provider=eq.google",
+        method="PATCH",
+        payload=patch,
+        bearer=para_access_token,
+        prefer="return=minimal",
+    )
+    return status, patch if status < 400 else {}
 
 def external_account_status(access_token: str, provider: str = "google") -> tuple[int, dict]:
     if provider != "google":
@@ -3511,7 +3574,7 @@ class ParaHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         request = urlparse(self.path)
         if request.path == "/api/v1/integrations/google/youtube/upload":
-            status, _, _, refreshed_headers = self._authenticated_access()
+            status, _, para_access, refreshed_headers = self._authenticated_access()
             clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)
             if status != 200:
                 self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
@@ -3537,6 +3600,10 @@ class ParaHandler(SimpleHTTPRequestHandler):
             description = str(query.get("description", [""])[0] or "")
             privacy = str(query.get("privacy", ["private"])[0] or "private").lower()
             audience = str(query.get("made_for_kids", [""])[0] or "").lower()
+            tags = [tag.strip() for tag in str(query.get("tags", [""])[0] or "").split(",") if tag.strip()][:40]
+            category_id = str(query.get("category_id", ["20"])[0] or "20").strip()
+            publish_at = str(query.get("publish_at", [""])[0] or "").strip()
+            thumbnail_pending = str(query.get("thumbnail_pending", ["false"])[0] or "false").lower() == "true"
             if not title or len(title) > 100:
                 self._send_json(400, {"error": "youtube_title_invalid", "message": "Enter a YouTube title between 1 and 100 characters."}, refreshed_headers)
                 return
@@ -3549,18 +3616,77 @@ class ParaHandler(SimpleHTTPRequestHandler):
             if audience not in {"true", "false"}:
                 self._send_json(400, {"error": "youtube_audience_required", "message": "Choose whether this video is made for kids."}, refreshed_headers)
                 return
+            if len(",".join(tags)) > 500:
+                self._send_json(400, {"error": "youtube_tags_invalid", "message": "YouTube tags can total up to 500 characters."}, refreshed_headers)
+                return
+            if not category_id.isdigit() or len(category_id) > 8:
+                self._send_json(400, {"error": "youtube_category_invalid", "message": "Choose a valid YouTube video category."}, refreshed_headers)
+                return
+            if publish_at:
+                try:
+                    parsed_publish = datetime.fromisoformat(publish_at.replace("Z", "+00:00"))
+                    if parsed_publish.tzinfo is None:
+                        parsed_publish = parsed_publish.replace(tzinfo=timezone.utc)
+                    if parsed_publish.timestamp() < time.time() + 60:
+                        raise ValueError
+                    publish_at = parsed_publish.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                    privacy = "private"
+                except ValueError:
+                    self._send_json(400, {"error": "youtube_publish_time_invalid", "message": "Choose a scheduled publish time at least one minute in the future."}, refreshed_headers)
+                    return
             init_status, init_payload = begin_youtube_resumable_upload(
-                google_access, title=title, description=description, privacy_status=privacy, made_for_kids=(audience == "true"), content_type=content_type, content_length=length
+                google_access, title=title, description=description, privacy_status=privacy, made_for_kids=(audience == "true"), content_type=content_type, content_length=length,
+                tags=tags, category_id=category_id, publish_at=publish_at,
             )
             if init_status not in {200, 201}:
                 self._send_json(init_status, init_payload, refreshed_headers)
                 return
             upload_status, result = stream_youtube_resumable_upload(str(init_payload.get("location") or ""), self.rfile, content_type=content_type, content_length=length)
             if upload_status == 200:
-                clear_youtube_upload_session(upload_session_id)
-                self._send_json(upload_status, result, [*refreshed_headers, *clear_upload_cookie])
+                result["publish_at"] = publish_at or None
+                channel_status, channel = youtube_channel(google_access)
+                if channel_status == 200 and channel.get("found"):
+                    refresh_external_youtube_stats(para_access, channel)
+                    result["creator_stats"] = {
+                        "youtube_subscriber_count": channel.get("youtube_subscriber_count"),
+                        "youtube_view_count": channel.get("youtube_view_count"),
+                        "youtube_video_count": channel.get("youtube_video_count"),
+                    }
+                if thumbnail_pending:
+                    self._send_json(upload_status, result, refreshed_headers)
+                else:
+                    clear_youtube_upload_session(upload_session_id)
+                    self._send_json(upload_status, result, [*refreshed_headers, *clear_upload_cookie])
             else:
                 self._send_json(upload_status, result, refreshed_headers)
+            return
+
+        if request.path == "/api/v1/integrations/google/youtube/thumbnail":
+            status, _, _, refreshed_headers = self._authenticated_access()
+            clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
+                return
+            upload_session_id = self._cookies().get(YOUTUBE_UPLOAD_SESSION_COOKIE, "")
+            google_access = youtube_upload_session_access(upload_session_id)
+            if not google_access:
+                self._send_json(401, {"error": "youtube_upload_authorization_required", "message": "Authorize YouTube upload access before setting a thumbnail."}, [*refreshed_headers, *clear_upload_cookie])
+                return
+            query = parse_qs(request.query, keep_blank_values=True)
+            video_id = str(query.get("video_id", [""])[0] or "").strip()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            content_type = str(self.headers.get("Content-Type") or "image/jpeg").split(";", 1)[0].strip().lower()
+            if not video_id or length < 1 or length > 2 * 1024 * 1024 or content_type not in {"image/jpeg", "image/png"}:
+                clear_youtube_upload_session(upload_session_id)
+                self._send_json(400, {"error": "youtube_thumbnail_invalid", "message": "Custom thumbnails must be a JPEG or PNG image no larger than 2 MB."}, [*refreshed_headers, *clear_upload_cookie])
+                return
+            image_bytes = self.rfile.read(length)
+            thumb_status, thumb_result = set_youtube_thumbnail(google_access, video_id, image_bytes, content_type)
+            clear_youtube_upload_session(upload_session_id)
+            self._send_json(thumb_status, thumb_result, [*refreshed_headers, *clear_upload_cookie])
             return
 
         if request.path == "/api/v1/backgrounds/custom":

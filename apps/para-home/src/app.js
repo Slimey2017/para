@@ -63,6 +63,7 @@ import {
   closeParaBoard, isParaBoardOpen, openParaBoard, paraBoardBackspace, paraBoardInsert, paraBoardToggleShift, paraBoardToggleSymbols,
 } from "./ui/paraboard.js";
 import { toggleParaPoint } from "./ui/parapoint.js";
+import { activateParaVideoPlayers, paraVideoPlayerMarkup } from "./ui/video-player.js";
 import {
   beginPowerSequence, beginSleep, cancelTurnOffConfirmation, confirmTurnOff,
   consumePowerInput, openTurnOffConfirmation,
@@ -134,6 +135,7 @@ let idleSleepTimer = null;
 let idleDimTimer = null;
 let overlayCloseTimer = null;
 let captureViewerUrl = "";
+let youtubeThumbnailPickerUrl = "";
 let activeInputDevice = "keyboard";
 let gameTransitionInFlight = false;
 const GAME_RETURN_TRANSITION_KEY = "para.game.transition.return";
@@ -144,6 +146,7 @@ let pendingAccountRecovery = null;
 let pendingIntegrationNotice = null;
 let pendingYoutubeUploadReturn = null;
 const YOUTUBE_UPLOAD_DRAFT_KEY = "para.youtube.upload.draft";
+const YOUTUBE_DEFAULT_VISIBILITY_KEY = "para.youtube.defaultVisibility";
 
 function captureAccountRecoveryFromUrl() {
   const raw = location.hash.replace(/^#/, "");
@@ -509,6 +512,7 @@ async function openControlCenter() {
 function closeControlCenter(restore = true) {
   if (overlay.hidden) return;
   if (captureViewerUrl) { URL.revokeObjectURL(captureViewerUrl); captureViewerUrl = ""; }
+  if (youtubeThumbnailPickerUrl) { URL.revokeObjectURL(youtubeThumbnailPickerUrl); youtubeThumbnailPickerUrl = ""; }
   overlay.classList.add("is-closing");
   const returnTarget = restore ? overlayReturnFocus : null;
   clearTimeout(overlayCloseTimer);
@@ -553,6 +557,92 @@ function escapeOverlayText(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }
 
+function youtubeCategoryOptions(selected = "20") {
+  const categories = [
+    ["20", "Gaming"], ["24", "Entertainment"], ["22", "People & Blogs"], ["23", "Comedy"],
+    ["27", "Education"], ["28", "Science & Technology"], ["17", "Sports"], ["1", "Film & Animation"], ["10", "Music"],
+  ];
+  return categories.map(([id, label]) => `<option value="${id}" ${id === String(selected) ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function drawThumbnailFrame(video, canvas) {
+  if (!video?.videoWidth || !video?.videoHeight || !canvas) return false;
+  const context = canvas.getContext("2d");
+  if (!context) return false;
+  const width = canvas.width || 1280;
+  const height = canvas.height || 720;
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, width, height);
+  const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
+  const drawWidth = video.videoWidth * scale;
+  const drawHeight = video.videoHeight * scale;
+  context.drawImage(video, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+  return true;
+}
+
+function setupYouTubeThumbnailPicker(item) {
+  const video = overlay.querySelector("[data-youtube-thumbnail-video]");
+  const canvas = overlay.querySelector("[data-youtube-thumbnail-canvas]");
+  const range = overlay.querySelector("[data-youtube-thumbnail-time]");
+  const label = overlay.querySelector("[data-youtube-thumbnail-time-label]");
+  const enabled = overlay.querySelector("[data-youtube-thumbnail-enabled]");
+  const picker = overlay.querySelector("[data-youtube-thumbnail-picker]");
+  if (!video || !canvas || !range || !enabled || !picker) return;
+  if (youtubeThumbnailPickerUrl) URL.revokeObjectURL(youtubeThumbnailPickerUrl);
+  youtubeThumbnailPickerUrl = URL.createObjectURL(item.blob);
+  video.src = youtubeThumbnailPickerUrl;
+  const expected = Math.max(0.1, Number(item.durationMs || 0) / 1000);
+  const updateLabel = () => { if (label) label.textContent = `${Number(range.value || 0).toFixed(1)}s`; };
+  const seek = () => {
+    updateLabel();
+    try { video.currentTime = Math.max(0, Number(range.value || 0)); } catch {}
+  };
+  const ready = () => {
+    const duration = Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : expected;
+    range.max = String(Math.max(0.1, duration));
+    range.step = "0.1";
+    const initial = Math.min(Math.max(0.1, duration * 0.25), Math.max(0.1, duration - 0.05));
+    range.value = String(initial);
+    seek();
+  };
+  video.addEventListener("loadedmetadata", ready, { once: true });
+  video.addEventListener("seeked", () => drawThumbnailFrame(video, canvas));
+  video.addEventListener("loadeddata", () => drawThumbnailFrame(video, canvas));
+  range.addEventListener("input", seek);
+  enabled.addEventListener("change", () => picker.classList.toggle("is-disabled", !enabled.checked));
+  video.load();
+  if (video.readyState >= 1) ready();
+}
+
+async function captureThumbnailBlob(item, seconds) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(item.blob);
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.playsInline = true;
+    const cleanup = () => { URL.revokeObjectURL(url); video.remove(); };
+    const fail = () => { cleanup(); reject(new Error("PARA could not extract that thumbnail frame.")); };
+    video.addEventListener("error", fail, { once: true });
+    video.addEventListener("loadedmetadata", () => {
+      const duration = Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : Math.max(0.1, Number(item.durationMs || 0) / 1000);
+      try { video.currentTime = Math.min(Math.max(0, Number(seconds || 0)), Math.max(0, duration - 0.02)); } catch { fail(); }
+    }, { once: true });
+    video.addEventListener("seeked", () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+      if (!drawThumbnailFrame(video, canvas)) { fail(); return; }
+      canvas.toBlob((blob) => {
+        cleanup();
+        if (blob) resolve(blob); else reject(new Error("PARA could not create the thumbnail image."));
+      }, "image/jpeg", 0.9);
+    }, { once: true });
+    video.src = url;
+    video.load();
+  });
+}
+
 async function openYouTubeUploadDialog(captureId) {
   const item = await getCapture(captureId);
   if (!item) { toast("Capture not found"); return false; }
@@ -561,23 +651,42 @@ async function openYouTubeUploadDialog(captureId) {
   overlayReturnFocus = focus.current;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt || Date.now());
   const defaultTitle = `PARA Gameplay · ${when}`.slice(0, 100);
+  const savedVisibility = ["private", "unlisted", "public"].includes(localStorage.getItem(YOUTUBE_DEFAULT_VISIBILITY_KEY)) ? localStorage.getItem(YOUTUBE_DEFAULT_VISIBILITY_KEY) : "private";
   overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div>
     <section class="youtube-upload-dialog" role="dialog" aria-modal="true" aria-label="Upload gameplay to YouTube">
-      <header class="share-center__header"><div><span>PARA × YOUTUBE</span><h2>Upload gameplay</h2><small>PARA asks Google for upload permission only when you publish a capture.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close YouTube upload">×</button></header>
-      <div class="youtube-upload-form">
-        <label><span>Title</span><input type="text" maxlength="100" value="${escapeOverlayText(defaultTitle)}" data-youtube-upload-title data-autofocus="true"></label>
-        <label><span>Description</span><textarea maxlength="5000" rows="4" placeholder="Optional description" data-youtube-upload-description>Captured with PARA.</textarea></label>
-        <div class="youtube-upload-form__split">
-          <label><span>Visibility</span><select data-youtube-upload-privacy><option value="private" selected>Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label>
-          <label><span>Audience</span><select data-youtube-upload-audience><option value="" selected>Choose…</option><option value="false">No, not made for kids</option><option value="true">Yes, made for kids</option></select></label>
+      <header class="share-center__header"><div><span>PARA × YOUTUBE</span><h2>Upload gameplay</h2><small>Publish this capture without leaving PARA.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close YouTube upload">×</button></header>
+      <div class="youtube-upload-layout">
+        <div class="youtube-thumbnail-panel">
+          <span class="youtube-upload-field-label">Thumbnail frame</span>
+          <div class="youtube-thumbnail-picker" data-youtube-thumbnail-picker>
+            <video muted playsinline preload="auto" data-youtube-thumbnail-video aria-hidden="true"></video>
+            <canvas width="1280" height="720" data-youtube-thumbnail-canvas></canvas>
+          </div>
+          <div class="youtube-thumbnail-scrubber"><input type="range" min="0" max="15" step="0.1" value="1" data-youtube-thumbnail-time aria-label="Thumbnail frame time"><strong data-youtube-thumbnail-time-label>1.0s</strong></div>
+          <label class="youtube-thumbnail-toggle"><input type="checkbox" data-youtube-thumbnail-enabled checked><span>Use this frame as the custom thumbnail</span></label>
+          <small>Custom thumbnails require an eligible YouTube channel. If YouTube rejects it, the video still uploads normally.</small>
         </div>
-        <p class="youtube-upload-note">Google will show a consent screen for <strong>Manage your YouTube videos</strong>. PARA does not save a Google refresh token. The upload grant is short-lived and used for this upload session.</p>
-        <p class="youtube-upload-note youtube-upload-note--warning">While PARA's YouTube API project is unverified, YouTube can force API uploads to <strong>Private</strong> even if you choose another visibility.</p>
+        <div class="youtube-upload-form">
+          <label><span>Title</span><input type="text" maxlength="100" value="${escapeOverlayText(defaultTitle)}" data-youtube-upload-title data-autofocus="true"></label>
+          <label><span>Description</span><textarea maxlength="5000" rows="4" placeholder="Optional description" data-youtube-upload-description>Captured with PARA.</textarea></label>
+          <label><span>Tags</span><input type="text" maxlength="500" placeholder="PARA, gameplay, gaming" value="PARA, gameplay" data-youtube-upload-tags></label>
+          <div class="youtube-upload-form__split">
+            <label><span>Category</span><select data-youtube-upload-category>${youtubeCategoryOptions("20")}</select></label>
+            <label><span>Visibility</span><select data-youtube-upload-privacy><option value="private" ${savedVisibility === "private" ? "selected" : ""}>Private</option><option value="unlisted" ${savedVisibility === "unlisted" ? "selected" : ""}>Unlisted</option><option value="public" ${savedVisibility === "public" ? "selected" : ""}>Public</option></select></label>
+          </div>
+          <div class="youtube-upload-form__split">
+            <label><span>Audience</span><select data-youtube-upload-audience><option value="" selected>Choose…</option><option value="false">No, not made for kids</option><option value="true">Yes, made for kids</option></select></label>
+            <label><span>Schedule publish (optional)</span><input type="datetime-local" data-youtube-upload-schedule></label>
+          </div>
+          <p class="youtube-upload-note">A scheduled upload stays <strong>Private</strong> until the selected time, then YouTube publishes it. PARA remembers your normal visibility choice for the next upload.</p>
+          <p class="youtube-upload-note youtube-upload-note--warning">While PARA's YouTube API project is unverified, YouTube forces API uploads to <strong>Private</strong>, regardless of the visibility you choose.</p>
+        </div>
       </div>
       <footer class="youtube-upload-actions"><button type="button" class="action-button action-button--ghost" data-action="close-control-center">Cancel</button><button type="button" class="action-button" data-action="youtube-upload-authorize" data-capture-id="${escapeOverlayText(item.id)}">Authorize & Upload</button></footer>
     </section>`;
   overlay.hidden = false;
   overlay.classList.remove("is-closing");
+  setupYouTubeThumbnailPicker(item);
   updateControllerPrompts();
   requestAnimationFrame(() => focus.focusFirst());
   return true;
@@ -586,13 +695,60 @@ async function openYouTubeUploadDialog(captureId) {
 function saveYouTubeUploadDraft(captureId) {
   const title = String(overlay.querySelector("[data-youtube-upload-title]")?.value || "").trim();
   const description = String(overlay.querySelector("[data-youtube-upload-description]")?.value || "");
-  const privacy = String(overlay.querySelector("[data-youtube-upload-privacy]")?.value || "private");
+  const selectedPrivacy = String(overlay.querySelector("[data-youtube-upload-privacy]")?.value || "private");
   const audience = String(overlay.querySelector("[data-youtube-upload-audience]")?.value || "");
+  const categoryId = String(overlay.querySelector("[data-youtube-upload-category]")?.value || "20");
+  const tags = [...new Set(String(overlay.querySelector("[data-youtube-upload-tags]")?.value || "").split(",").map((tag) => tag.trim()).filter(Boolean))].slice(0, 40);
+  const scheduleRaw = String(overlay.querySelector("[data-youtube-upload-schedule]")?.value || "");
+  const thumbnailEnabled = Boolean(overlay.querySelector("[data-youtube-thumbnail-enabled]")?.checked);
+  const thumbnailTime = Number(overlay.querySelector("[data-youtube-thumbnail-time]")?.value || 0);
   if (!title) throw new Error("Give the YouTube video a title.");
   if (!audience) throw new Error("Choose whether the video is made for kids.");
-  const draft = { captureId: String(captureId || ""), title, description, privacy, madeForKids: audience === "true", createdAt: Date.now() };
+  if (tags.join(",").length > 500) throw new Error("YouTube tags can total up to 500 characters.");
+  let publishAt = "";
+  if (scheduleRaw) {
+    const schedule = new Date(scheduleRaw);
+    if (!Number.isFinite(schedule.getTime()) || schedule.getTime() < Date.now() + 60_000) throw new Error("Choose a publish time at least one minute in the future.");
+    publishAt = schedule.toISOString();
+  }
+  try { localStorage.setItem(YOUTUBE_DEFAULT_VISIBILITY_KEY, selectedPrivacy); } catch {}
+  const draft = {
+    captureId: String(captureId || ""), title, description, privacy: publishAt ? "private" : selectedPrivacy,
+    madeForKids: audience === "true", tags, categoryId, publishAt,
+    thumbnailRequested: thumbnailEnabled, thumbnailTime: Math.max(0, thumbnailTime), createdAt: Date.now(),
+  };
   sessionStorage.setItem(YOUTUBE_UPLOAD_DRAFT_KEY, JSON.stringify(draft));
   return draft;
+}
+
+function showYouTubeUploadProgress(draft) {
+  overlay.innerHTML = `<div class="share-center-scrim"></div><section class="youtube-upload-progress" role="dialog" aria-modal="true" aria-label="Uploading to YouTube">
+    <div class="youtube-upload-progress__mark">▶</div><span>PARA × YOUTUBE</span><h2>Uploading gameplay</h2><p data-youtube-upload-stage>Sending the capture securely through PARA…</p>
+    <div class="youtube-upload-progress__bar"><i data-youtube-upload-bar style="width:0%"></i></div><strong data-youtube-upload-percent>0%</strong><small>${escapeOverlayText(draft.title || "Gameplay capture")}</small>
+    <em>Keep PARA open until YouTube confirms the upload.</em>
+  </section>`;
+  overlay.hidden = false;
+  overlay.classList.remove("is-closing");
+  return {
+    stage: overlay.querySelector("[data-youtube-upload-stage]"),
+    bar: overlay.querySelector("[data-youtube-upload-bar]"),
+    percent: overlay.querySelector("[data-youtube-upload-percent]"),
+  };
+}
+
+function showYouTubeUploadSuccess(result, { thumbnailWarning = "" } = {}) {
+  const stats = result?.creator_stats || {};
+  const stat = (value) => Number.isFinite(Number(value)) ? new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(Number(value)) : "—";
+  const scheduled = result?.publish_at ? `<p class="youtube-upload-success__schedule">Scheduled for ${escapeOverlayText(new Date(result.publish_at).toLocaleString())}</p>` : "";
+  overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div><section class="youtube-upload-success" role="dialog" aria-modal="true" aria-label="YouTube upload complete">
+    <div class="youtube-upload-success__mark">✓</div><span>UPLOAD COMPLETE</span><h2>Gameplay is on YouTube</h2><p>YouTube received the video${result?.privacy_status ? ` as <strong>${escapeOverlayText(result.privacy_status)}</strong>` : ""}. Processing can continue after this screen closes.</p>${scheduled}
+    ${thumbnailWarning ? `<p class="youtube-upload-success__warning">${escapeOverlayText(thumbnailWarning)}</p>` : ""}
+    <div class="youtube-creator-snapshot"><div><small>Subscribers</small><strong>${stat(stats.youtube_subscriber_count)}</strong></div><div><small>Channel views</small><strong>${stat(stats.youtube_view_count)}</strong></div><div><small>Videos</small><strong>${stat(stats.youtube_video_count)}</strong></div></div>
+    <footer>${result?.watch_url ? `<a class="action-button" href="${escapeOverlayText(result.watch_url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>` : ""}<button type="button" class="action-button action-button--ghost" data-action="close-control-center" data-autofocus="true">Done</button></footer>
+  </section>`;
+  overlay.hidden = false;
+  overlay.classList.remove("is-closing");
+  requestAnimationFrame(() => focus.focusFirst());
 }
 
 async function resumePendingYouTubeUpload() {
@@ -608,12 +764,27 @@ async function resumePendingYouTubeUpload() {
   const mime = item.mimeType || item.blob?.type || "video/webm";
   const extension = mime.includes("mp4") ? "mp4" : "webm";
   const file = new File([item.blob], `PARA-${item.id}.${extension}`, { type: mime });
-  toast("Uploading to YouTube", "Keep PARA open while the gameplay video is transferred.");
+  let thumbnailBlob = null;
+  let thumbnailWarning = "";
+  if (draft.thumbnailRequested) {
+    try { thumbnailBlob = await captureThumbnailBlob(item, draft.thumbnailTime); }
+    catch (error) { thumbnailWarning = error?.message || "PARA could not create the selected thumbnail frame."; }
+  }
+  const progress = showYouTubeUploadProgress(draft);
   try {
-    const result = await paraApi.youtubeUploadCapture(file, draft);
+    const result = await paraApi.youtubeUploadCapture(file, { ...draft, thumbnailPending: Boolean(thumbnailBlob) }, (percent) => {
+      const rounded = Math.max(0, Math.min(100, Math.round(percent)));
+      if (progress.bar) progress.bar.style.width = `${rounded}%`;
+      if (progress.percent) progress.percent.textContent = `${rounded}%`;
+      if (rounded >= 100 && progress.stage) progress.stage.textContent = "PARA received the clip. YouTube is finishing the upload…";
+    });
+    if (thumbnailBlob && result?.video_id) {
+      if (progress.stage) progress.stage.textContent = "Setting your selected thumbnail…";
+      try { await paraApi.youtubeSetThumbnail(result.video_id, thumbnailBlob); }
+      catch (error) { thumbnailWarning = error?.message || "The video uploaded, but YouTube could not use that custom thumbnail."; }
+    }
     sessionStorage.removeItem(YOUTUBE_UPLOAD_DRAFT_KEY);
-    const privacy = result?.privacy_status ? ` · ${String(result.privacy_status)}` : "";
-    toast("Uploaded to YouTube", `${result?.video_id ? `Video ${result.video_id}` : "Your video"}${privacy}. YouTube may still be processing it.`);
+    showYouTubeUploadSuccess(result, { thumbnailWarning });
     return true;
   } catch (error) {
     if (error?.code === "youtube_upload_authorization_required") {
@@ -621,6 +792,7 @@ async function resumePendingYouTubeUpload() {
     } else {
       toast("YouTube upload failed", error?.message || "YouTube could not accept this gameplay video.");
     }
+    closeControlCenter(false);
     return false;
   }
 }
@@ -664,7 +836,7 @@ async function openCaptureViewer(captureId) {
   clearTimeout(overlayCloseTimer);
   if (overlay.hidden) overlayReturnFocus = focus.current;
   const media = item.type === "clip"
-    ? `<video controls playsinline preload="auto" src="${captureViewerUrl}" data-recorded-duration-ms="${Number(item.durationMs || 0)}">Your browser could not play this PARA recording.</video>`
+    ? paraVideoPlayerMarkup({ src: captureViewerUrl, durationMs: item.durationMs, className: "para-video-player--viewer" })
     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
@@ -673,7 +845,8 @@ async function openCaptureViewer(captureId) {
     <div class="capture-viewer__stage">${media}</div>
     <footer class="capture-viewer__controls">
       ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${previous.id}">← Previous</button>` : ""}
-      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" data-autofocus="true">↗ Share</button>
+      ${item.type === "clip" ? `<button type="button" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}" data-autofocus="true">▶ Upload to YouTube</button>` : ""}
+      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" ${item.type === "clip" ? "" : 'data-autofocus="true"'}>↗ Share</button>
       <button type="button" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}">⇩ Save</button>
       <button type="button" data-action="capture-browser-fullscreen">⛶ Fullscreen</button>
       ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${next.id}">Next →</button>` : ""}
@@ -682,33 +855,7 @@ async function openCaptureViewer(captureId) {
   </div>`;
   overlay.hidden = false;
   overlay.classList.remove("is-closing");
-  const viewerVideo = overlay.querySelector("[data-capture-viewer] video");
-  if (viewerVideo) {
-    const expectedDuration = Math.max(0, Number(viewerVideo.dataset.recordedDurationMs || 0) / 1000);
-    let repairedDuration = false;
-    const repairWebmDuration = () => {
-      if (repairedDuration || !expectedDuration) return;
-      if (Number.isFinite(viewerVideo.duration) && viewerVideo.duration > 0.05) return;
-      repairedDuration = true;
-      // MediaRecorder WebM files can omit duration metadata. Chromium can
-      // discover the real end time by seeking past the end, then rewinding.
-      const rewind = () => {
-        try { viewerVideo.currentTime = 0; } catch {}
-      };
-      viewerVideo.addEventListener("durationchange", rewind, { once: true });
-      viewerVideo.addEventListener("timeupdate", rewind, { once: true });
-      try { viewerVideo.currentTime = 1e10; } catch {}
-    };
-    viewerVideo.addEventListener("loadedmetadata", repairWebmDuration);
-    viewerVideo.addEventListener("loadeddata", () => {
-      if (!viewerVideo.videoWidth || !viewerVideo.videoHeight) {
-        toast("Video has no picture", "This capture came from an older broken recording runtime. Record a new clip with PARA v13.");
-      }
-    }, { once: true });
-    viewerVideo.addEventListener("error", () => toast("Video could not play", "This capture is damaged. New v13 recordings are decoded before PARA saves them."), { once: true });
-    viewerVideo.load();
-    if (viewerVideo.readyState >= 1) repairWebmDuration();
-  }
+  activateParaVideoPlayers(overlay, { onError: () => toast("Video could not play", "This capture may be damaged or use an unsupported codec.") });
   updateControllerPrompts();
   requestAnimationFrame(() => focus.focusFirst());
   return true;

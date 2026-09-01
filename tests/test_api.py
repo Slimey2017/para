@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 import os
 import tempfile
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -319,6 +320,58 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(kwargs["payload"]["youtube_subscriber_count"], 5000)
         self.assertNotIn("access_token", kwargs["payload"])
         self.assertNotIn("refresh_token", kwargs["payload"])
+
+
+    def test_youtube_upload_metadata_supports_tags_category_and_schedule(self):
+        class FakeResponse:
+            status = 200
+            headers = {"Location": "https://upload.youtube.com/resumable-session"}
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+        with patch("server.urllib.request.urlopen", return_value=FakeResponse()) as opener:
+            status, payload = begin_youtube_resumable_upload(
+                "google-access", title="PARA Gameplay", description="Captured with PARA", privacy_status="public",
+                made_for_kids=False, content_type="video/webm", content_length=1234,
+                tags=["PARA", "gameplay"], category_id="20", publish_at="2026-09-02T18:00:00Z",
+            )
+        self.assertEqual(status, 200)
+        self.assertIn("location", payload)
+        request = opener.call_args.args[0]
+        metadata = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(metadata["snippet"]["tags"], ["PARA", "gameplay"])
+        self.assertEqual(metadata["snippet"]["categoryId"], "20")
+        self.assertEqual(metadata["status"]["privacyStatus"], "private")
+        self.assertEqual(metadata["status"]["publishAt"], "2026-09-02T18:00:00Z")
+
+    def test_youtube_custom_thumbnail_uses_authenticated_media_upload(self):
+        class FakeResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self): return b'{"items":[]}'
+        with patch("server.urllib.request.urlopen", return_value=FakeResponse()) as opener:
+            status, payload = set_youtube_thumbnail("google-access", "video123", b"jpeg-bytes", "image/jpeg")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["thumbnail_set"])
+        request = opener.call_args.args[0]
+        self.assertIn("/upload/youtube/v3/thumbnails/set", request.full_url)
+        self.assertIn("videoId=video123", request.full_url)
+        self.assertEqual(request.headers.get("Authorization"), "Bearer google-access")
+
+    def test_creator_stats_refresh_updates_connected_google_record(self):
+        channel = {
+            "found": True, "youtube_channel_id": "UC123", "youtube_channel_title": "PARA Creator",
+            "youtube_custom_url": "@paracreator", "youtube_subscriber_count": 5000,
+            "youtube_view_count": 1234567, "youtube_video_count": 43, "youtube_hidden_subscriber_count": False,
+        }
+        with patch("server._supabase_account_rest_request", return_value=(204, {})) as request:
+            status, payload = refresh_external_youtube_stats("para-jwt", channel)
+        self.assertEqual(status, 204)
+        self.assertEqual(payload["youtube_video_count"], 43)
+        args, kwargs = request.call_args
+        self.assertIn("provider=eq.google", args[0])
+        self.assertEqual(kwargs["method"], "PATCH")
+        self.assertEqual(kwargs["bearer"], "para-jwt")
 
     def test_para_account_signin_normalizes_supabase_session(self):
         remote = {

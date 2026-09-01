@@ -332,6 +332,33 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('youtube.upload', privacy)
         self.assertIn('short-lived server memory', privacy)
 
+    def test_v45_media_player_and_youtube_publish_polish_are_wired(self):
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        self.assertIn("paraVideoPlayerMarkup", media)
+        self.assertIn("activateParaVideoPlayers", media)
+        for feature in ["data-video-seek", "data-video-volume", "data-video-speed", "data-video-action=\"fullscreen\""]:
+            self.assertIn(feature, player)
+        self.assertIn("Upload to YouTube", media)
+        self.assertIn("data-youtube-upload-tags", app)
+        self.assertIn("data-youtube-upload-category", app)
+        self.assertIn("data-youtube-upload-schedule", app)
+        self.assertIn("data-youtube-thumbnail-time", app)
+        self.assertIn("YOUTUBE_DEFAULT_VISIBILITY_KEY", app)
+        self.assertIn("youtubeSetThumbnail", api)
+        self.assertIn("xhr.upload.onprogress", api)
+        self.assertIn("GOOGLE_YOUTUBE_THUMBNAIL_UPLOAD_URL", server)
+        self.assertIn('"publishAt"', server)
+        self.assertIn('"categoryId"', server)
+        self.assertIn('snippet["tags"]', server)
+        self.assertIn("creator_stats", server)
+        self.assertIn(".para-video-player__seek", css)
+        self.assertIn(".youtube-upload-progress__bar", css)
+
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")

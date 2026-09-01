@@ -2,6 +2,7 @@ import { page } from "../ui/components.js";
 import { deleteCapture, listCaptures } from "../services/capture-service.js";
 import { getProfileRuntime } from "../state.js";
 import { escapeHtml } from "../services/para-api.js";
+import { activateParaVideoPlayers, paraVideoPlayerMarkup } from "../ui/video-player.js";
 
 const liveUrls = new Map();
 const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -35,7 +36,7 @@ function heroMarkup(item) {
   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
   const url = mediaUrl(item);
   const mediaStage = item.type === "clip"
-    ? `<div class="capture-hero__media capture-hero__media--video"><video src="${url}" preload="auto" playsinline controls></video><button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
+    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, durationMs: item.durationMs, className: "para-video-player--hero" })}<button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
   return `<article class="capture-hero" data-selected-capture="${item.id}">
     ${mediaStage}
@@ -43,6 +44,7 @@ function heroMarkup(item) {
       <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
       <div class="capture-hero__actions" data-focus-zone="capture-actions">
         <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
+        ${item.type === "clip" ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
         <button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}"><b>↗</b><span>Share</span></button>
         <button type="button" class="capture-action" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}"><b>⇩</b><span>Save</span></button>
         <button type="button" class="capture-action capture-action--danger" data-action="delete-capture" data-capture-id="${item.id}"><b>×</b><span>Delete</span></button>
@@ -74,6 +76,7 @@ function refreshGalleryMarkup({ keepFocus = false } = {}) {
   const selected = items.find((item) => item.id === selectedCaptureId) || items[0] || null;
   const focusId = keepFocus ? document.activeElement?.dataset?.captureId : null;
   host.innerHTML = `${heroMarkup(selected)}${railMarkup(items)}`;
+  activateParaVideoPlayers(host);
   document.querySelectorAll("[data-media-filter]").forEach((button) => {
     const selected = button.dataset.mediaFilter === galleryFilter;
     button.classList.toggle("is-active", selected);

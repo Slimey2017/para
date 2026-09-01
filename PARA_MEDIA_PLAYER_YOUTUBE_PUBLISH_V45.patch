@@ -1,0 +1,1015 @@
+--- a/apps/para-home/src/app.js
++++ b/apps/para-home/src/app.js
+@@ -63,6 +63,7 @@
+   closeParaBoard, isParaBoardOpen, openParaBoard, paraBoardBackspace, paraBoardInsert, paraBoardToggleShift, paraBoardToggleSymbols,
+ } from "./ui/paraboard.js";
+ import { toggleParaPoint } from "./ui/parapoint.js";
++import { activateParaVideoPlayers, paraVideoPlayerMarkup } from "./ui/video-player.js";
+ import {
+   beginPowerSequence, beginSleep, cancelTurnOffConfirmation, confirmTurnOff,
+   consumePowerInput, openTurnOffConfirmation,
+@@ -134,6 +135,7 @@
+ let idleDimTimer = null;
+ let overlayCloseTimer = null;
+ let captureViewerUrl = "";
++let youtubeThumbnailPickerUrl = "";
+ let activeInputDevice = "keyboard";
+ let gameTransitionInFlight = false;
+ const GAME_RETURN_TRANSITION_KEY = "para.game.transition.return";
+@@ -144,6 +146,7 @@
+ let pendingIntegrationNotice = null;
+ let pendingYoutubeUploadReturn = null;
+ const YOUTUBE_UPLOAD_DRAFT_KEY = "para.youtube.upload.draft";
++const YOUTUBE_DEFAULT_VISIBILITY_KEY = "para.youtube.defaultVisibility";
+ 
+ function captureAccountRecoveryFromUrl() {
+   const raw = location.hash.replace(/^#/, "");
+@@ -509,6 +512,7 @@
+ function closeControlCenter(restore = true) {
+   if (overlay.hidden) return;
+   if (captureViewerUrl) { URL.revokeObjectURL(captureViewerUrl); captureViewerUrl = ""; }
++  if (youtubeThumbnailPickerUrl) { URL.revokeObjectURL(youtubeThumbnailPickerUrl); youtubeThumbnailPickerUrl = ""; }
+   overlay.classList.add("is-closing");
+   const returnTarget = restore ? overlayReturnFocus : null;
+   clearTimeout(overlayCloseTimer);
+@@ -553,6 +557,92 @@
+   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+ }
+ 
++function youtubeCategoryOptions(selected = "20") {
++  const categories = [
++    ["20", "Gaming"], ["24", "Entertainment"], ["22", "People & Blogs"], ["23", "Comedy"],
++    ["27", "Education"], ["28", "Science & Technology"], ["17", "Sports"], ["1", "Film & Animation"], ["10", "Music"],
++  ];
++  return categories.map(([id, label]) => `<option value="${id}" ${id === String(selected) ? "selected" : ""}>${label}</option>`).join("");
++}
++
++function drawThumbnailFrame(video, canvas) {
++  if (!video?.videoWidth || !video?.videoHeight || !canvas) return false;
++  const context = canvas.getContext("2d");
++  if (!context) return false;
++  const width = canvas.width || 1280;
++  const height = canvas.height || 720;
++  context.fillStyle = "#000";
++  context.fillRect(0, 0, width, height);
++  const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
++  const drawWidth = video.videoWidth * scale;
++  const drawHeight = video.videoHeight * scale;
++  context.drawImage(video, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
++  return true;
++}
++
++function setupYouTubeThumbnailPicker(item) {
++  const video = overlay.querySelector("[data-youtube-thumbnail-video]");
++  const canvas = overlay.querySelector("[data-youtube-thumbnail-canvas]");
++  const range = overlay.querySelector("[data-youtube-thumbnail-time]");
++  const label = overlay.querySelector("[data-youtube-thumbnail-time-label]");
++  const enabled = overlay.querySelector("[data-youtube-thumbnail-enabled]");
++  const picker = overlay.querySelector("[data-youtube-thumbnail-picker]");
++  if (!video || !canvas || !range || !enabled || !picker) return;
++  if (youtubeThumbnailPickerUrl) URL.revokeObjectURL(youtubeThumbnailPickerUrl);
++  youtubeThumbnailPickerUrl = URL.createObjectURL(item.blob);
++  video.src = youtubeThumbnailPickerUrl;
++  const expected = Math.max(0.1, Number(item.durationMs || 0) / 1000);
++  const updateLabel = () => { if (label) label.textContent = `${Number(range.value || 0).toFixed(1)}s`; };
++  const seek = () => {
++    updateLabel();
++    try { video.currentTime = Math.max(0, Number(range.value || 0)); } catch {}
++  };
++  const ready = () => {
++    const duration = Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : expected;
++    range.max = String(Math.max(0.1, duration));
++    range.step = "0.1";
++    const initial = Math.min(Math.max(0.1, duration * 0.25), Math.max(0.1, duration - 0.05));
++    range.value = String(initial);
++    seek();
++  };
++  video.addEventListener("loadedmetadata", ready, { once: true });
++  video.addEventListener("seeked", () => drawThumbnailFrame(video, canvas));
++  video.addEventListener("loadeddata", () => drawThumbnailFrame(video, canvas));
++  range.addEventListener("input", seek);
++  enabled.addEventListener("change", () => picker.classList.toggle("is-disabled", !enabled.checked));
++  video.load();
++  if (video.readyState >= 1) ready();
++}
++
++async function captureThumbnailBlob(item, seconds) {
++  return new Promise((resolve, reject) => {
++    const url = URL.createObjectURL(item.blob);
++    const video = document.createElement("video");
++    video.muted = true;
++    video.preload = "auto";
++    video.playsInline = true;
++    const cleanup = () => { URL.revokeObjectURL(url); video.remove(); };
++    const fail = () => { cleanup(); reject(new Error("PARA could not extract that thumbnail frame.")); };
++    video.addEventListener("error", fail, { once: true });
++    video.addEventListener("loadedmetadata", () => {
++      const duration = Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : Math.max(0.1, Number(item.durationMs || 0) / 1000);
++      try { video.currentTime = Math.min(Math.max(0, Number(seconds || 0)), Math.max(0, duration - 0.02)); } catch { fail(); }
++    }, { once: true });
++    video.addEventListener("seeked", () => {
++      const canvas = document.createElement("canvas");
++      canvas.width = 1280;
++      canvas.height = 720;
++      if (!drawThumbnailFrame(video, canvas)) { fail(); return; }
++      canvas.toBlob((blob) => {
++        cleanup();
++        if (blob) resolve(blob); else reject(new Error("PARA could not create the thumbnail image."));
++      }, "image/jpeg", 0.9);
++    }, { once: true });
++    video.src = url;
++    video.load();
++  });
++}
++
+ async function openYouTubeUploadDialog(captureId) {
+   const item = await getCapture(captureId);
+   if (!item) { toast("Capture not found"); return false; }
+@@ -561,23 +651,42 @@
+   overlayReturnFocus = focus.current;
+   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt || Date.now());
+   const defaultTitle = `PARA Gameplay · ${when}`.slice(0, 100);
++  const savedVisibility = ["private", "unlisted", "public"].includes(localStorage.getItem(YOUTUBE_DEFAULT_VISIBILITY_KEY)) ? localStorage.getItem(YOUTUBE_DEFAULT_VISIBILITY_KEY) : "private";
+   overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div>
+     <section class="youtube-upload-dialog" role="dialog" aria-modal="true" aria-label="Upload gameplay to YouTube">
+-      <header class="share-center__header"><div><span>PARA × YOUTUBE</span><h2>Upload gameplay</h2><small>PARA asks Google for upload permission only when you publish a capture.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close YouTube upload">×</button></header>
+-      <div class="youtube-upload-form">
+-        <label><span>Title</span><input type="text" maxlength="100" value="${escapeOverlayText(defaultTitle)}" data-youtube-upload-title data-autofocus="true"></label>
+-        <label><span>Description</span><textarea maxlength="5000" rows="4" placeholder="Optional description" data-youtube-upload-description>Captured with PARA.</textarea></label>
+-        <div class="youtube-upload-form__split">
+-          <label><span>Visibility</span><select data-youtube-upload-privacy><option value="private" selected>Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label>
+-          <label><span>Audience</span><select data-youtube-upload-audience><option value="" selected>Choose…</option><option value="false">No, not made for kids</option><option value="true">Yes, made for kids</option></select></label>
++      <header class="share-center__header"><div><span>PARA × YOUTUBE</span><h2>Upload gameplay</h2><small>Publish this capture without leaving PARA.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close YouTube upload">×</button></header>
++      <div class="youtube-upload-layout">
++        <div class="youtube-thumbnail-panel">
++          <span class="youtube-upload-field-label">Thumbnail frame</span>
++          <div class="youtube-thumbnail-picker" data-youtube-thumbnail-picker>
++            <video muted playsinline preload="auto" data-youtube-thumbnail-video aria-hidden="true"></video>
++            <canvas width="1280" height="720" data-youtube-thumbnail-canvas></canvas>
++          </div>
++          <div class="youtube-thumbnail-scrubber"><input type="range" min="0" max="15" step="0.1" value="1" data-youtube-thumbnail-time aria-label="Thumbnail frame time"><strong data-youtube-thumbnail-time-label>1.0s</strong></div>
++          <label class="youtube-thumbnail-toggle"><input type="checkbox" data-youtube-thumbnail-enabled checked><span>Use this frame as the custom thumbnail</span></label>
++          <small>Custom thumbnails require an eligible YouTube channel. If YouTube rejects it, the video still uploads normally.</small>
+         </div>
+-        <p class="youtube-upload-note">Google will show a consent screen for <strong>Manage your YouTube videos</strong>. PARA does not save a Google refresh token. The upload grant is short-lived and used for this upload session.</p>
+-        <p class="youtube-upload-note youtube-upload-note--warning">While PARA's YouTube API project is unverified, YouTube can force API uploads to <strong>Private</strong> even if you choose another visibility.</p>
++        <div class="youtube-upload-form">
++          <label><span>Title</span><input type="text" maxlength="100" value="${escapeOverlayText(defaultTitle)}" data-youtube-upload-title data-autofocus="true"></label>
++          <label><span>Description</span><textarea maxlength="5000" rows="4" placeholder="Optional description" data-youtube-upload-description>Captured with PARA.</textarea></label>
++          <label><span>Tags</span><input type="text" maxlength="500" placeholder="PARA, gameplay, gaming" value="PARA, gameplay" data-youtube-upload-tags></label>
++          <div class="youtube-upload-form__split">
++            <label><span>Category</span><select data-youtube-upload-category>${youtubeCategoryOptions("20")}</select></label>
++            <label><span>Visibility</span><select data-youtube-upload-privacy><option value="private" ${savedVisibility === "private" ? "selected" : ""}>Private</option><option value="unlisted" ${savedVisibility === "unlisted" ? "selected" : ""}>Unlisted</option><option value="public" ${savedVisibility === "public" ? "selected" : ""}>Public</option></select></label>
++          </div>
++          <div class="youtube-upload-form__split">
++            <label><span>Audience</span><select data-youtube-upload-audience><option value="" selected>Choose…</option><option value="false">No, not made for kids</option><option value="true">Yes, made for kids</option></select></label>
++            <label><span>Schedule publish (optional)</span><input type="datetime-local" data-youtube-upload-schedule></label>
++          </div>
++          <p class="youtube-upload-note">A scheduled upload stays <strong>Private</strong> until the selected time, then YouTube publishes it. PARA remembers your normal visibility choice for the next upload.</p>
++          <p class="youtube-upload-note youtube-upload-note--warning">While PARA's YouTube API project is unverified, YouTube forces API uploads to <strong>Private</strong>, regardless of the visibility you choose.</p>
++        </div>
+       </div>
+       <footer class="youtube-upload-actions"><button type="button" class="action-button action-button--ghost" data-action="close-control-center">Cancel</button><button type="button" class="action-button" data-action="youtube-upload-authorize" data-capture-id="${escapeOverlayText(item.id)}">Authorize & Upload</button></footer>
+     </section>`;
+   overlay.hidden = false;
+   overlay.classList.remove("is-closing");
++  setupYouTubeThumbnailPicker(item);
+   updateControllerPrompts();
+   requestAnimationFrame(() => focus.focusFirst());
+   return true;
+@@ -586,13 +695,60 @@
+ function saveYouTubeUploadDraft(captureId) {
+   const title = String(overlay.querySelector("[data-youtube-upload-title]")?.value || "").trim();
+   const description = String(overlay.querySelector("[data-youtube-upload-description]")?.value || "");
+-  const privacy = String(overlay.querySelector("[data-youtube-upload-privacy]")?.value || "private");
++  const selectedPrivacy = String(overlay.querySelector("[data-youtube-upload-privacy]")?.value || "private");
+   const audience = String(overlay.querySelector("[data-youtube-upload-audience]")?.value || "");
++  const categoryId = String(overlay.querySelector("[data-youtube-upload-category]")?.value || "20");
++  const tags = [...new Set(String(overlay.querySelector("[data-youtube-upload-tags]")?.value || "").split(",").map((tag) => tag.trim()).filter(Boolean))].slice(0, 40);
++  const scheduleRaw = String(overlay.querySelector("[data-youtube-upload-schedule]")?.value || "");
++  const thumbnailEnabled = Boolean(overlay.querySelector("[data-youtube-thumbnail-enabled]")?.checked);
++  const thumbnailTime = Number(overlay.querySelector("[data-youtube-thumbnail-time]")?.value || 0);
+   if (!title) throw new Error("Give the YouTube video a title.");
+   if (!audience) throw new Error("Choose whether the video is made for kids.");
+-  const draft = { captureId: String(captureId || ""), title, description, privacy, madeForKids: audience === "true", createdAt: Date.now() };
++  if (tags.join(",").length > 500) throw new Error("YouTube tags can total up to 500 characters.");
++  let publishAt = "";
++  if (scheduleRaw) {
++    const schedule = new Date(scheduleRaw);
++    if (!Number.isFinite(schedule.getTime()) || schedule.getTime() < Date.now() + 60_000) throw new Error("Choose a publish time at least one minute in the future.");
++    publishAt = schedule.toISOString();
++  }
++  try { localStorage.setItem(YOUTUBE_DEFAULT_VISIBILITY_KEY, selectedPrivacy); } catch {}
++  const draft = {
++    captureId: String(captureId || ""), title, description, privacy: publishAt ? "private" : selectedPrivacy,
++    madeForKids: audience === "true", tags, categoryId, publishAt,
++    thumbnailRequested: thumbnailEnabled, thumbnailTime: Math.max(0, thumbnailTime), createdAt: Date.now(),
++  };
+   sessionStorage.setItem(YOUTUBE_UPLOAD_DRAFT_KEY, JSON.stringify(draft));
+   return draft;
++}
++
++function showYouTubeUploadProgress(draft) {
++  overlay.innerHTML = `<div class="share-center-scrim"></div><section class="youtube-upload-progress" role="dialog" aria-modal="true" aria-label="Uploading to YouTube">
++    <div class="youtube-upload-progress__mark">▶</div><span>PARA × YOUTUBE</span><h2>Uploading gameplay</h2><p data-youtube-upload-stage>Sending the capture securely through PARA…</p>
++    <div class="youtube-upload-progress__bar"><i data-youtube-upload-bar style="width:0%"></i></div><strong data-youtube-upload-percent>0%</strong><small>${escapeOverlayText(draft.title || "Gameplay capture")}</small>
++    <em>Keep PARA open until YouTube confirms the upload.</em>
++  </section>`;
++  overlay.hidden = false;
++  overlay.classList.remove("is-closing");
++  return {
++    stage: overlay.querySelector("[data-youtube-upload-stage]"),
++    bar: overlay.querySelector("[data-youtube-upload-bar]"),
++    percent: overlay.querySelector("[data-youtube-upload-percent]"),
++  };
++}
++
++function showYouTubeUploadSuccess(result, { thumbnailWarning = "" } = {}) {
++  const stats = result?.creator_stats || {};
++  const stat = (value) => Number.isFinite(Number(value)) ? new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(Number(value)) : "—";
++  const scheduled = result?.publish_at ? `<p class="youtube-upload-success__schedule">Scheduled for ${escapeOverlayText(new Date(result.publish_at).toLocaleString())}</p>` : "";
++  overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div><section class="youtube-upload-success" role="dialog" aria-modal="true" aria-label="YouTube upload complete">
++    <div class="youtube-upload-success__mark">✓</div><span>UPLOAD COMPLETE</span><h2>Gameplay is on YouTube</h2><p>YouTube received the video${result?.privacy_status ? ` as <strong>${escapeOverlayText(result.privacy_status)}</strong>` : ""}. Processing can continue after this screen closes.</p>${scheduled}
++    ${thumbnailWarning ? `<p class="youtube-upload-success__warning">${escapeOverlayText(thumbnailWarning)}</p>` : ""}
++    <div class="youtube-creator-snapshot"><div><small>Subscribers</small><strong>${stat(stats.youtube_subscriber_count)}</strong></div><div><small>Channel views</small><strong>${stat(stats.youtube_view_count)}</strong></div><div><small>Videos</small><strong>${stat(stats.youtube_video_count)}</strong></div></div>
++    <footer>${result?.watch_url ? `<a class="action-button" href="${escapeOverlayText(result.watch_url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>` : ""}<button type="button" class="action-button action-button--ghost" data-action="close-control-center" data-autofocus="true">Done</button></footer>
++  </section>`;
++  overlay.hidden = false;
++  overlay.classList.remove("is-closing");
++  requestAnimationFrame(() => focus.focusFirst());
+ }
+ 
+ async function resumePendingYouTubeUpload() {
+@@ -608,12 +764,27 @@
+   const mime = item.mimeType || item.blob?.type || "video/webm";
+   const extension = mime.includes("mp4") ? "mp4" : "webm";
+   const file = new File([item.blob], `PARA-${item.id}.${extension}`, { type: mime });
+-  toast("Uploading to YouTube", "Keep PARA open while the gameplay video is transferred.");
++  let thumbnailBlob = null;
++  let thumbnailWarning = "";
++  if (draft.thumbnailRequested) {
++    try { thumbnailBlob = await captureThumbnailBlob(item, draft.thumbnailTime); }
++    catch (error) { thumbnailWarning = error?.message || "PARA could not create the selected thumbnail frame."; }
++  }
++  const progress = showYouTubeUploadProgress(draft);
+   try {
+-    const result = await paraApi.youtubeUploadCapture(file, draft);
++    const result = await paraApi.youtubeUploadCapture(file, { ...draft, thumbnailPending: Boolean(thumbnailBlob) }, (percent) => {
++      const rounded = Math.max(0, Math.min(100, Math.round(percent)));
++      if (progress.bar) progress.bar.style.width = `${rounded}%`;
++      if (progress.percent) progress.percent.textContent = `${rounded}%`;
++      if (rounded >= 100 && progress.stage) progress.stage.textContent = "PARA received the clip. YouTube is finishing the upload…";
++    });
++    if (thumbnailBlob && result?.video_id) {
++      if (progress.stage) progress.stage.textContent = "Setting your selected thumbnail…";
++      try { await paraApi.youtubeSetThumbnail(result.video_id, thumbnailBlob); }
++      catch (error) { thumbnailWarning = error?.message || "The video uploaded, but YouTube could not use that custom thumbnail."; }
++    }
+     sessionStorage.removeItem(YOUTUBE_UPLOAD_DRAFT_KEY);
+-    const privacy = result?.privacy_status ? ` · ${String(result.privacy_status)}` : "";
+-    toast("Uploaded to YouTube", `${result?.video_id ? `Video ${result.video_id}` : "Your video"}${privacy}. YouTube may still be processing it.`);
++    showYouTubeUploadSuccess(result, { thumbnailWarning });
+     return true;
+   } catch (error) {
+     if (error?.code === "youtube_upload_authorization_required") {
+@@ -621,6 +792,7 @@
+     } else {
+       toast("YouTube upload failed", error?.message || "YouTube could not accept this gameplay video.");
+     }
++    closeControlCenter(false);
+     return false;
+   }
+ }
+@@ -664,7 +836,7 @@
+   clearTimeout(overlayCloseTimer);
+   if (overlay.hidden) overlayReturnFocus = focus.current;
+   const media = item.type === "clip"
+-    ? `<video controls playsinline preload="auto" src="${captureViewerUrl}" data-recorded-duration-ms="${Number(item.durationMs || 0)}">Your browser could not play this PARA recording.</video>`
++    ? paraVideoPlayerMarkup({ src: captureViewerUrl, durationMs: item.durationMs, className: "para-video-player--viewer" })
+     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
+   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
+   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
+@@ -673,7 +845,8 @@
+     <div class="capture-viewer__stage">${media}</div>
+     <footer class="capture-viewer__controls">
+       ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${previous.id}">← Previous</button>` : ""}
+-      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" data-autofocus="true">↗ Share</button>
++      ${item.type === "clip" ? `<button type="button" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}" data-autofocus="true">▶ Upload to YouTube</button>` : ""}
++      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" ${item.type === "clip" ? "" : 'data-autofocus="true"'}>↗ Share</button>
+       <button type="button" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}">⇩ Save</button>
+       <button type="button" data-action="capture-browser-fullscreen">⛶ Fullscreen</button>
+       ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${next.id}">Next →</button>` : ""}
+@@ -682,33 +855,7 @@
+   </div>`;
+   overlay.hidden = false;
+   overlay.classList.remove("is-closing");
+-  const viewerVideo = overlay.querySelector("[data-capture-viewer] video");
+-  if (viewerVideo) {
+-    const expectedDuration = Math.max(0, Number(viewerVideo.dataset.recordedDurationMs || 0) / 1000);
+-    let repairedDuration = false;
+-    const repairWebmDuration = () => {
+-      if (repairedDuration || !expectedDuration) return;
+-      if (Number.isFinite(viewerVideo.duration) && viewerVideo.duration > 0.05) return;
+-      repairedDuration = true;
+-      // MediaRecorder WebM files can omit duration metadata. Chromium can
+-      // discover the real end time by seeking past the end, then rewinding.
+-      const rewind = () => {
+-        try { viewerVideo.currentTime = 0; } catch {}
+-      };
+-      viewerVideo.addEventListener("durationchange", rewind, { once: true });
+-      viewerVideo.addEventListener("timeupdate", rewind, { once: true });
+-      try { viewerVideo.currentTime = 1e10; } catch {}
+-    };
+-    viewerVideo.addEventListener("loadedmetadata", repairWebmDuration);
+-    viewerVideo.addEventListener("loadeddata", () => {
+-      if (!viewerVideo.videoWidth || !viewerVideo.videoHeight) {
+-        toast("Video has no picture", "This capture came from an older broken recording runtime. Record a new clip with PARA v13.");
+-      }
+-    }, { once: true });
+-    viewerVideo.addEventListener("error", () => toast("Video could not play", "This capture is damaged. New v13 recordings are decoded before PARA saves them."), { once: true });
+-    viewerVideo.load();
+-    if (viewerVideo.readyState >= 1) repairWebmDuration();
+-  }
++  activateParaVideoPlayers(overlay, { onError: () => toast("Video could not play", "This capture may be damaged or use an unsupported codec.") });
+   updateControllerPrompts();
+   requestAnimationFrame(() => focus.focusFirst());
+   return true;
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -2,6 +2,7 @@
+ import { deleteCapture, listCaptures } from "../services/capture-service.js";
+ import { getProfileRuntime } from "../state.js";
+ import { escapeHtml } from "../services/para-api.js";
++import { activateParaVideoPlayers, paraVideoPlayerMarkup } from "../ui/video-player.js";
+ 
+ const liveUrls = new Map();
+ const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+@@ -35,7 +36,7 @@
+   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
+   const url = mediaUrl(item);
+   const mediaStage = item.type === "clip"
+-    ? `<div class="capture-hero__media capture-hero__media--video"><video src="${url}" preload="auto" playsinline controls></video><button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
++    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, durationMs: item.durationMs, className: "para-video-player--hero" })}<button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
+     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
+   return `<article class="capture-hero" data-selected-capture="${item.id}">
+     ${mediaStage}
+@@ -43,6 +44,7 @@
+       <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
+       <div class="capture-hero__actions" data-focus-zone="capture-actions">
+         <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
++        ${item.type === "clip" ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
+         <button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}"><b>↗</b><span>Share</span></button>
+         <button type="button" class="capture-action" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}"><b>⇩</b><span>Save</span></button>
+         <button type="button" class="capture-action capture-action--danger" data-action="delete-capture" data-capture-id="${item.id}"><b>×</b><span>Delete</span></button>
+@@ -74,6 +76,7 @@
+   const selected = items.find((item) => item.id === selectedCaptureId) || items[0] || null;
+   const focusId = keepFocus ? document.activeElement?.dataset?.captureId : null;
+   host.innerHTML = `${heroMarkup(selected)}${railMarkup(items)}`;
++  activateParaVideoPlayers(host);
+   document.querySelectorAll("[data-media-filter]").forEach((button) => {
+     const selected = button.dataset.mediaFilter === galleryFilter;
+     button.classList.toggle("is-active", selected);
+--- a/apps/para-home/src/services/para-api.js
++++ b/apps/para-home/src/services/para-api.js
+@@ -31,22 +31,55 @@
+   steamDisconnect: () => request("/api/v1/integrations/steam/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
+   googleStatus: () => request("/api/v1/integrations/google/status", { signal: AbortSignal.timeout(12_000) }),
+   googleDisconnect: () => request("/api/v1/integrations/google/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
+-  youtubeUploadCapture: async (file, { title, description = "", privacy = "private", madeForKids } = {}) => {
++  youtubeUploadCapture: (file, { title, description = "", privacy = "private", madeForKids, tags = [], categoryId = "20", publishAt = "", thumbnailPending = false } = {}, onProgress = null) => new Promise((resolve, reject) => {
+     const query = new URLSearchParams({
+       title: String(title || ""),
+       description: String(description || ""),
+       privacy: String(privacy || "private"),
+       made_for_kids: madeForKids ? "true" : "false",
++      tags: Array.isArray(tags) ? tags.join(",") : String(tags || ""),
++      category_id: String(categoryId || "20"),
++      publish_at: String(publishAt || ""),
++      thumbnail_pending: thumbnailPending ? "true" : "false",
+     });
+-    const response = await fetch(`/api/v1/integrations/google/youtube/upload?${query}`, {
++    const xhr = new XMLHttpRequest();
++    xhr.open("POST", `/api/v1/integrations/google/youtube/upload?${query}`);
++    xhr.setRequestHeader("Accept", "application/json");
++    xhr.setRequestHeader("Content-Type", file.type || "video/webm");
++    xhr.upload.onprogress = (event) => {
++      if (event.lengthComputable) onProgress?.((event.loaded / event.total) * 100, event.loaded, event.total);
++    };
++    xhr.onerror = () => {
++      const error = new Error("The connection to PARA was interrupted during the YouTube upload.");
++      error.code = "youtube_upload_network_error";
++      reject(error);
++    };
++    xhr.onload = () => {
++      let payload = {};
++      try { payload = JSON.parse(xhr.responseText || "{}"); } catch {}
++      if (xhr.status < 200 || xhr.status >= 300) {
++        const error = new Error(payload.message || payload.error || `YouTube upload failed: ${xhr.status}`);
++        error.code = payload.error || "youtube_upload_failed";
++        error.status = xhr.status;
++        error.payload = payload;
++        reject(error);
++        return;
++      }
++      onProgress?.(100, file.size, file.size);
++      resolve(payload);
++    };
++    xhr.send(file);
++  }),
++  youtubeSetThumbnail: async (videoId, imageBlob) => {
++    const response = await fetch(`/api/v1/integrations/google/youtube/thumbnail?video_id=${encodeURIComponent(String(videoId || ""))}`, {
+       method: "POST",
+-      headers: { "Accept": "application/json", "Content-Type": file.type || "video/webm" },
+-      body: file,
++      headers: { "Accept": "application/json", "Content-Type": imageBlob?.type || "image/jpeg" },
++      body: imageBlob,
+     });
+     const payload = await response.json().catch(() => ({}));
+     if (!response.ok) {
+-      const error = new Error(payload.message || payload.error || `YouTube upload failed: ${response.status}`);
+-      error.code = payload.error || "youtube_upload_failed";
++      const error = new Error(payload.message || payload.error || `Thumbnail upload failed: ${response.status}`);
++      error.code = payload.error || "youtube_thumbnail_failed";
+       error.status = response.status;
+       error.payload = payload;
+       throw error;
+--- /dev/null
++++ b/apps/para-home/src/ui/video-player.js
+@@ -0,0 +1,169 @@
++function clamp(value, min, max) {
++  return Math.min(max, Math.max(min, Number(value) || 0));
++}
++
++function formatTime(seconds) {
++  const total = Math.max(0, Math.floor(Number(seconds) || 0));
++  const hours = Math.floor(total / 3600);
++  const minutes = Math.floor((total % 3600) / 60);
++  const secs = String(total % 60).padStart(2, "0");
++  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `${minutes}:${secs}`;
++}
++
++export function paraVideoPlayerMarkup({ src, durationMs = 0, className = "", autoplay = false } = {}) {
++  const expectedSeconds = Math.max(0, Number(durationMs || 0) / 1000);
++  return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}">
++    <video src="${src}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>Your browser could not play this PARA recording.</video>
++    <button type="button" class="para-video-player__bigplay" data-video-action="toggle" aria-label="Play video">▶</button>
++    <div class="para-video-player__chrome">
++      <input class="para-video-player__seek" type="range" min="0" max="1000" step="1" value="0" data-video-seek aria-label="Video position">
++      <div class="para-video-player__controls">
++        <button type="button" data-video-action="toggle" aria-label="Play or pause"><span data-video-play-icon>▶</span></button>
++        <button type="button" data-video-action="skip" data-video-skip="-10" aria-label="Back 10 seconds">↺10</button>
++        <button type="button" data-video-action="skip" data-video-skip="10" aria-label="Forward 10 seconds">10↻</button>
++        <span class="para-video-player__time"><b data-video-current>0:00</b><i>/</i><b data-video-duration>${formatTime(expectedSeconds)}</b></span>
++        <span class="para-video-player__spacer"></span>
++        <button type="button" data-video-action="mute" aria-label="Mute or unmute"><span data-video-volume-icon>🔊</span></button>
++        <input class="para-video-player__volume" type="range" min="0" max="1" step="0.05" value="1" data-video-volume aria-label="Volume">
++        <select class="para-video-player__speed" data-video-speed aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
++        <button type="button" data-video-action="fullscreen" aria-label="Fullscreen">⛶</button>
++      </div>
++    </div>
++  </div>`;
++}
++
++export function activateParaVideoPlayers(root = document, { onError } = {}) {
++  const cleanups = [];
++  for (const player of root.querySelectorAll?.("[data-para-video-player]") || []) {
++    const video = player.querySelector("video");
++    if (!video || player.dataset.playerReady === "true") continue;
++    player.dataset.playerReady = "true";
++    const expected = Math.max(0, Number(player.dataset.expectedDuration || 0));
++    const seek = player.querySelector("[data-video-seek]");
++    const volume = player.querySelector("[data-video-volume]");
++    const speed = player.querySelector("[data-video-speed]");
++    const current = player.querySelector("[data-video-current]");
++    const duration = player.querySelector("[data-video-duration]");
++    const playIcons = player.querySelectorAll("[data-video-play-icon]");
++    const volumeIcons = player.querySelectorAll("[data-video-volume-icon]");
++    const bigPlay = player.querySelector(".para-video-player__bigplay");
++    let previewSeeked = false;
++    let repairing = false;
++
++    const realDuration = () => Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : expected;
++    const update = () => {
++      const length = realDuration();
++      if (current) current.textContent = formatTime(video.currentTime || 0);
++      if (duration) duration.textContent = formatTime(length);
++      if (seek && length > 0 && !seek.matches(":active")) seek.value = String(Math.round(clamp((video.currentTime || 0) / length, 0, 1) * 1000));
++      for (const icon of playIcons) icon.textContent = video.paused ? "▶" : "❚❚";
++      if (bigPlay) {
++        bigPlay.textContent = video.paused ? "▶" : "❚❚";
++        bigPlay.classList.toggle("is-playing", !video.paused);
++      }
++      for (const icon of volumeIcons) icon.textContent = video.muted || video.volume === 0 ? "🔇" : video.volume < 0.5 ? "🔉" : "🔊";
++      if (volume && !volume.matches(":active")) volume.value = String(video.muted ? 0 : video.volume);
++    };
++
++    const repairDuration = () => {
++      if (repairing || !expected) return;
++      if (Number.isFinite(video.duration) && video.duration > 0.05) return;
++      repairing = true;
++      const rewind = () => {
++        try { video.currentTime = 0.08; previewSeeked = true; } catch {}
++        update();
++      };
++      video.addEventListener("durationchange", rewind, { once: true });
++      video.addEventListener("timeupdate", rewind, { once: true });
++      try { video.currentTime = 1e10; } catch { rewind(); }
++    };
++
++    const toggle = async () => {
++      try {
++        if (video.paused) {
++          if (previewSeeked && video.currentTime < 0.2) { try { video.currentTime = 0; } catch {} }
++          await video.play();
++        } else video.pause();
++      } catch (error) {
++        onError?.(error);
++      }
++      update();
++    };
++
++    const onClick = async (event) => {
++      const button = event.target.closest?.("[data-video-action]");
++      if (!button || !player.contains(button)) return;
++      const action = button.dataset.videoAction;
++      if (action === "toggle") await toggle();
++      else if (action === "skip") {
++        const length = realDuration();
++        video.currentTime = clamp((video.currentTime || 0) + Number(button.dataset.videoSkip || 0), 0, length || Infinity);
++      } else if (action === "mute") {
++        video.muted = !video.muted;
++      } else if (action === "fullscreen") {
++        try {
++          if (!document.fullscreenElement) await player.requestFullscreen?.();
++          else await document.exitFullscreen?.();
++        } catch (error) { onError?.(error); }
++      }
++      update();
++    };
++
++    const onSeek = () => {
++      const length = realDuration();
++      if (!length) return;
++      video.currentTime = clamp(Number(seek?.value || 0) / 1000, 0, 1) * length;
++      update();
++    };
++    const onVolume = () => {
++      video.muted = false;
++      video.volume = clamp(volume?.value || 0, 0, 1);
++      update();
++    };
++    const onSpeed = () => { video.playbackRate = clamp(speed?.value || 1, 0.25, 4); };
++    const onVideoClick = (event) => { if (event.target === video) void toggle(); };
++    const onDoubleClick = async () => {
++      try { if (!document.fullscreenElement) await player.requestFullscreen?.(); else await document.exitFullscreen?.(); } catch (error) { onError?.(error); }
++    };
++    const onKey = (event) => {
++      if (event.target.matches?.("input,select,button")) return;
++      if (event.code === "Space" || event.key === "k") { event.preventDefault(); void toggle(); }
++      else if (event.key === "ArrowLeft") { event.preventDefault(); video.currentTime = clamp((video.currentTime || 0) - 5, 0, realDuration() || Infinity); }
++      else if (event.key === "ArrowRight") { event.preventDefault(); video.currentTime = clamp((video.currentTime || 0) + 5, 0, realDuration() || Infinity); }
++      update();
++    };
++    const onMetadata = () => {
++      repairDuration();
++      if (!previewSeeked && video.paused && realDuration() > 0.12 && video.currentTime < 0.01) {
++        try { video.currentTime = Math.min(0.08, realDuration() / 4); previewSeeked = true; } catch {}
++      }
++      update();
++    };
++
++    player.tabIndex = player.tabIndex >= 0 ? player.tabIndex : 0;
++    player.addEventListener("click", onClick);
++    player.addEventListener("keydown", onKey);
++    video.addEventListener("click", onVideoClick);
++    video.addEventListener("dblclick", onDoubleClick);
++    for (const eventName of ["timeupdate", "play", "pause", "ended", "volumechange", "durationchange", "ratechange"]) video.addEventListener(eventName, update);
++    video.addEventListener("loadedmetadata", onMetadata);
++    video.addEventListener("error", (event) => onError?.(event));
++    seek?.addEventListener("input", onSeek);
++    volume?.addEventListener("input", onVolume);
++    speed?.addEventListener("change", onSpeed);
++    video.load();
++    if (video.readyState >= 1) onMetadata();
++    update();
++
++    cleanups.push(() => {
++      player.removeEventListener("click", onClick);
++      player.removeEventListener("keydown", onKey);
++      video.removeEventListener("click", onVideoClick);
++      video.removeEventListener("dblclick", onDoubleClick);
++      seek?.removeEventListener("input", onSeek);
++      volume?.removeEventListener("input", onVolume);
++      speed?.removeEventListener("change", onSpeed);
++    });
++  }
++  return () => cleanups.forEach((cleanup) => cleanup());
++}
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -2090,3 +2090,21 @@
+ .youtube-upload-dialog{position:absolute;left:50%;bottom:38px;transform:translateX(-50%);width:min(760px,calc(100% - 48px));max-height:calc(100% - 76px);overflow:auto;padding:22px;border:1px solid rgba(181,126,255,.22);border-radius:26px;background:linear-gradient(160deg,rgba(22,14,34,.99),rgba(9,7,15,.99));box-shadow:0 28px 90px rgba(0,0,0,.6),0 0 70px rgba(123,50,255,.1)}
+ .youtube-upload-form{display:grid;gap:15px}.youtube-upload-form label{display:grid;gap:7px}.youtube-upload-form label>span{color:#c8a1f7;font-size:.67rem;font-weight:850;letter-spacing:.09em;text-transform:uppercase}.youtube-upload-form input,.youtube-upload-form textarea,.youtube-upload-form select{width:100%;border:1px solid rgba(255,255,255,.11);border-radius:13px;background:rgba(5,3,9,.7);color:#f8f4fb;padding:12px 13px;font:inherit;outline:none}.youtube-upload-form textarea{resize:vertical;min-height:104px}.youtube-upload-form input:focus,.youtube-upload-form textarea:focus,.youtube-upload-form select:focus{border-color:rgba(190,132,255,.7);box-shadow:0 0 0 3px rgba(148,77,238,.12)}.youtube-upload-form__split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.youtube-upload-note{margin:0;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:13px;background:rgba(255,255,255,.03);color:rgba(244,239,249,.6);font-size:.72rem;line-height:1.55}.youtube-upload-note strong{color:#f2e8ff}.youtube-upload-note--warning{border-color:rgba(255,194,99,.18);background:rgba(151,91,22,.08);color:rgba(255,226,184,.68)}.youtube-upload-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07)}.share-destination:disabled{opacity:.42;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+ @media(max-width:720px){.youtube-upload-dialog{bottom:14px;width:calc(100% - 24px);max-height:calc(100% - 28px);padding:17px;border-radius:21px}.youtube-upload-form__split{grid-template-columns:1fr}.youtube-upload-actions{flex-direction:column-reverse}.youtube-upload-actions .action-button{width:100%;justify-content:center}}
++
++/* PARA Media Player + YouTube publishing v45 */
++.para-video-player{position:relative;width:100%;height:100%;min-height:220px;overflow:hidden;background:#000;color:#fff;outline:none;isolation:isolate}
++.para-video-player video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
++.para-video-player__bigplay{position:absolute;left:50%;top:50%;z-index:3;width:76px;height:76px;display:grid;place-items:center;transform:translate(-50%,-50%);padding:0 0 0 4px;border:1px solid rgba(255,255,255,.26);border-radius:50%;background:rgba(8,5,14,.72);backdrop-filter:blur(15px);color:#fff;font-size:1.55rem;cursor:pointer;box-shadow:0 18px 54px rgba(0,0,0,.42);transition:opacity .18s ease,transform .18s ease,background .18s ease}
++.para-video-player__bigplay.is-playing{opacity:0;transform:translate(-50%,-50%) scale(.86);pointer-events:none}.para-video-player:hover .para-video-player__bigplay.is-playing,.para-video-player:focus-within .para-video-player__bigplay.is-playing{opacity:.5;pointer-events:auto}
++.para-video-player__chrome{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:40px 16px 14px;background:linear-gradient(0deg,rgba(0,0,0,.94),rgba(0,0,0,.54),transparent);opacity:.25;transition:opacity .18s ease}.para-video-player:hover .para-video-player__chrome,.para-video-player:focus-within .para-video-player__chrome,.para-video-player:fullscreen .para-video-player__chrome{opacity:1}
++.para-video-player__seek{width:100%;height:5px;margin:0 0 9px;accent-color:#a85cff;cursor:pointer}.para-video-player__controls{display:flex;align-items:center;gap:8px}.para-video-player__controls button{min-width:38px;height:36px;padding:0 9px;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:rgba(255,255,255,.075);color:#fff;font-weight:800;cursor:pointer}.para-video-player__controls button:hover,.para-video-player__controls button:focus-visible{outline:0;border-color:rgba(188,125,255,.7);background:rgba(143,69,236,.3)}
++.para-video-player__time{display:flex;align-items:center;gap:5px;margin-left:3px;color:rgba(255,255,255,.72);font-size:.7rem;white-space:nowrap}.para-video-player__time b{color:#fff;font-weight:760}.para-video-player__time i{font-style:normal;opacity:.45}.para-video-player__spacer{flex:1}.para-video-player__volume{width:76px;accent-color:#a85cff}.para-video-player__speed{height:36px;padding:0 8px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(8,5,13,.86);color:#fff;font:750 .68rem/1 system-ui}.para-video-player:focus-visible{box-shadow:inset 0 0 0 3px rgba(189,126,255,.72)}
++.para-video-player--viewer{min-height:0}.capture-viewer__stage .para-video-player{width:min(100%,1600px);height:100%}.capture-hero__media--video{cursor:default}.capture-hero__media--video:after{display:none}.capture-hero__media--video>.capture-hero__fullscreen{position:absolute;right:16px;top:16px;z-index:6;min-height:38px;padding:0 12px;border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(8,5,13,.72);backdrop-filter:blur(10px);color:#fff;font-weight:760}.capture-action--youtube{border-color:rgba(255,82,82,.24);background:linear-gradient(135deg,rgba(194,30,46,.24),rgba(91,24,135,.14))}.capture-action--youtube b{background:rgba(255,48,64,.15)}
++
++.youtube-upload-layout{display:grid;grid-template-columns:minmax(260px,.72fr) minmax(360px,1.28fr);gap:20px;margin-top:18px}.youtube-thumbnail-panel{display:grid;align-content:start;gap:10px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:18px;background:rgba(255,255,255,.025)}.youtube-upload-field-label{color:#c8a1f7;font-size:.67rem;font-weight:850;letter-spacing:.09em;text-transform:uppercase}.youtube-thumbnail-picker{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:13px;background:#000}.youtube-thumbnail-picker video{position:absolute;width:1px;height:1px;opacity:.001;pointer-events:none}.youtube-thumbnail-picker canvas{width:100%;height:100%;display:block;object-fit:contain;background:#000}.youtube-thumbnail-picker.is-disabled{opacity:.38;filter:saturate(.4)}.youtube-thumbnail-scrubber{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px}.youtube-thumbnail-scrubber input{width:100%;accent-color:#a85cff}.youtube-thumbnail-scrubber strong{min-width:42px;color:#fff;font-size:.72rem;text-align:right}.youtube-thumbnail-toggle{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center;gap:9px!important;color:#f2eaf8;font-size:.72rem}.youtube-thumbnail-toggle input{width:auto!important;accent-color:#a85cff}.youtube-thumbnail-panel>small{color:rgba(244,239,249,.46);font-size:.65rem;line-height:1.5}
++.youtube-upload-progress,.youtube-upload-success{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(590px,calc(100% - 36px));padding:30px;border:1px solid rgba(187,128,255,.23);border-radius:28px;background:linear-gradient(150deg,rgba(24,15,38,.99),rgba(7,5,12,.99));box-shadow:0 34px 110px rgba(0,0,0,.68);text-align:center;color:#fff}.youtube-upload-progress__mark,.youtube-upload-success__mark{width:62px;height:62px;margin:0 auto 16px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#a050ff,#6f28d8);font-size:1.45rem;box-shadow:0 12px 34px rgba(99,37,197,.28)}.youtube-upload-success__mark{background:linear-gradient(135deg,#64d797,#2ca96f)}.youtube-upload-progress>span,.youtube-upload-success>span{color:#c27fff;font-size:.62rem;font-weight:900;letter-spacing:.18em}.youtube-upload-progress h2,.youtube-upload-success h2{margin:7px 0 8px;font-size:1.9rem}.youtube-upload-progress p,.youtube-upload-success p{margin:0;color:rgba(244,239,249,.62);line-height:1.55}.youtube-upload-progress__bar{height:12px;margin:24px 0 10px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}.youtube-upload-progress__bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7834e8,#c278ff);box-shadow:0 0 22px rgba(174,91,255,.5);transition:width .16s ease}.youtube-upload-progress>strong{display:block;font-size:1.45rem}.youtube-upload-progress>small{display:block;margin-top:4px;color:rgba(244,239,249,.55)}.youtube-upload-progress>em{display:block;margin-top:21px;color:rgba(244,239,249,.42);font-style:normal;font-size:.67rem}.youtube-upload-success__schedule{margin-top:12px!important;color:#d8b8ff!important}.youtube-upload-success__warning{margin-top:14px!important;padding:10px 12px;border:1px solid rgba(255,188,90,.2);border-radius:12px;background:rgba(151,91,22,.09);color:#ffdca4!important;font-size:.71rem}.youtube-creator-snapshot{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:22px 0}.youtube-creator-snapshot>div{padding:14px 10px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.035)}.youtube-creator-snapshot small,.youtube-creator-snapshot strong{display:block}.youtube-creator-snapshot small{color:rgba(244,239,249,.46);font-size:.62rem}.youtube-creator-snapshot strong{margin-top:4px;font-size:1.25rem}.youtube-upload-success footer{display:flex;justify-content:center;gap:9px;margin-top:18px}.youtube-upload-success footer .action-button{text-decoration:none}
++
++@media(max-width:900px){.youtube-upload-layout{grid-template-columns:1fr}.youtube-thumbnail-panel{grid-template-columns:minmax(0,1fr);}.youtube-upload-dialog{width:min(720px,calc(100% - 30px))}.para-video-player__volume{display:none}}
++@media(max-width:620px){.para-video-player__controls{gap:5px}.para-video-player__controls button{min-width:34px;padding:0 7px}.para-video-player__time{font-size:.62rem}.para-video-player__speed{display:none}.youtube-creator-snapshot{grid-template-columns:1fr}.youtube-upload-success footer{flex-direction:column}.youtube-upload-success footer .action-button{width:100%;justify-content:center}}
++
++.youtube-upload-dialog{width:min(980px,calc(100% - 48px))}
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -15,6 +15,7 @@
+ import secrets
+ import threading
+ import time
++from datetime import datetime, timezone
+ import platform
+ import re
+ import urllib.error
+@@ -81,6 +82,7 @@
+ GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+ GOOGLE_YOUTUBE_CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
+ GOOGLE_YOUTUBE_UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
++GOOGLE_YOUTUBE_THUMBNAIL_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
+ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+ YOUTUBE_UPLOAD_SESSION_COOKIE = "para_youtube_upload_session"
+ YOUTUBE_UPLOAD_SESSION_TTL_SECONDS = 45 * 60
+@@ -479,15 +481,24 @@
+         _youtube_upload_sessions.pop(str(session_id or ""), None)
+ 
+ 
+-def begin_youtube_resumable_upload(access_token: str, *, title: str, description: str, privacy_status: str, made_for_kids: bool, content_type: str, content_length: int) -> tuple[int, dict]:
++def begin_youtube_resumable_upload(access_token: str, *, title: str, description: str, privacy_status: str, made_for_kids: bool, content_type: str, content_length: int, tags: list[str] | None = None, category_id: str = "20", publish_at: str = "") -> tuple[int, dict]:
+     """Create a YouTube videos.insert resumable upload session and return its HTTPS Location."""
+     privacy = str(privacy_status or "private").lower()
+     if privacy not in {"private", "unlisted", "public"}:
+         privacy = "private"
+-    metadata = {
+-        "snippet": {"title": str(title or "PARA Gameplay Capture")[:100], "description": str(description or "")[:5000]},
+-        "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)},
+-    }
++    clean_tags = [str(tag).strip()[:100] for tag in (tags or []) if str(tag).strip()][:40]
++    snippet = {
++        "title": str(title or "PARA Gameplay Capture")[:100],
++        "description": str(description or "")[:5000],
++        "categoryId": str(category_id or "20")[:8],
++    }
++    if clean_tags:
++        snippet["tags"] = clean_tags
++    status_payload = {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)}
++    if publish_at:
++        status_payload["privacyStatus"] = "private"
++        status_payload["publishAt"] = str(publish_at)
++    metadata = {"snippet": snippet, "status": status_payload}
+     query = urllib.parse.urlencode({"uploadType": "resumable", "part": "snippet,status", "notifySubscribers": "false"})
+     data = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
+     request = urllib.request.Request(
+@@ -507,7 +518,7 @@
+             location = str(response.headers.get("Location") or "")
+             if not location:
+                 return 502, {"error": "youtube_upload_session_missing", "message": "YouTube did not return an upload session."}
+-            return response.status, {"location": location}
++            return response.status, {"location": location, "publish_at": str(publish_at or "")}
+     except urllib.error.HTTPError as error:
+         body = error.read().decode("utf-8", "replace")
+         try:
+@@ -519,7 +530,6 @@
+         return error.code, {"error": "youtube_upload_init_failed", "message": str(message or "YouTube rejected the upload request.")[:300]}
+     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+         return 502, {"error": "youtube_unavailable", "message": "PARA could not start the YouTube upload."}
+-
+ 
+ def stream_youtube_resumable_upload(upload_url: str, source, *, content_type: str, content_length: int) -> tuple[int, dict]:
+     """Stream the browser capture through PARA to a YouTube resumable upload URL."""
+@@ -567,6 +577,59 @@
+     finally:
+         connection.close()
+ 
++
++
++def set_youtube_thumbnail(access_token: str, video_id: str, image_bytes: bytes, content_type: str = "image/jpeg") -> tuple[int, dict]:
++    video_id = str(video_id or "").strip()
++    if not video_id or not image_bytes:
++        return 400, {"error": "youtube_thumbnail_invalid", "message": "Choose a valid YouTube video and thumbnail image."}
++    query = urllib.parse.urlencode({"videoId": video_id, "uploadType": "media"})
++    request = urllib.request.Request(
++        f"{GOOGLE_YOUTUBE_THUMBNAIL_UPLOAD_URL}?{query}",
++        data=image_bytes,
++        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": content_type},
++        method="POST",
++    )
++    try:
++        with urllib.request.urlopen(request, timeout=30) as response:
++            body = response.read().decode("utf-8", "replace")
++            payload = json.loads(body) if body else {}
++            return response.status, {"thumbnail_set": True, "video_id": video_id, "youtube": payload}
++    except urllib.error.HTTPError as error:
++        body = error.read().decode("utf-8", "replace")
++        try:
++            payload = json.loads(body)
++        except json.JSONDecodeError:
++            payload = {}
++        detail = payload.get("error") if isinstance(payload, dict) else {}
++        message = detail.get("message") if isinstance(detail, dict) else ""
++        return error.code, {"error": "youtube_thumbnail_failed", "message": str(message or "YouTube could not set that custom thumbnail. Your channel may not be eligible for custom thumbnails.")[:300]}
++    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
++        return 502, {"error": "youtube_thumbnail_unavailable", "message": "PARA could not reach YouTube to set the thumbnail."}
++
++
++def refresh_external_youtube_stats(para_access_token: str, channel: dict) -> tuple[int, dict]:
++    if not isinstance(channel, dict) or not channel.get("found"):
++        return 200, {}
++    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
++    patch = {
++        "youtube_channel_id": str(channel.get("youtube_channel_id") or "") or None,
++        "youtube_channel_title": str(channel.get("youtube_channel_title") or "") or None,
++        "youtube_custom_url": str(channel.get("youtube_custom_url") or "") or None,
++        "youtube_subscriber_count": channel.get("youtube_subscriber_count"),
++        "youtube_view_count": channel.get("youtube_view_count"),
++        "youtube_video_count": channel.get("youtube_video_count"),
++        "youtube_hidden_subscriber_count": channel.get("youtube_hidden_subscriber_count"),
++        "updated_at": timestamp,
++    }
++    status, _ = _supabase_account_rest_request(
++        "/rest/v1/external_accounts?provider=eq.google",
++        method="PATCH",
++        payload=patch,
++        bearer=para_access_token,
++        prefer="return=minimal",
++    )
++    return status, patch if status < 400 else {}
+ 
+ def external_account_status(access_token: str, provider: str = "google") -> tuple[int, dict]:
+     if provider != "google":
+@@ -3511,7 +3574,7 @@
+     def do_POST(self) -> None:  # noqa: N802
+         request = urlparse(self.path)
+         if request.path == "/api/v1/integrations/google/youtube/upload":
+-            status, _, _, refreshed_headers = self._authenticated_access()
++            status, _, para_access, refreshed_headers = self._authenticated_access()
+             clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)
+             if status != 200:
+                 self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
+@@ -3537,6 +3600,10 @@
+             description = str(query.get("description", [""])[0] or "")
+             privacy = str(query.get("privacy", ["private"])[0] or "private").lower()
+             audience = str(query.get("made_for_kids", [""])[0] or "").lower()
++            tags = [tag.strip() for tag in str(query.get("tags", [""])[0] or "").split(",") if tag.strip()][:40]
++            category_id = str(query.get("category_id", ["20"])[0] or "20").strip()
++            publish_at = str(query.get("publish_at", [""])[0] or "").strip()
++            thumbnail_pending = str(query.get("thumbnail_pending", ["false"])[0] or "false").lower() == "true"
+             if not title or len(title) > 100:
+                 self._send_json(400, {"error": "youtube_title_invalid", "message": "Enter a YouTube title between 1 and 100 characters."}, refreshed_headers)
+                 return
+@@ -3549,18 +3616,77 @@
+             if audience not in {"true", "false"}:
+                 self._send_json(400, {"error": "youtube_audience_required", "message": "Choose whether this video is made for kids."}, refreshed_headers)
+                 return
++            if len(",".join(tags)) > 500:
++                self._send_json(400, {"error": "youtube_tags_invalid", "message": "YouTube tags can total up to 500 characters."}, refreshed_headers)
++                return
++            if not category_id.isdigit() or len(category_id) > 8:
++                self._send_json(400, {"error": "youtube_category_invalid", "message": "Choose a valid YouTube video category."}, refreshed_headers)
++                return
++            if publish_at:
++                try:
++                    parsed_publish = datetime.fromisoformat(publish_at.replace("Z", "+00:00"))
++                    if parsed_publish.tzinfo is None:
++                        parsed_publish = parsed_publish.replace(tzinfo=timezone.utc)
++                    if parsed_publish.timestamp() < time.time() + 60:
++                        raise ValueError
++                    publish_at = parsed_publish.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
++                    privacy = "private"
++                except ValueError:
++                    self._send_json(400, {"error": "youtube_publish_time_invalid", "message": "Choose a scheduled publish time at least one minute in the future."}, refreshed_headers)
++                    return
+             init_status, init_payload = begin_youtube_resumable_upload(
+-                google_access, title=title, description=description, privacy_status=privacy, made_for_kids=(audience == "true"), content_type=content_type, content_length=length
++                google_access, title=title, description=description, privacy_status=privacy, made_for_kids=(audience == "true"), content_type=content_type, content_length=length,
++                tags=tags, category_id=category_id, publish_at=publish_at,
+             )
+             if init_status not in {200, 201}:
+                 self._send_json(init_status, init_payload, refreshed_headers)
+                 return
+             upload_status, result = stream_youtube_resumable_upload(str(init_payload.get("location") or ""), self.rfile, content_type=content_type, content_length=length)
+             if upload_status == 200:
+-                clear_youtube_upload_session(upload_session_id)
+-                self._send_json(upload_status, result, [*refreshed_headers, *clear_upload_cookie])
++                result["publish_at"] = publish_at or None
++                channel_status, channel = youtube_channel(google_access)
++                if channel_status == 200 and channel.get("found"):
++                    refresh_external_youtube_stats(para_access, channel)
++                    result["creator_stats"] = {
++                        "youtube_subscriber_count": channel.get("youtube_subscriber_count"),
++                        "youtube_view_count": channel.get("youtube_view_count"),
++                        "youtube_video_count": channel.get("youtube_video_count"),
++                    }
++                if thumbnail_pending:
++                    self._send_json(upload_status, result, refreshed_headers)
++                else:
++                    clear_youtube_upload_session(upload_session_id)
++                    self._send_json(upload_status, result, [*refreshed_headers, *clear_upload_cookie])
+             else:
+                 self._send_json(upload_status, result, refreshed_headers)
++            return
++
++        if request.path == "/api/v1/integrations/google/youtube/thumbnail":
++            status, _, _, refreshed_headers = self._authenticated_access()
++            clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)
++            if status != 200:
++                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
++                return
++            upload_session_id = self._cookies().get(YOUTUBE_UPLOAD_SESSION_COOKIE, "")
++            google_access = youtube_upload_session_access(upload_session_id)
++            if not google_access:
++                self._send_json(401, {"error": "youtube_upload_authorization_required", "message": "Authorize YouTube upload access before setting a thumbnail."}, [*refreshed_headers, *clear_upload_cookie])
++                return
++            query = parse_qs(request.query, keep_blank_values=True)
++            video_id = str(query.get("video_id", [""])[0] or "").strip()
++            try:
++                length = int(self.headers.get("Content-Length", "0"))
++            except ValueError:
++                length = 0
++            content_type = str(self.headers.get("Content-Type") or "image/jpeg").split(";", 1)[0].strip().lower()
++            if not video_id or length < 1 or length > 2 * 1024 * 1024 or content_type not in {"image/jpeg", "image/png"}:
++                clear_youtube_upload_session(upload_session_id)
++                self._send_json(400, {"error": "youtube_thumbnail_invalid", "message": "Custom thumbnails must be a JPEG or PNG image no larger than 2 MB."}, [*refreshed_headers, *clear_upload_cookie])
++                return
++            image_bytes = self.rfile.read(length)
++            thumb_status, thumb_result = set_youtube_thumbnail(google_access, video_id, image_bytes, content_type)
++            clear_youtube_upload_session(upload_session_id)
++            self._send_json(thumb_status, thumb_result, [*refreshed_headers, *clear_upload_cookie])
+             return
+ 
+         if request.path == "/api/v1/backgrounds/custom":
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import sys
++import json
+ from pathlib import Path
+ import os
+ import tempfile
+@@ -9,7 +10,7 @@
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "services/api"))
+-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account  # noqa: E402
++from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats  # noqa: E402
+ import system_layer  # noqa: E402
+ 
+ 
+@@ -319,6 +320,58 @@
+         self.assertEqual(kwargs["payload"]["youtube_subscriber_count"], 5000)
+         self.assertNotIn("access_token", kwargs["payload"])
+         self.assertNotIn("refresh_token", kwargs["payload"])
++
++
++    def test_youtube_upload_metadata_supports_tags_category_and_schedule(self):
++        class FakeResponse:
++            status = 200
++            headers = {"Location": "https://upload.youtube.com/resumable-session"}
++            def __enter__(self): return self
++            def __exit__(self, *_): return False
++        with patch("server.urllib.request.urlopen", return_value=FakeResponse()) as opener:
++            status, payload = begin_youtube_resumable_upload(
++                "google-access", title="PARA Gameplay", description="Captured with PARA", privacy_status="public",
++                made_for_kids=False, content_type="video/webm", content_length=1234,
++                tags=["PARA", "gameplay"], category_id="20", publish_at="2026-09-02T18:00:00Z",
++            )
++        self.assertEqual(status, 200)
++        self.assertIn("location", payload)
++        request = opener.call_args.args[0]
++        metadata = json.loads(request.data.decode("utf-8"))
++        self.assertEqual(metadata["snippet"]["tags"], ["PARA", "gameplay"])
++        self.assertEqual(metadata["snippet"]["categoryId"], "20")
++        self.assertEqual(metadata["status"]["privacyStatus"], "private")
++        self.assertEqual(metadata["status"]["publishAt"], "2026-09-02T18:00:00Z")
++
++    def test_youtube_custom_thumbnail_uses_authenticated_media_upload(self):
++        class FakeResponse:
++            status = 200
++            def __enter__(self): return self
++            def __exit__(self, *_): return False
++            def read(self): return b'{"items":[]}'
++        with patch("server.urllib.request.urlopen", return_value=FakeResponse()) as opener:
++            status, payload = set_youtube_thumbnail("google-access", "video123", b"jpeg-bytes", "image/jpeg")
++        self.assertEqual(status, 200)
++        self.assertTrue(payload["thumbnail_set"])
++        request = opener.call_args.args[0]
++        self.assertIn("/upload/youtube/v3/thumbnails/set", request.full_url)
++        self.assertIn("videoId=video123", request.full_url)
++        self.assertEqual(request.headers.get("Authorization"), "Bearer google-access")
++
++    def test_creator_stats_refresh_updates_connected_google_record(self):
++        channel = {
++            "found": True, "youtube_channel_id": "UC123", "youtube_channel_title": "PARA Creator",
++            "youtube_custom_url": "@paracreator", "youtube_subscriber_count": 5000,
++            "youtube_view_count": 1234567, "youtube_video_count": 43, "youtube_hidden_subscriber_count": False,
++        }
++        with patch("server._supabase_account_rest_request", return_value=(204, {})) as request:
++            status, payload = refresh_external_youtube_stats("para-jwt", channel)
++        self.assertEqual(status, 204)
++        self.assertEqual(payload["youtube_video_count"], 43)
++        args, kwargs = request.call_args
++        self.assertIn("provider=eq.google", args[0])
++        self.assertEqual(kwargs["method"], "PATCH")
++        self.assertEqual(kwargs["bearer"], "para-jwt")
+ 
+     def test_para_account_signin_normalizes_supabase_session(self):
+         remote = {
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -331,6 +331,33 @@
+         self.assertIn('resumePendingYouTubeUpload', app)
+         self.assertIn('youtube.upload', privacy)
+         self.assertIn('short-lived server memory', privacy)
++
++    def test_v45_media_player_and_youtube_publish_polish_are_wired(self):
++        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
++        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
++        self.assertIn("paraVideoPlayerMarkup", media)
++        self.assertIn("activateParaVideoPlayers", media)
++        for feature in ["data-video-seek", "data-video-volume", "data-video-speed", "data-video-action=\"fullscreen\""]:
++            self.assertIn(feature, player)
++        self.assertIn("Upload to YouTube", media)
++        self.assertIn("data-youtube-upload-tags", app)
++        self.assertIn("data-youtube-upload-category", app)
++        self.assertIn("data-youtube-upload-schedule", app)
++        self.assertIn("data-youtube-thumbnail-time", app)
++        self.assertIn("YOUTUBE_DEFAULT_VISIBILITY_KEY", app)
++        self.assertIn("youtubeSetThumbnail", api)
++        self.assertIn("xhr.upload.onprogress", api)
++        self.assertIn("GOOGLE_YOUTUBE_THUMBNAIL_UPLOAD_URL", server)
++        self.assertIn('"publishAt"', server)
++        self.assertIn('"categoryId"', server)
++        self.assertIn('snippet["tags"]', server)
++        self.assertIn("creator_stats", server)
++        self.assertIn(".para-video-player__seek", css)
++        self.assertIn(".youtube-upload-progress__bar", css)
+ 
+     def test_control_center_is_a_compact_contextual_strip(self):
+         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+--- /dev/null
++++ b/PARA_MEDIA_PLAYER_YOUTUBE_PUBLISH_V45.md
+@@ -0,0 +1,41 @@
++# PARA Media Player + YouTube Publish V45
++
++V45 upgrades PARA Capture now that the end-to-end YouTube upload path is proven.
++
++## Proper PARA video player
++
++- Replaces the browser-default video controls in Media Gallery and the full capture viewer with a PARA player.
++- Adds play/pause, 10-second skip back/forward, timeline scrubbing, elapsed/total time, mute, volume, playback speed, click-to-play, double-click fullscreen, and a fullscreen button.
++- Keeps the existing WebM duration-repair behavior for MediaRecorder captures that omit useful duration metadata.
++- Seeks a tiny amount into a paused capture so the Media Gallery can show a real frame instead of a dead/blank first frame when possible.
++- Adds a direct **Upload to YouTube** action from both the Media Gallery hero and fullscreen capture viewer.
++
++## YouTube publishing polish
++
++- Adds custom thumbnail frame selection from the PARA capture itself.
++- Adds tags and video category, defaulting gameplay captures to YouTube's Gaming category (`20`).
++- Adds optional scheduled publishing. Scheduled videos are uploaded Private with YouTube `status.publishAt`, as required by the YouTube Data API.
++- Remembers the user's normal Private / Unlisted / Public choice locally for the next upload.
++- Shows real browser-to-PARA upload percentage, then changes the stage text while PARA/YouTube finish server-side processing instead of pretending that 100% means YouTube is done.
++- Adds an upload-complete screen with **Open on YouTube**.
++- Refreshes the connected YouTube channel snapshot after a successful upload and shows subscribers, channel views, and video count. This is groundwork for PARA Creator milestones; no $5K reward formula is invented in V45.
++
++## Thumbnail behavior
++
++If the user selects a frame, PARA extracts a 1280×720 JPEG after the Google OAuth return, uploads the video, then calls YouTube's custom-thumbnail endpoint for that new video. If YouTube rejects the custom thumbnail (for example because the channel is not eligible), the video remains successfully uploaded and PARA reports only the thumbnail warning.
++
++The short-lived Google upload grant stays in server memory until the thumbnail request finishes, or until its normal timeout. PARA still does not persist a Google refresh token for upload.
++
++## YouTube API rules reflected in V45
++
++- Video tags are sent as `snippet.tags` and kept under YouTube's 500-character aggregate limit.
++- Category is sent as `snippet.categoryId`.
++- Scheduling uses `status.publishAt`, and the upload is forced to Private while scheduled.
++- API uploads from an unverified YouTube API project can still be forced Private by YouTube.
++
++## Validation
++
++- V45-specific API + repository tests: 4 passed.
++- Full `tests/test_api.py` + `tests/test_repository.py`: 80 passed, 1 pre-existing legacy failure (`apps/para-home/src/mock-data.js` is still present while the old cleanup test expects it deleted).
++- `app.js`, `media.js`, `video-player.js`, and `para-api.js` pass `node --check`.
++- `services/api/server.py` passes Python compilation.
