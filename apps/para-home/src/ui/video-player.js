@@ -18,20 +18,20 @@ function escapeAttr(value = "") {
     .replaceAll(">", "&gt;");
 }
 
-function mediaErrorMessage(video) {
+function mediaErrorMessage(video, error = null) {
   const code = Number(video?.error?.code || 0);
-  if (code === 1) return "Playback was interrupted.";
+  if (code === 1 || error?.name === "AbortError") return "Playback was interrupted. Press Play again.";
   if (code === 2) return "PARA could not read this capture from local storage.";
-  if (code === 3) return "Chrome could not decode this capture.";
-  if (code === 4) return "This capture uses a video format Chrome cannot play.";
-  return "PARA could not play this capture.";
+  if (code === 3) return "Chrome could not decode this WebM capture.";
+  if (code === 4 || error?.name === "NotSupportedError") return "Chrome rejected this capture's video stream.";
+  if (error?.name === "NotAllowedError") return "Chrome blocked playback. Press Play again.";
+  return error?.message ? `Playback failed: ${error.message}` : "PARA could not play this capture.";
 }
 
 export function paraVideoPlayerMarkup({ src, mimeType = "", durationMs = 0, className = "", autoplay = false } = {}) {
   const expectedSeconds = Math.max(0, Number(durationMs || 0) / 1000);
-  const sourceType = mimeType ? ` type="${escapeAttr(mimeType)}"` : "";
   return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}" data-video-mime="${escapeAttr(mimeType)}">
-    <video preload="auto" playsinline ${autoplay ? "autoplay" : ""}><source src="${escapeAttr(src)}"${sourceType}>Your browser could not play this PARA recording.</video>
+    <video src="${escapeAttr(src)}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>Your browser could not play this PARA recording.</video>
     <button type="button" class="para-video-player__bigplay" data-video-action="toggle" aria-label="Play video">▶</button>
     <div class="para-video-player__status" data-video-status hidden><span></span><strong data-video-status-text>Loading video…</strong></div>
     <div class="para-video-player__chrome">
@@ -80,8 +80,8 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     };
 
     const reportError = (error, message = "") => {
-      lastError = error || new Error(message || mediaErrorMessage(video));
-      setStatus(message || mediaErrorMessage(video), "error");
+      lastError = error || new Error(message || mediaErrorMessage(video, error));
+      setStatus(message || mediaErrorMessage(video, error), "error");
       onError?.(lastError);
     };
 
@@ -220,13 +220,15 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     volume?.addEventListener("input", onVolume);
     speed?.addEventListener("change", onSpeed);
 
-    if (mimeType && video.canPlayType?.(mimeType) === "") {
-      reportError(new Error(`Unsupported media type: ${mimeType}`), `Chrome cannot play ${mimeType}.`);
-    } else {
-      setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");
-      video.load();
-      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) onLoaded();
-    }
+    // Do not reject an IndexedDB capture solely from canPlayType(). Older PARA
+    // recordings can carry an over-specific MediaRecorder codec string even
+    // when Chromium can decode the underlying WebM bytes. The playback Blob is
+    // normalized to video/webm by capture-service and the browser gets the final
+    // say by actually loading the source.
+    player.dataset.mimeHint = mimeType && video.canPlayType?.(mimeType) === "" ? "unknown" : "supported";
+    setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");
+    video.load();
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) onLoaded();
     update();
 
     cleanups.push(() => {

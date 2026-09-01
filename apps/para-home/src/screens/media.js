@@ -1,5 +1,5 @@
 import { page } from "../ui/components.js";
-import { deleteCapture, listCaptures } from "../services/capture-service.js";
+import { capturePlaybackBlob, capturePlaybackMime, deleteCapture, listCaptures } from "../services/capture-service.js";
 import { getProfileRuntime } from "../state.js";
 import { escapeHtml } from "../services/para-api.js";
 import { activateParaVideoPlayers, paraVideoPlayerMarkup } from "../ui/video-player.js";
@@ -16,7 +16,7 @@ function releaseUrls() {
 }
 
 function mediaUrl(item) {
-  if (!liveUrls.has(item.id)) liveUrls.set(item.id, URL.createObjectURL(item.blob));
+  if (!liveUrls.has(item.id)) liveUrls.set(item.id, URL.createObjectURL(capturePlaybackBlob(item)));
   return liveUrls.get(item.id);
 }
 
@@ -36,7 +36,7 @@ function heroMarkup(item) {
   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
   const url = mediaUrl(item);
   const mediaStage = item.type === "clip"
-    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: item.mimeType || item.blob?.type || "", durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
+    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
   return `<article class="capture-hero" data-selected-capture="${item.id}">
     ${mediaStage}

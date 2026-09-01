@@ -36,6 +36,26 @@ export async function listCaptures() {
   return [...(items || [])].sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
 }
 
+
+export function capturePlaybackMime(item = {}) {
+  const declared = String(item?.mimeType || item?.blob?.type || "").trim().toLowerCase();
+  if (item?.type === "clip" && (!declared || declared.includes("webm"))) return "video/webm";
+  return String(item?.mimeType || item?.blob?.type || "").trim();
+}
+
+export function capturePlaybackBlob(item = {}) {
+  const blob = item?.blob;
+  if (!(blob instanceof Blob)) return blob;
+  const playbackMime = capturePlaybackMime(item);
+  if (!playbackMime || blob.type === playbackMime) return blob;
+  // IndexedDB keeps the original MediaRecorder MIME string. Older captures can
+  // contain an over-specific codecs parameter that Chromium later rejects when
+  // used as the Blob URL response Content-Type even though the WebM bytes are
+  // valid (YouTube/ffmpeg can still ingest them). Re-wrap the same bytes with a
+  // generic WebM MIME for local playback; uploads keep the untouched original.
+  return new Blob([blob], { type: playbackMime });
+}
+
 export async function deleteCapture(id) {
   if (!globalThis.indexedDB) return false;
   await transact("readwrite", (store) => store.delete(id));
@@ -172,14 +192,15 @@ function recorderMimeType() {
 
 async function assertPlayableVideo(blob) {
   if (!blob?.size || blob.size < 1024) throw new Error("The recording was empty.");
-  const url = URL.createObjectURL(blob);
+  const playbackBlob = capturePlaybackBlob({ type: "clip", blob, mimeType: blob.type });
+  const url = URL.createObjectURL(playbackBlob);
   const video = document.createElement("video");
   try {
     video.preload = "auto";
     video.muted = true;
     video.playsInline = true;
-    if (blob.type && video.canPlayType?.(blob.type) === "") {
-      throw new Error(`Chrome cannot play the recorded format (${blob.type}).`);
+    if (playbackBlob.type && video.canPlayType?.(playbackBlob.type) === "") {
+      throw new Error(`Chrome cannot play the recorded format (${playbackBlob.type}).`);
     }
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("The video file could not be decoded.")), 7000);
