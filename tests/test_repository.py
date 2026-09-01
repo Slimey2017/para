@@ -359,6 +359,20 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn(".para-video-player__seek", css)
         self.assertIn(".youtube-upload-progress__bar", css)
 
+    def test_v46_media_playback_fix_avoids_webm_duration_seek_and_removes_overlay_fullscreen(self):
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
+        capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
+        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+        self.assertNotIn("video.currentTime = 1e10", player)
+        self.assertIn("mimeType: item.mimeType", media)
+        self.assertNotIn('class="capture-hero__fullscreen"', media)
+        self.assertNotIn(".capture-hero__fullscreen", css)
+        self.assertIn("data-video-status", player)
+        self.assertIn("video.canPlayType", player)
+        self.assertIn("playback did not advance", capture)
+        self.assertIn("video.canPlayType", capture)
+
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")

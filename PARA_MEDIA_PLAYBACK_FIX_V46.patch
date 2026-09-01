@@ -1,0 +1,401 @@
+diff --git a/apps/para-home/src/ui/video-player.js b/apps/para-home/src/ui/video-player.js
+index 017d7d5..3609227 100644
+--- a/apps/para-home/src/ui/video-player.js
++++ b/apps/para-home/src/ui/video-player.js
+@@ -10,11 +10,30 @@ function formatTime(seconds) {
+   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `${minutes}:${secs}`;
+ }
+ 
+-export function paraVideoPlayerMarkup({ src, durationMs = 0, className = "", autoplay = false } = {}) {
++function escapeAttr(value = "") {
++  return String(value)
++    .replaceAll("&", "&amp;")
++    .replaceAll('"', "&quot;")
++    .replaceAll("<", "&lt;")
++    .replaceAll(">", "&gt;");
++}
++
++function mediaErrorMessage(video) {
++  const code = Number(video?.error?.code || 0);
++  if (code === 1) return "Playback was interrupted.";
++  if (code === 2) return "PARA could not read this capture from local storage.";
++  if (code === 3) return "Chrome could not decode this capture.";
++  if (code === 4) return "This capture uses a video format Chrome cannot play.";
++  return "PARA could not play this capture.";
++}
++
++export function paraVideoPlayerMarkup({ src, mimeType = "", durationMs = 0, className = "", autoplay = false } = {}) {
+   const expectedSeconds = Math.max(0, Number(durationMs || 0) / 1000);
+-  return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}">
+-    <video src="${src}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>Your browser could not play this PARA recording.</video>
++  const sourceType = mimeType ? ` type="${escapeAttr(mimeType)}"` : "";
++  return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}" data-video-mime="${escapeAttr(mimeType)}">
++    <video preload="auto" playsinline ${autoplay ? "autoplay" : ""}><source src="${escapeAttr(src)}"${sourceType}>Your browser could not play this PARA recording.</video>
+     <button type="button" class="para-video-player__bigplay" data-video-action="toggle" aria-label="Play video">▶</button>
++    <div class="para-video-player__status" data-video-status hidden><span></span><strong data-video-status-text>Loading video…</strong></div>
+     <div class="para-video-player__chrome">
+       <input class="para-video-player__seek" type="range" min="0" max="1000" step="1" value="0" data-video-seek aria-label="Video position">
+       <div class="para-video-player__controls">
+@@ -26,7 +45,7 @@ export function paraVideoPlayerMarkup({ src, durationMs = 0, className = "", aut
+         <button type="button" data-video-action="mute" aria-label="Mute or unmute"><span data-video-volume-icon>🔊</span></button>
+         <input class="para-video-player__volume" type="range" min="0" max="1" step="0.05" value="1" data-video-volume aria-label="Volume">
+         <select class="para-video-player__speed" data-video-speed aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+-        <button type="button" data-video-action="fullscreen" aria-label="Fullscreen">⛶</button>
++        <button type="button" data-video-action="fullscreen" aria-label="Fullscreen" title="Fullscreen">⛶</button>
+       </div>
+     </div>
+   </div>`;
+@@ -38,7 +57,9 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+     const video = player.querySelector("video");
+     if (!video || player.dataset.playerReady === "true") continue;
+     player.dataset.playerReady = "true";
++
+     const expected = Math.max(0, Number(player.dataset.expectedDuration || 0));
++    const mimeType = String(player.dataset.videoMime || "").trim();
+     const seek = player.querySelector("[data-video-seek]");
+     const volume = player.querySelector("[data-video-volume]");
+     const speed = player.querySelector("[data-video-speed]");
+@@ -47,15 +68,40 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+     const playIcons = player.querySelectorAll("[data-video-play-icon]");
+     const volumeIcons = player.querySelectorAll("[data-video-volume-icon]");
+     const bigPlay = player.querySelector(".para-video-player__bigplay");
+-    let previewSeeked = false;
+-    let repairing = false;
++    const status = player.querySelector("[data-video-status]");
++    const statusText = player.querySelector("[data-video-status-text]");
++    let lastError = null;
++
++    const setStatus = (message = "", kind = "loading") => {
++      if (!status) return;
++      status.hidden = !message;
++      status.classList.toggle("is-error", kind === "error");
++      if (statusText) statusText.textContent = message;
++    };
++
++    const reportError = (error, message = "") => {
++      lastError = error || new Error(message || mediaErrorMessage(video));
++      setStatus(message || mediaErrorMessage(video), "error");
++      onError?.(lastError);
++    };
+ 
+     const realDuration = () => Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : expected;
++    const seekableEnd = () => {
++      try {
++        const ranges = video.seekable;
++        return ranges?.length ? ranges.end(ranges.length - 1) : 0;
++      } catch {
++        return 0;
++      }
++    };
++    const canSeek = () => Number.isFinite(video.duration) || seekableEnd() > 0;
++
+     const update = () => {
+       const length = realDuration();
+       if (current) current.textContent = formatTime(video.currentTime || 0);
+       if (duration) duration.textContent = formatTime(length);
+       if (seek && length > 0 && !seek.matches(":active")) seek.value = String(Math.round(clamp((video.currentTime || 0) / length, 0, 1) * 1000));
++      if (seek) seek.disabled = !canSeek();
+       for (const icon of playIcons) icon.textContent = video.paused ? "▶" : "❚❚";
+       if (bigPlay) {
+         bigPlay.textContent = video.paused ? "▶" : "❚❚";
+@@ -65,27 +111,31 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+       if (volume && !volume.matches(":active")) volume.value = String(video.muted ? 0 : video.volume);
+     };
+ 
+-    const repairDuration = () => {
+-      if (repairing || !expected) return;
+-      if (Number.isFinite(video.duration) && video.duration > 0.05) return;
+-      repairing = true;
+-      const rewind = () => {
+-        try { video.currentTime = 0.08; previewSeeked = true; } catch {}
+-        update();
+-      };
+-      video.addEventListener("durationchange", rewind, { once: true });
+-      video.addEventListener("timeupdate", rewind, { once: true });
+-      try { video.currentTime = 1e10; } catch { rewind(); }
++    const setCurrentTime = (seconds) => {
++      const length = realDuration();
++      const max = seekableEnd() || length || Infinity;
++      const target = clamp(seconds, 0, max);
++      try {
++        if (typeof video.fastSeek === "function") video.fastSeek(target);
++        else video.currentTime = target;
++      } catch {
++        // Some MediaRecorder WebM files are playable before they become seekable.
++        // Playback should keep working even when timeline seeking is unavailable.
++      }
+     };
+ 
+     const toggle = async () => {
+       try {
+         if (video.paused) {
+-          if (previewSeeked && video.currentTime < 0.2) { try { video.currentTime = 0; } catch {} }
++          lastError = null;
++          if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) setStatus("Loading video…");
+           await video.play();
+-        } else video.pause();
++          setStatus("");
++        } else {
++          video.pause();
++        }
+       } catch (error) {
+-        onError?.(error);
++        reportError(error);
+       }
+       update();
+     };
+@@ -95,24 +145,23 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+       if (!button || !player.contains(button)) return;
+       const action = button.dataset.videoAction;
+       if (action === "toggle") await toggle();
+-      else if (action === "skip") {
+-        const length = realDuration();
+-        video.currentTime = clamp((video.currentTime || 0) + Number(button.dataset.videoSkip || 0), 0, length || Infinity);
+-      } else if (action === "mute") {
+-        video.muted = !video.muted;
+-      } else if (action === "fullscreen") {
++      else if (action === "skip") setCurrentTime((video.currentTime || 0) + Number(button.dataset.videoSkip || 0));
++      else if (action === "mute") video.muted = !video.muted;
++      else if (action === "fullscreen") {
+         try {
+           if (!document.fullscreenElement) await player.requestFullscreen?.();
+           else await document.exitFullscreen?.();
+-        } catch (error) { onError?.(error); }
++        } catch (error) {
++          reportError(error, "Fullscreen is unavailable here.");
++        }
+       }
+       update();
+     };
+ 
+     const onSeek = () => {
+       const length = realDuration();
+-      if (!length) return;
+-      video.currentTime = clamp(Number(seek?.value || 0) / 1000, 0, 1) * length;
++      if (!length || !canSeek()) return;
++      setCurrentTime(clamp(Number(seek?.value || 0) / 1000, 0, 1) * length);
+       update();
+     };
+     const onVolume = () => {
+@@ -123,36 +172,61 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+     const onSpeed = () => { video.playbackRate = clamp(speed?.value || 1, 0.25, 4); };
+     const onVideoClick = (event) => { if (event.target === video) void toggle(); };
+     const onDoubleClick = async () => {
+-      try { if (!document.fullscreenElement) await player.requestFullscreen?.(); else await document.exitFullscreen?.(); } catch (error) { onError?.(error); }
++      try {
++        if (!document.fullscreenElement) await player.requestFullscreen?.();
++        else await document.exitFullscreen?.();
++      } catch (error) {
++        reportError(error, "Fullscreen is unavailable here.");
++      }
+     };
+     const onKey = (event) => {
+       if (event.target.matches?.("input,select,button")) return;
+       if (event.code === "Space" || event.key === "k") { event.preventDefault(); void toggle(); }
+-      else if (event.key === "ArrowLeft") { event.preventDefault(); video.currentTime = clamp((video.currentTime || 0) - 5, 0, realDuration() || Infinity); }
+-      else if (event.key === "ArrowRight") { event.preventDefault(); video.currentTime = clamp((video.currentTime || 0) + 5, 0, realDuration() || Infinity); }
++      else if (event.key === "ArrowLeft") { event.preventDefault(); setCurrentTime((video.currentTime || 0) - 5); }
++      else if (event.key === "ArrowRight") { event.preventDefault(); setCurrentTime((video.currentTime || 0) + 5); }
+       update();
+     };
+-    const onMetadata = () => {
+-      repairDuration();
+-      if (!previewSeeked && video.paused && realDuration() > 0.12 && video.currentTime < 0.01) {
+-        try { video.currentTime = Math.min(0.08, realDuration() / 4); previewSeeked = true; } catch {}
+-      }
++    const onLoaded = () => {
++      // Do not seek to an absurd timestamp to "repair" WebM duration metadata.
++      // MediaRecorder WebM often reports Infinity/unknown duration but is still
++      // perfectly playable. The old repair seek could strand the video at EOF.
++      setStatus("");
++      update();
++    };
++    const onWaiting = () => {
++      if (!lastError && !video.paused) setStatus("Buffering…");
++    };
++    const onPlaying = () => {
++      lastError = null;
++      setStatus("");
+       update();
+     };
++    const onMediaError = () => reportError(video.error || new Error(mediaErrorMessage(video)));
+ 
+     player.tabIndex = player.tabIndex >= 0 ? player.tabIndex : 0;
+     player.addEventListener("click", onClick);
+     player.addEventListener("keydown", onKey);
+     video.addEventListener("click", onVideoClick);
+     video.addEventListener("dblclick", onDoubleClick);
+-    for (const eventName of ["timeupdate", "play", "pause", "ended", "volumechange", "durationchange", "ratechange"]) video.addEventListener(eventName, update);
+-    video.addEventListener("loadedmetadata", onMetadata);
+-    video.addEventListener("error", (event) => onError?.(event));
++    for (const eventName of ["timeupdate", "play", "pause", "ended", "volumechange", "durationchange", "ratechange", "progress"]) video.addEventListener(eventName, update);
++    video.addEventListener("loadedmetadata", onLoaded);
++    video.addEventListener("loadeddata", onLoaded);
++    video.addEventListener("canplay", onLoaded);
++    video.addEventListener("waiting", onWaiting);
++    video.addEventListener("stalled", onWaiting);
++    video.addEventListener("playing", onPlaying);
++    video.addEventListener("error", onMediaError);
+     seek?.addEventListener("input", onSeek);
+     volume?.addEventListener("input", onVolume);
+     speed?.addEventListener("change", onSpeed);
+-    video.load();
+-    if (video.readyState >= 1) onMetadata();
++
++    if (mimeType && video.canPlayType?.(mimeType) === "") {
++      reportError(new Error(`Unsupported media type: ${mimeType}`), `Chrome cannot play ${mimeType}.`);
++    } else {
++      setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");
++      video.load();
++      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) onLoaded();
++    }
+     update();
+ 
+     cleanups.push(() => {
+@@ -163,6 +237,13 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+       seek?.removeEventListener("input", onSeek);
+       volume?.removeEventListener("input", onVolume);
+       speed?.removeEventListener("change", onSpeed);
++      video.removeEventListener("loadedmetadata", onLoaded);
++      video.removeEventListener("loadeddata", onLoaded);
++      video.removeEventListener("canplay", onLoaded);
++      video.removeEventListener("waiting", onWaiting);
++      video.removeEventListener("stalled", onWaiting);
++      video.removeEventListener("playing", onPlaying);
++      video.removeEventListener("error", onMediaError);
+     });
+   }
+   return () => cleanups.forEach((cleanup) => cleanup());
+diff --git a/apps/para-home/src/screens/media.js b/apps/para-home/src/screens/media.js
+index c6cd7dc..f38e5eb 100644
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -36,7 +36,7 @@ function heroMarkup(item) {
+   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
+   const url = mediaUrl(item);
+   const mediaStage = item.type === "clip"
+-    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, durationMs: item.durationMs, className: "para-video-player--hero" })}<button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
++    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: item.mimeType || item.blob?.type || "", durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
+     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
+   return `<article class="capture-hero" data-selected-capture="${item.id}">
+     ${mediaStage}
+diff --git a/apps/para-home/src/services/capture-service.js b/apps/para-home/src/services/capture-service.js
+index 93983ab..972e98b 100644
+--- a/apps/para-home/src/services/capture-service.js
++++ b/apps/para-home/src/services/capture-service.js
+@@ -173,13 +173,16 @@ function recorderMimeType() {
+ async function assertPlayableVideo(blob) {
+   if (!blob?.size || blob.size < 1024) throw new Error("The recording was empty.");
+   const url = URL.createObjectURL(blob);
++  const video = document.createElement("video");
+   try {
++    video.preload = "auto";
++    video.muted = true;
++    video.playsInline = true;
++    if (blob.type && video.canPlayType?.(blob.type) === "") {
++      throw new Error(`Chrome cannot play the recorded format (${blob.type}).`);
++    }
+     await new Promise((resolve, reject) => {
+-      const video = document.createElement("video");
+       const timer = setTimeout(() => reject(new Error("The video file could not be decoded.")), 7000);
+-      video.preload = "auto";
+-      video.muted = true;
+-      video.playsInline = true;
+       video.onloadeddata = () => {
+         clearTimeout(timer);
+         if (!video.videoWidth || !video.videoHeight) {
+@@ -192,7 +195,29 @@ async function assertPlayableVideo(blob) {
+       video.src = url;
+       video.load();
+     });
+-  } finally { URL.revokeObjectURL(url); }
++
++    // Loading one frame is not enough. A malformed MediaRecorder WebM can show
++    // a thumbnail but still fail when the user presses Play. Verify that the
++    // timeline actually advances before PARA commits the capture to IndexedDB.
++    const start = Number(video.currentTime || 0);
++    await video.play();
++    await new Promise((resolve, reject) => {
++      const timer = setTimeout(() => reject(new Error("The recording decoded, but playback did not advance.")), 3000);
++      const advanced = () => {
++        if (Number(video.currentTime || 0) <= start + 0.03 && !video.ended) return;
++        clearTimeout(timer);
++        video.removeEventListener("timeupdate", advanced);
++        resolve();
++      };
++      video.addEventListener("timeupdate", advanced);
++      advanced();
++    });
++    video.pause();
++  } finally {
++    video.pause?.();
++    video.removeAttribute?.("src");
++    URL.revokeObjectURL(url);
++  }
+ }
+ 
+ export function replayStatus() {
+diff --git a/apps/para-home/src/app.js b/apps/para-home/src/app.js
+index edef0ce..8649e4a 100644
+--- a/apps/para-home/src/app.js
++++ b/apps/para-home/src/app.js
+@@ -836,7 +836,7 @@ async function openCaptureViewer(captureId) {
+   clearTimeout(overlayCloseTimer);
+   if (overlay.hidden) overlayReturnFocus = focus.current;
+   const media = item.type === "clip"
+-    ? paraVideoPlayerMarkup({ src: captureViewerUrl, durationMs: item.durationMs, className: "para-video-player--viewer" })
++    ? paraVideoPlayerMarkup({ src: captureViewerUrl, mimeType: item.mimeType || item.blob?.type || "", durationMs: item.durationMs, className: "para-video-player--viewer" })
+     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
+   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
+   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
+diff --git a/apps/para-home/styles.css b/apps/para-home/styles.css
+index a83d43f..8f7a388 100644
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -1897,7 +1897,7 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ @keyframes para-recording-pulse{50%{opacity:.48;transform:scale(.82)}}
+ .para-overlay:not([hidden])~.para-recording-hud{z-index:2}
+ @media(max-width:620px){.para-recording-hud{left:14px;right:14px;top:14px;min-width:0}}
+-.capture-hero__media--video{cursor:default}.capture-hero__media--video:after{pointer-events:none}.capture-hero__media--video video{position:relative;z-index:1}.capture-hero__fullscreen{position:absolute;right:14px;bottom:14px;z-index:3;min-height:38px;padding:0 13px;border:1px solid rgba(255,255,255,.18);border-radius:11px;background:rgba(9,6,14,.78);color:#fff;font-size:.66rem;font-weight:800;backdrop-filter:blur(10px)}.capture-hero__fullscreen:focus-visible,.capture-hero__fullscreen[data-focused="true"]{outline:2px solid #bc7cff;outline-offset:2px}
++.capture-hero__media--video{cursor:default}.capture-hero__media--video:after{pointer-events:none}.capture-hero__media--video video{position:relative;z-index:1}
+ 
+ /* v16: system-level launch/return transition for games. */
+ .para-game-transition {
+@@ -2096,10 +2096,11 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ .para-video-player video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+ .para-video-player__bigplay{position:absolute;left:50%;top:50%;z-index:3;width:76px;height:76px;display:grid;place-items:center;transform:translate(-50%,-50%);padding:0 0 0 4px;border:1px solid rgba(255,255,255,.26);border-radius:50%;background:rgba(8,5,14,.72);backdrop-filter:blur(15px);color:#fff;font-size:1.55rem;cursor:pointer;box-shadow:0 18px 54px rgba(0,0,0,.42);transition:opacity .18s ease,transform .18s ease,background .18s ease}
+ .para-video-player__bigplay.is-playing{opacity:0;transform:translate(-50%,-50%) scale(.86);pointer-events:none}.para-video-player:hover .para-video-player__bigplay.is-playing,.para-video-player:focus-within .para-video-player__bigplay.is-playing{opacity:.5;pointer-events:auto}
++.para-video-player__status{position:absolute;left:16px;top:16px;z-index:5;display:flex;align-items:center;gap:8px;max-width:min(440px,calc(100% - 32px));padding:8px 11px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(8,5,13,.74);backdrop-filter:blur(12px);color:rgba(255,255,255,.78);font-size:.7rem;box-shadow:0 10px 26px rgba(0,0,0,.26)}.para-video-player__status[hidden]{display:none}.para-video-player__status span{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:#b978ff;box-shadow:0 0 14px rgba(185,120,255,.7);animation:paraVideoPulse 1s ease-in-out infinite}.para-video-player__status strong{font-weight:760}.para-video-player__status.is-error{border-color:rgba(255,104,124,.32);color:#ffd4da;background:rgba(48,8,17,.86)}.para-video-player__status.is-error span{background:#ff667c;box-shadow:0 0 14px rgba(255,82,107,.58);animation:none}@keyframes paraVideoPulse{50%{opacity:.35;transform:scale(.75)}}
+ .para-video-player__chrome{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:40px 16px 14px;background:linear-gradient(0deg,rgba(0,0,0,.94),rgba(0,0,0,.54),transparent);opacity:.25;transition:opacity .18s ease}.para-video-player:hover .para-video-player__chrome,.para-video-player:focus-within .para-video-player__chrome,.para-video-player:fullscreen .para-video-player__chrome{opacity:1}
+ .para-video-player__seek{width:100%;height:5px;margin:0 0 9px;accent-color:#a85cff;cursor:pointer}.para-video-player__controls{display:flex;align-items:center;gap:8px}.para-video-player__controls button{min-width:38px;height:36px;padding:0 9px;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:rgba(255,255,255,.075);color:#fff;font-weight:800;cursor:pointer}.para-video-player__controls button:hover,.para-video-player__controls button:focus-visible{outline:0;border-color:rgba(188,125,255,.7);background:rgba(143,69,236,.3)}
+ .para-video-player__time{display:flex;align-items:center;gap:5px;margin-left:3px;color:rgba(255,255,255,.72);font-size:.7rem;white-space:nowrap}.para-video-player__time b{color:#fff;font-weight:760}.para-video-player__time i{font-style:normal;opacity:.45}.para-video-player__spacer{flex:1}.para-video-player__volume{width:76px;accent-color:#a85cff}.para-video-player__speed{height:36px;padding:0 8px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(8,5,13,.86);color:#fff;font:750 .68rem/1 system-ui}.para-video-player:focus-visible{box-shadow:inset 0 0 0 3px rgba(189,126,255,.72)}
+-.para-video-player--viewer{min-height:0}.capture-viewer__stage .para-video-player{width:min(100%,1600px);height:100%}.capture-hero__media--video{cursor:default}.capture-hero__media--video:after{display:none}.capture-hero__media--video>.capture-hero__fullscreen{position:absolute;right:16px;top:16px;z-index:6;min-height:38px;padding:0 12px;border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(8,5,13,.72);backdrop-filter:blur(10px);color:#fff;font-weight:760}.capture-action--youtube{border-color:rgba(255,82,82,.24);background:linear-gradient(135deg,rgba(194,30,46,.24),rgba(91,24,135,.14))}.capture-action--youtube b{background:rgba(255,48,64,.15)}
++.para-video-player--viewer{min-height:0}.capture-viewer__stage .para-video-player{width:min(100%,1600px);height:100%}.capture-hero__media--video{cursor:default}.capture-hero__media--video:after{display:none}.capture-action--youtube{border-color:rgba(255,82,82,.24);background:linear-gradient(135deg,rgba(194,30,46,.24),rgba(91,24,135,.14))}.capture-action--youtube b{background:rgba(255,48,64,.15)}
+ 
+ .youtube-upload-layout{display:grid;grid-template-columns:minmax(260px,.72fr) minmax(360px,1.28fr);gap:20px;margin-top:18px}.youtube-thumbnail-panel{display:grid;align-content:start;gap:10px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:18px;background:rgba(255,255,255,.025)}.youtube-upload-field-label{color:#c8a1f7;font-size:.67rem;font-weight:850;letter-spacing:.09em;text-transform:uppercase}.youtube-thumbnail-picker{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:13px;background:#000}.youtube-thumbnail-picker video{position:absolute;width:1px;height:1px;opacity:.001;pointer-events:none}.youtube-thumbnail-picker canvas{width:100%;height:100%;display:block;object-fit:contain;background:#000}.youtube-thumbnail-picker.is-disabled{opacity:.38;filter:saturate(.4)}.youtube-thumbnail-scrubber{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px}.youtube-thumbnail-scrubber input{width:100%;accent-color:#a85cff}.youtube-thumbnail-scrubber strong{min-width:42px;color:#fff;font-size:.72rem;text-align:right}.youtube-thumbnail-toggle{display:flex!important;grid-template-columns:auto 1fr!important;align-items:center;gap:9px!important;color:#f2eaf8;font-size:.72rem}.youtube-thumbnail-toggle input{width:auto!important;accent-color:#a85cff}.youtube-thumbnail-panel>small{color:rgba(244,239,249,.46);font-size:.65rem;line-height:1.5}
+ .youtube-upload-progress,.youtube-upload-success{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(590px,calc(100% - 36px));padding:30px;border:1px solid rgba(187,128,255,.23);border-radius:28px;background:linear-gradient(150deg,rgba(24,15,38,.99),rgba(7,5,12,.99));box-shadow:0 34px 110px rgba(0,0,0,.68);text-align:center;color:#fff}.youtube-upload-progress__mark,.youtube-upload-success__mark{width:62px;height:62px;margin:0 auto 16px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#a050ff,#6f28d8);font-size:1.45rem;box-shadow:0 12px 34px rgba(99,37,197,.28)}.youtube-upload-success__mark{background:linear-gradient(135deg,#64d797,#2ca96f)}.youtube-upload-progress>span,.youtube-upload-success>span{color:#c27fff;font-size:.62rem;font-weight:900;letter-spacing:.18em}.youtube-upload-progress h2,.youtube-upload-success h2{margin:7px 0 8px;font-size:1.9rem}.youtube-upload-progress p,.youtube-upload-success p{margin:0;color:rgba(244,239,249,.62);line-height:1.55}.youtube-upload-progress__bar{height:12px;margin:24px 0 10px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}.youtube-upload-progress__bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7834e8,#c278ff);box-shadow:0 0 22px rgba(174,91,255,.5);transition:width .16s ease}.youtube-upload-progress>strong{display:block;font-size:1.45rem}.youtube-upload-progress>small{display:block;margin-top:4px;color:rgba(244,239,249,.55)}.youtube-upload-progress>em{display:block;margin-top:21px;color:rgba(244,239,249,.42);font-style:normal;font-size:.67rem}.youtube-upload-success__schedule{margin-top:12px!important;color:#d8b8ff!important}.youtube-upload-success__warning{margin-top:14px!important;padding:10px 12px;border:1px solid rgba(255,188,90,.2);border-radius:12px;background:rgba(151,91,22,.09);color:#ffdca4!important;font-size:.71rem}.youtube-creator-snapshot{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:22px 0}.youtube-creator-snapshot>div{padding:14px 10px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.035)}.youtube-creator-snapshot small,.youtube-creator-snapshot strong{display:block}.youtube-creator-snapshot small{color:rgba(244,239,249,.46);font-size:.62rem}.youtube-creator-snapshot strong{margin-top:4px;font-size:1.25rem}.youtube-upload-success footer{display:flex;justify-content:center;gap:9px;margin-top:18px}.youtube-upload-success footer .action-button{text-decoration:none}
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index c3526d6..f01dbd9 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -359,6 +359,20 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn(".para-video-player__seek", css)
+         self.assertIn(".youtube-upload-progress__bar", css)
+ 
++    def test_v46_media_playback_fix_avoids_webm_duration_seek_and_removes_overlay_fullscreen(self):
++        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
++        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
++        capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
++        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
++        self.assertNotIn("video.currentTime = 1e10", player)
++        self.assertIn("mimeType: item.mimeType", media)
++        self.assertNotIn('class="capture-hero__fullscreen"', media)
++        self.assertNotIn(".capture-hero__fullscreen", css)
++        self.assertIn("data-video-status", player)
++        self.assertIn("video.canPlayType", player)
++        self.assertIn("playback did not advance", capture)
++        self.assertIn("video.canPlayType", capture)
++
+     def test_control_center_is_a_compact_contextual_strip(self):
+         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")

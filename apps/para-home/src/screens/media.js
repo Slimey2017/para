@@ -36,7 +36,7 @@ function heroMarkup(item) {
   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
   const url = mediaUrl(item);
   const mediaStage = item.type === "clip"
-    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, durationMs: item.durationMs, className: "para-video-player--hero" })}<button type="button" class="capture-hero__fullscreen" data-action="open-media-viewer" data-capture-id="${item.id}" aria-label="Open gameplay video fullscreen">⛶ Fullscreen</button></div>`
+    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: item.mimeType || item.blob?.type || "", durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
   return `<article class="capture-hero" data-selected-capture="${item.id}">
     ${mediaStage}

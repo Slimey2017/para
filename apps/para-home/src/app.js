@@ -836,7 +836,7 @@ async function openCaptureViewer(captureId) {
   clearTimeout(overlayCloseTimer);
   if (overlay.hidden) overlayReturnFocus = focus.current;
   const media = item.type === "clip"
-    ? paraVideoPlayerMarkup({ src: captureViewerUrl, durationMs: item.durationMs, className: "para-video-player--viewer" })
+    ? paraVideoPlayerMarkup({ src: captureViewerUrl, mimeType: item.mimeType || item.blob?.type || "", durationMs: item.durationMs, className: "para-video-player--viewer" })
     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;

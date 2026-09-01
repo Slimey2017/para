@@ -173,13 +173,16 @@ function recorderMimeType() {
 async function assertPlayableVideo(blob) {
   if (!blob?.size || blob.size < 1024) throw new Error("The recording was empty.");
   const url = URL.createObjectURL(blob);
+  const video = document.createElement("video");
   try {
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    if (blob.type && video.canPlayType?.(blob.type) === "") {
+      throw new Error(`Chrome cannot play the recorded format (${blob.type}).`);
+    }
     await new Promise((resolve, reject) => {
-      const video = document.createElement("video");
       const timer = setTimeout(() => reject(new Error("The video file could not be decoded.")), 7000);
-      video.preload = "auto";
-      video.muted = true;
-      video.playsInline = true;
       video.onloadeddata = () => {
         clearTimeout(timer);
         if (!video.videoWidth || !video.videoHeight) {
@@ -192,7 +195,29 @@ async function assertPlayableVideo(blob) {
       video.src = url;
       video.load();
     });
-  } finally { URL.revokeObjectURL(url); }
+
+    // Loading one frame is not enough. A malformed MediaRecorder WebM can show
+    // a thumbnail but still fail when the user presses Play. Verify that the
+    // timeline actually advances before PARA commits the capture to IndexedDB.
+    const start = Number(video.currentTime || 0);
+    await video.play();
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("The recording decoded, but playback did not advance.")), 3000);
+      const advanced = () => {
+        if (Number(video.currentTime || 0) <= start + 0.03 && !video.ended) return;
+        clearTimeout(timer);
+        video.removeEventListener("timeupdate", advanced);
+        resolve();
+      };
+      video.addEventListener("timeupdate", advanced);
+      advanced();
+    });
+    video.pause();
+  } finally {
+    video.pause?.();
+    video.removeAttribute?.("src");
+    URL.revokeObjectURL(url);
+  }
 }
 
 export function replayStatus() {
