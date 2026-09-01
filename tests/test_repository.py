@@ -314,6 +314,24 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('OAuth access/refresh tokens are intentionally NOT stored', migration)
         self.assertIn('auth.uid()', migration)
 
+    def test_youtube_direct_upload_uses_incremental_oauth_and_resumable_upload(self):
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        privacy = (ROOT / "apps/para-home/privacy/index.html").read_text(encoding="utf-8")
+        self.assertIn('YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"', server)
+        self.assertIn('"/api/v1/integrations/google/youtube/authorize"', server)
+        self.assertIn('"/api/v1/integrations/google/youtube/upload"', server)
+        self.assertIn('uploadType": "resumable"', server)
+        self.assertIn('stream_youtube_resumable_upload', server)
+        self.assertIn('YOUTUBE_UPLOAD_SESSION_COOKIE', server)
+        self.assertIn('youtubeUploadCapture:', api)
+        self.assertIn('Authorize & Upload', app)
+        self.assertIn('data-youtube-upload-audience', app)
+        self.assertIn('resumePendingYouTubeUpload', app)
+        self.assertIn('youtube.upload', privacy)
+        self.assertIn('short-lived server memory', privacy)
+
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
         css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")

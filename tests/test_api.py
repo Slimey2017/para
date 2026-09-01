@@ -249,6 +249,18 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("https://www.googleapis.com/auth/youtube.readonly", scopes)
         self.assertNotIn("https://www.googleapis.com/auth/youtube.upload", scopes)
 
+    def test_google_oauth_upload_authorization_is_incremental(self):
+        import urllib.parse
+        with patch("server.GOOGLE_OAUTH_CLIENT_ID", "google-client"), patch("server.GOOGLE_OAUTH_CLIENT_SECRET", "google-secret"):
+            url = google_oauth_login_url("ytup_state-token", upload=True)
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        scopes = query["scope"][0].split()
+        self.assertIn("https://www.googleapis.com/auth/youtube.readonly", scopes)
+        self.assertIn("https://www.googleapis.com/auth/youtube.upload", scopes)
+        self.assertEqual(query["include_granted_scopes"], ["true"])
+        self.assertEqual(query["access_type"], ["online"])
+        self.assertIn("consent", query["prompt"][0])
+
     def test_youtube_channel_reads_authenticated_channel_and_creator_snapshot(self):
         payload = {
             "items": [{

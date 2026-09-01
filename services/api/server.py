@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+import http.client
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
@@ -79,6 +80,11 @@ GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_YOUTUBE_CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
+GOOGLE_YOUTUBE_UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_UPLOAD_SESSION_COOKIE = "para_youtube_upload_session"
+YOUTUBE_UPLOAD_SESSION_TTL_SECONDS = 45 * 60
+YOUTUBE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
 GOOGLE_OAUTH_STATE_COOKIE = "para_google_oauth_state"
 GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60
 GOOGLE_OAUTH_SCOPES = (
@@ -87,6 +93,8 @@ GOOGLE_OAUTH_SCOPES = (
     "profile",
     "https://www.googleapis.com/auth/youtube.readonly",
 )
+_youtube_upload_sessions: dict[str, dict] = {}
+_youtube_upload_lock = threading.Lock()
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
@@ -302,19 +310,22 @@ def _google_callback_url() -> str:
     return PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/api/v1/integrations/google/callback"
 
 
-def google_oauth_login_url(state: str) -> str:
-    """Build the Google OAuth consent URL for identity + YouTube read-only access."""
+def google_oauth_login_url(state: str, *, upload: bool = False) -> str:
+    """Build Google OAuth for normal linking or an incremental YouTube upload grant."""
     if not google_oauth_configured():
         return ""
+    scopes = list(GOOGLE_OAUTH_SCOPES)
+    if upload and YOUTUBE_UPLOAD_SCOPE not in scopes:
+        scopes.append(YOUTUBE_UPLOAD_SCOPE)
     params = {
         "client_id": GOOGLE_OAUTH_CLIENT_ID,
         "redirect_uri": _google_callback_url(),
         "response_type": "code",
-        "scope": " ".join(GOOGLE_OAUTH_SCOPES),
+        "scope": " ".join(scopes),
         "state": str(state),
         "include_granted_scopes": "true",
         "access_type": "online",
-        "prompt": "select_account",
+        "prompt": "consent select_account" if upload else "select_account",
     }
     return f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
@@ -357,7 +368,7 @@ def exchange_google_oauth_code(code: str) -> tuple[int, dict]:
         return 502, {"error": "google_token_missing", "message": "Google did not return a usable account session."}
     # V41 deliberately uses the access token only during this callback. It is not
     # persisted in public.external_accounts or returned to PARA Home.
-    return 200, {"access_token": access_token, "scope": str(result.get("scope") or "")}
+    return 200, {"access_token": access_token, "scope": str(result.get("scope") or ""), "expires_in": int(result.get("expires_in") or 3600)}
 
 
 def _google_bearer_json(url: str, access_token: str) -> tuple[int, dict]:
@@ -430,6 +441,131 @@ def youtube_channel(access_token: str) -> tuple[int, dict]:
         "youtube_video_count": number("videoCount"),
         "youtube_hidden_subscriber_count": bool(statistics.get("hiddenSubscriberCount", False)),
     }
+
+
+
+def _prune_youtube_upload_sessions(now: float | None = None) -> None:
+    now = float(now if now is not None else time.time())
+    expired = [key for key, value in _youtube_upload_sessions.items() if float(value.get("expires_at") or 0) <= now]
+    for key in expired:
+        _youtube_upload_sessions.pop(key, None)
+
+
+def create_youtube_upload_session(access_token: str, expires_in: int = 3600) -> str:
+    """Keep a Google upload grant server-side behind an opaque, short-lived browser cookie."""
+    token = str(access_token or "")
+    if not token:
+        return ""
+    session_id = secrets.token_urlsafe(32)
+    ttl = max(60, min(int(expires_in or 3600), YOUTUBE_UPLOAD_SESSION_TTL_SECONDS))
+    with _youtube_upload_lock:
+        _prune_youtube_upload_sessions()
+        _youtube_upload_sessions[session_id] = {"access_token": token, "expires_at": time.time() + ttl}
+    return session_id
+
+
+def youtube_upload_session_access(session_id: str) -> str:
+    session_id = str(session_id or "")
+    if not session_id:
+        return ""
+    with _youtube_upload_lock:
+        _prune_youtube_upload_sessions()
+        record = _youtube_upload_sessions.get(session_id) or {}
+        return str(record.get("access_token") or "")
+
+
+def clear_youtube_upload_session(session_id: str) -> None:
+    with _youtube_upload_lock:
+        _youtube_upload_sessions.pop(str(session_id or ""), None)
+
+
+def begin_youtube_resumable_upload(access_token: str, *, title: str, description: str, privacy_status: str, made_for_kids: bool, content_type: str, content_length: int) -> tuple[int, dict]:
+    """Create a YouTube videos.insert resumable upload session and return its HTTPS Location."""
+    privacy = str(privacy_status or "private").lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        privacy = "private"
+    metadata = {
+        "snippet": {"title": str(title or "PARA Gameplay Capture")[:100], "description": str(description or "")[:5000]},
+        "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)},
+    }
+    query = urllib.parse.urlencode({"uploadType": "resumable", "part": "snippet,status", "notifySubscribers": "false"})
+    data = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(
+        f"{GOOGLE_YOUTUBE_UPLOAD_INIT_URL}?{query}",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-Upload-Content-Type": content_type,
+            "X-Upload-Content-Length": str(content_length),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            location = str(response.headers.get("Location") or "")
+            if not location:
+                return 502, {"error": "youtube_upload_session_missing", "message": "YouTube did not return an upload session."}
+            return response.status, {"location": location}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            payload = {}
+        detail = payload.get("error") if isinstance(payload, dict) else {}
+        message = detail.get("message") if isinstance(detail, dict) else ""
+        return error.code, {"error": "youtube_upload_init_failed", "message": str(message or "YouTube rejected the upload request.")[:300]}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return 502, {"error": "youtube_unavailable", "message": "PARA could not start the YouTube upload."}
+
+
+def stream_youtube_resumable_upload(upload_url: str, source, *, content_type: str, content_length: int) -> tuple[int, dict]:
+    """Stream the browser capture through PARA to a YouTube resumable upload URL."""
+    parsed = urllib.parse.urlparse(str(upload_url or ""))
+    host = str(parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not (host == "googleapis.com" or host.endswith(".googleapis.com") or host.endswith(".googleusercontent.com")):
+        return 502, {"error": "youtube_upload_location_invalid", "message": "YouTube returned an invalid upload destination."}
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+    connection = http.client.HTTPSConnection(host, parsed.port or 443, timeout=120)
+    try:
+        connection.putrequest("PUT", path)
+        connection.putheader("Content-Type", content_type)
+        connection.putheader("Content-Length", str(content_length))
+        connection.endheaders()
+        remaining = int(content_length)
+        while remaining > 0:
+            chunk = source.read(min(1024 * 1024, remaining))
+            if not chunk:
+                return 400, {"error": "youtube_upload_incomplete", "message": "The capture upload ended before the full video was received."}
+            connection.send(chunk)
+            remaining -= len(chunk)
+        response = connection.getresponse()
+        body = response.read().decode("utf-8", "replace")
+        try:
+            payload = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            payload = {}
+        if response.status not in {200, 201}:
+            detail = payload.get("error") if isinstance(payload, dict) else {}
+            message = detail.get("message") if isinstance(detail, dict) else ""
+            return response.status, {"error": "youtube_upload_failed", "message": str(message or "YouTube could not finish the video upload.")[:300]}
+        video_id = str(payload.get("id") or "") if isinstance(payload, dict) else ""
+        actual_privacy = ((payload.get("status") or {}).get("privacyStatus") if isinstance(payload, dict) and isinstance(payload.get("status"), dict) else None)
+        return 200, {
+            "uploaded": True,
+            "provider": "youtube",
+            "video_id": video_id,
+            "privacy_status": actual_privacy,
+            "watch_url": f"https://www.youtube.com/watch?v={urllib.parse.quote(video_id, safe='')}" if video_id else "",
+        }
+    except (OSError, TimeoutError, http.client.HTTPException):
+        return 502, {"error": "youtube_upload_unavailable", "message": "The connection to YouTube was interrupted during upload."}
+    finally:
+        connection.close()
 
 
 def external_account_status(access_token: str, provider: str = "google") -> tuple[int, dict]:
@@ -3090,6 +3226,13 @@ class ParaHandler(SimpleHTTPRequestHandler):
             return [("Set-Cookie", f"{GOOGLE_OAUTH_STATE_COOKIE}=; Max-Age=0{suffix}")]
         return [("Set-Cookie", f"{GOOGLE_OAUTH_STATE_COOKIE}={state}; Max-Age={GOOGLE_OAUTH_STATE_TTL_SECONDS}{suffix}")]
 
+    def _youtube_upload_cookie_headers(self, session_id: str = "", *, clear: bool = False) -> list[tuple[str, str]]:
+        secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        suffix = "; Path=/api/v1/integrations/google/youtube; HttpOnly; SameSite=Lax" + ("; Secure" if secure else "")
+        if clear:
+            return [("Set-Cookie", f"{YOUTUBE_UPLOAD_SESSION_COOKIE}=; Max-Age=0{suffix}")]
+        return [("Set-Cookie", f"{YOUTUBE_UPLOAD_SESSION_COOKIE}={session_id}; Max-Age={YOUTUBE_UPLOAD_SESSION_TTL_SECONDS}{suffix}")]
+
     def _cookies(self) -> dict[str, str]:
         jar = SimpleCookie()
         try:
@@ -3189,45 +3332,76 @@ class ParaHandler(SimpleHTTPRequestHandler):
             headers = [*refreshed_headers, *self._google_state_cookie_headers(state)]
             self._send_redirect(google_oauth_login_url(state), extra_headers=headers)
             return
+        if request.path == "/api/v1/integrations/google/youtube/authorize":
+            status, _, _, refreshed_headers = self._authenticated_access()
+            destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/media-gallery?youtube_upload="
+            if status != 200:
+                self._send_redirect(destination_base + "signin_required", extra_headers=refreshed_headers)
+                return
+            if not google_oauth_configured():
+                self._send_redirect(destination_base + "config_required", extra_headers=refreshed_headers)
+                return
+            state = "ytup_" + secrets.token_urlsafe(32)
+            headers = [*refreshed_headers, *self._google_state_cookie_headers(state)]
+            self._send_redirect(google_oauth_login_url(state, upload=True), extra_headers=headers)
+            return
         if request.path == "/api/v1/integrations/google/callback":
             query = parse_qs(request.query, keep_blank_values=True)
             state = str(query.get("state", [""])[0] or "")
             cookie_state = self._cookies().get(GOOGLE_OAUTH_STATE_COOKIE, "")
             clear_state = self._google_state_cookie_headers(clear=True)
-            destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"
+            upload_flow = state.startswith("ytup_")
+            setup_destination = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"
+            upload_destination = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/media-gallery?youtube_upload="
+            def callback_destination(status_name: str, reason: str = "") -> str:
+                if upload_flow:
+                    return upload_destination + urllib.parse.quote(status_name, safe="") + (("&reason=" + urllib.parse.quote(reason, safe="")) if reason else "")
+                result = setup_destination + "&status=" + urllib.parse.quote(status_name, safe="")
+                return result + (("&reason=" + urllib.parse.quote(reason, safe="")) if reason else "")
             if not state or not cookie_state or not hmac.compare_digest(state, cookie_state):
-                self._send_redirect(destination_base + "&status=error&reason=state", extra_headers=clear_state)
+                self._send_redirect(callback_destination("error", "state"), extra_headers=clear_state)
                 return
             status, session, access, refreshed_headers = self._authenticated_access()
             callback_headers = [*refreshed_headers, *clear_state]
             if status != 200:
-                self._send_redirect(destination_base + "&status=signin_required", extra_headers=callback_headers)
+                self._send_redirect(callback_destination("signin_required"), extra_headers=callback_headers)
                 return
             oauth_error = str(query.get("error", [""])[0] or "")
             if oauth_error:
                 result_status = "cancelled" if oauth_error in {"access_denied", "interaction_required"} else "error"
-                self._send_redirect(destination_base + f"&status={result_status}&reason=oauth", extra_headers=callback_headers)
+                self._send_redirect(callback_destination(result_status, "oauth"), extra_headers=callback_headers)
                 return
             token_status, token_payload = exchange_google_oauth_code(str(query.get("code", [""])[0] or ""))
             if token_status != 200:
-                self._send_redirect(destination_base + "&status=error&reason=token", extra_headers=callback_headers)
+                self._send_redirect(callback_destination("error", "token"), extra_headers=callback_headers)
                 return
             google_access = str(token_payload.get("access_token") or "")
+            granted_scopes = set(str(token_payload.get("scope") or "").split())
+            if upload_flow and YOUTUBE_UPLOAD_SCOPE not in granted_scopes:
+                self._send_redirect(callback_destination("scope_required", "youtube_upload"), extra_headers=callback_headers)
+                return
             identity_status, identity = google_identity(google_access)
             if identity_status != 200:
-                self._send_redirect(destination_base + "&status=error&reason=identity", extra_headers=callback_headers)
+                self._send_redirect(callback_destination("error", "identity"), extra_headers=callback_headers)
                 return
             youtube_status, channel = youtube_channel(google_access)
             if youtube_status != 200:
-                self._send_redirect(destination_base + "&status=error&reason=youtube", extra_headers=callback_headers)
+                self._send_redirect(callback_destination("error", "youtube"), extra_headers=callback_headers)
                 return
             user_id = str(session.get("user", {}).get("id") or "")
             save_status, _ = connect_external_account(access, user_id, identity, channel)
             if save_status != 200:
-                self._send_redirect(destination_base + "&status=error&reason=storage", extra_headers=callback_headers)
+                self._send_redirect(callback_destination("error", "storage"), extra_headers=callback_headers)
+                return
+            if upload_flow:
+                upload_session = create_youtube_upload_session(google_access, int(token_payload.get("expires_in") or 3600))
+                if not upload_session:
+                    self._send_redirect(callback_destination("error", "upload_session"), extra_headers=callback_headers)
+                    return
+                self._send_redirect(callback_destination("authorized"), extra_headers=[*callback_headers, *self._youtube_upload_cookie_headers(upload_session)])
                 return
             channel_state = "found" if channel.get("found") else "none"
-            self._send_redirect(destination_base + f"&status=connected&youtube={channel_state}", extra_headers=callback_headers)
+            self._send_redirect(callback_destination("connected") + f"&youtube={channel_state}", extra_headers=callback_headers)
             return
         if request.path == "/api/v1/integrations/google/status":
             status, _, access, refreshed_headers = self._authenticated_access()
@@ -3336,6 +3510,59 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path == "/api/v1/integrations/google/youtube/upload":
+            status, _, _, refreshed_headers = self._authenticated_access()
+            clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to your PARA Account first."}, refreshed_headers)
+                return
+            upload_session_id = self._cookies().get(YOUTUBE_UPLOAD_SESSION_COOKIE, "")
+            google_access = youtube_upload_session_access(upload_session_id)
+            if not google_access:
+                self._send_json(401, {"error": "youtube_upload_authorization_required", "message": "Authorize YouTube upload access and try again."}, [*refreshed_headers, *clear_upload_cookie])
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length < 1 or length > YOUTUBE_UPLOAD_MAX_BYTES:
+                self._send_json(413, {"error": "youtube_video_size_invalid", "message": "Choose a non-empty capture smaller than 2 GB."}, refreshed_headers)
+                return
+            content_type = str(self.headers.get("Content-Type") or "video/webm").split(";", 1)[0].strip().lower()
+            if not content_type.startswith("video/"):
+                self._send_json(415, {"error": "youtube_video_required", "message": "YouTube direct upload only supports PARA video captures."}, refreshed_headers)
+                return
+            query = parse_qs(request.query, keep_blank_values=True)
+            title = str(query.get("title", [""])[0] or "").strip()
+            description = str(query.get("description", [""])[0] or "")
+            privacy = str(query.get("privacy", ["private"])[0] or "private").lower()
+            audience = str(query.get("made_for_kids", [""])[0] or "").lower()
+            if not title or len(title) > 100:
+                self._send_json(400, {"error": "youtube_title_invalid", "message": "Enter a YouTube title between 1 and 100 characters."}, refreshed_headers)
+                return
+            if len(description) > 5000:
+                self._send_json(400, {"error": "youtube_description_invalid", "message": "YouTube descriptions can be up to 5,000 characters."}, refreshed_headers)
+                return
+            if privacy not in {"private", "unlisted", "public"}:
+                self._send_json(400, {"error": "youtube_privacy_invalid", "message": "Choose Private, Unlisted, or Public."}, refreshed_headers)
+                return
+            if audience not in {"true", "false"}:
+                self._send_json(400, {"error": "youtube_audience_required", "message": "Choose whether this video is made for kids."}, refreshed_headers)
+                return
+            init_status, init_payload = begin_youtube_resumable_upload(
+                google_access, title=title, description=description, privacy_status=privacy, made_for_kids=(audience == "true"), content_type=content_type, content_length=length
+            )
+            if init_status not in {200, 201}:
+                self._send_json(init_status, init_payload, refreshed_headers)
+                return
+            upload_status, result = stream_youtube_resumable_upload(str(init_payload.get("location") or ""), self.rfile, content_type=content_type, content_length=length)
+            if upload_status == 200:
+                clear_youtube_upload_session(upload_session_id)
+                self._send_json(upload_status, result, [*refreshed_headers, *clear_upload_cookie])
+            else:
+                self._send_json(upload_status, result, refreshed_headers)
+            return
+
         if request.path == "/api/v1/backgrounds/custom":
             profile = parse_qs(request.query).get("profile", [""])[0]
             try:

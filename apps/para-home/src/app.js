@@ -17,7 +17,7 @@ import {
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
-import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
+import { captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
@@ -142,6 +142,8 @@ const IS_SUSPENDED_GAME_SHELL = window.parent !== window && SHELL_PARAMS.get("pa
 const SUSPENDED_GAME_ID = SHELL_PARAMS.get("para_suspended_game") || "";
 let pendingAccountRecovery = null;
 let pendingIntegrationNotice = null;
+let pendingYoutubeUploadReturn = null;
+const YOUTUBE_UPLOAD_DRAFT_KEY = "para.youtube.upload.draft";
 
 function captureAccountRecoveryFromUrl() {
   const raw = location.hash.replace(/^#/, "");
@@ -191,6 +193,18 @@ function captureIntegrationReturnFromUrl() {
   const returnRoute = sessionStorage.getItem("para.integration.return") === "account" ? "account" : "setup";
   sessionStorage.removeItem("para.integration.return");
   history.replaceState({}, "", `${location.pathname}${location.search}#/${returnRoute}`);
+  return true;
+}
+
+function captureYouTubeUploadReturnFromUrl() {
+  const raw = location.hash.replace(/^#\/?/, "");
+  const separator = raw.indexOf("?");
+  if (separator < 0 || raw.slice(0, separator) !== "media-gallery") return false;
+  const params = new URLSearchParams(raw.slice(separator + 1));
+  const status = params.get("youtube_upload") || "";
+  if (!status) return false;
+  pendingYoutubeUploadReturn = { status, reason: params.get("reason") || "" };
+  history.replaceState({}, "", `${location.pathname}${location.search}#/media-gallery`);
   return true;
 }
 
@@ -535,6 +549,82 @@ function openSwitcher() {
   requestAnimationFrame(()=>focus.focusFirst());
 }
 
+function escapeOverlayText(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
+
+async function openYouTubeUploadDialog(captureId) {
+  const item = await getCapture(captureId);
+  if (!item) { toast("Capture not found"); return false; }
+  if (item.type !== "clip") { toast("YouTube needs a video", "Choose a gameplay video instead of a screenshot."); return false; }
+  clearTimeout(overlayCloseTimer);
+  overlayReturnFocus = focus.current;
+  const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt || Date.now());
+  const defaultTitle = `PARA Gameplay · ${when}`.slice(0, 100);
+  overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div>
+    <section class="youtube-upload-dialog" role="dialog" aria-modal="true" aria-label="Upload gameplay to YouTube">
+      <header class="share-center__header"><div><span>PARA × YOUTUBE</span><h2>Upload gameplay</h2><small>PARA asks Google for upload permission only when you publish a capture.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close YouTube upload">×</button></header>
+      <div class="youtube-upload-form">
+        <label><span>Title</span><input type="text" maxlength="100" value="${escapeOverlayText(defaultTitle)}" data-youtube-upload-title data-autofocus="true"></label>
+        <label><span>Description</span><textarea maxlength="5000" rows="4" placeholder="Optional description" data-youtube-upload-description>Captured with PARA.</textarea></label>
+        <div class="youtube-upload-form__split">
+          <label><span>Visibility</span><select data-youtube-upload-privacy><option value="private" selected>Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label>
+          <label><span>Audience</span><select data-youtube-upload-audience><option value="" selected>Choose…</option><option value="false">No, not made for kids</option><option value="true">Yes, made for kids</option></select></label>
+        </div>
+        <p class="youtube-upload-note">Google will show a consent screen for <strong>Manage your YouTube videos</strong>. PARA does not save a Google refresh token. The upload grant is short-lived and used for this upload session.</p>
+        <p class="youtube-upload-note youtube-upload-note--warning">While PARA's YouTube API project is unverified, YouTube can force API uploads to <strong>Private</strong> even if you choose another visibility.</p>
+      </div>
+      <footer class="youtube-upload-actions"><button type="button" class="action-button action-button--ghost" data-action="close-control-center">Cancel</button><button type="button" class="action-button" data-action="youtube-upload-authorize" data-capture-id="${escapeOverlayText(item.id)}">Authorize & Upload</button></footer>
+    </section>`;
+  overlay.hidden = false;
+  overlay.classList.remove("is-closing");
+  updateControllerPrompts();
+  requestAnimationFrame(() => focus.focusFirst());
+  return true;
+}
+
+function saveYouTubeUploadDraft(captureId) {
+  const title = String(overlay.querySelector("[data-youtube-upload-title]")?.value || "").trim();
+  const description = String(overlay.querySelector("[data-youtube-upload-description]")?.value || "");
+  const privacy = String(overlay.querySelector("[data-youtube-upload-privacy]")?.value || "private");
+  const audience = String(overlay.querySelector("[data-youtube-upload-audience]")?.value || "");
+  if (!title) throw new Error("Give the YouTube video a title.");
+  if (!audience) throw new Error("Choose whether the video is made for kids.");
+  const draft = { captureId: String(captureId || ""), title, description, privacy, madeForKids: audience === "true", createdAt: Date.now() };
+  sessionStorage.setItem(YOUTUBE_UPLOAD_DRAFT_KEY, JSON.stringify(draft));
+  return draft;
+}
+
+async function resumePendingYouTubeUpload() {
+  let draft;
+  try { draft = JSON.parse(sessionStorage.getItem(YOUTUBE_UPLOAD_DRAFT_KEY) || "null"); } catch { draft = null; }
+  if (!draft?.captureId) { toast("YouTube upload expired", "Choose the capture again and restart the upload."); return false; }
+  const item = await getCapture(draft.captureId);
+  if (!item || item.type !== "clip") {
+    sessionStorage.removeItem(YOUTUBE_UPLOAD_DRAFT_KEY);
+    toast("Capture unavailable", "PARA could not find the gameplay video selected before Google sign-in.");
+    return false;
+  }
+  const mime = item.mimeType || item.blob?.type || "video/webm";
+  const extension = mime.includes("mp4") ? "mp4" : "webm";
+  const file = new File([item.blob], `PARA-${item.id}.${extension}`, { type: mime });
+  toast("Uploading to YouTube", "Keep PARA open while the gameplay video is transferred.");
+  try {
+    const result = await paraApi.youtubeUploadCapture(file, draft);
+    sessionStorage.removeItem(YOUTUBE_UPLOAD_DRAFT_KEY);
+    const privacy = result?.privacy_status ? ` · ${String(result.privacy_status)}` : "";
+    toast("Uploaded to YouTube", `${result?.video_id ? `Video ${result.video_id}` : "Your video"}${privacy}. YouTube may still be processing it.`);
+    return true;
+  } catch (error) {
+    if (error?.code === "youtube_upload_authorization_required") {
+      toast("YouTube authorization expired", "Authorize the upload again and PARA will retry with the saved capture.");
+    } else {
+      toast("YouTube upload failed", error?.message || "YouTube could not accept this gameplay video.");
+    }
+    return false;
+  }
+}
+
 function openShareCenter(target) {
   const captureId = target?.dataset?.captureId;
   if (!captureId || (!overlay.hidden && !overlay.querySelector("[data-capture-viewer]"))) return false;
@@ -545,7 +635,7 @@ function openShareCenter(target) {
     <section class="share-center" role="dialog" aria-modal="true" aria-label="Share Center">
       <header class="share-center__header"><div><span>PARA SHARE CENTER</span><h2>Share ${captureKind}</h2><small>Choose where this capture goes.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close Share Center">×</button></header>
       <div class="share-center__destinations" data-focus-zone="share-destinations">
-        <button type="button" class="share-destination share-destination--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${captureId}" data-autofocus="true"><b>▶</b><span><strong>YouTube</strong><small>Upload video or Short</small></span><em>Connect</em></button>
+        <button type="button" class="share-destination share-destination--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${captureId}" data-autofocus="true" ${captureKind === "Gameplay clip" ? "" : 'disabled aria-disabled="true"'}><b>▶</b><span><strong>YouTube</strong><small>${captureKind === "Gameplay clip" ? "Upload video or Short" : "Video captures only"}</small></span><em>${captureKind === "Gameplay clip" ? "Upload" : "Video"}</em></button>
         <button type="button" class="share-destination share-destination--facebook" data-action="share-capture" data-share-target="facebook" data-capture-id="${captureId}"><b>f</b><span><strong>Facebook</strong><small>Post to your connected account</small></span><em>Connect</em></button>
         <button type="button" class="share-destination share-destination--chat" data-action="share-capture" data-share-target="chat" data-capture-id="${captureId}"><b>◌</b><span><strong>PARA Chat</strong><small>Send to a friend or group</small></span><em>PARA</em></button>
         <button type="button" class="share-destination share-destination--phone" data-action="share-capture" data-share-target="phone" data-capture-id="${captureId}"><b>▯</b><span><strong>Send to Phone</strong><small>Export for nearby or companion transfer</small></span><em>Export</em></button>
@@ -1343,8 +1433,12 @@ async function handleAction(action, target) {
     case "share-capture":
       try {
         const destination = target.dataset.shareTarget || "system";
-        if (["youtube", "facebook"].includes(destination)) {
-          toast(`${destination === "youtube" ? "YouTube" : "Facebook"} account needed`, "Direct publishing connects through Settings → Connected Apps in native PARA.");
+        if (destination === "youtube") {
+          await openYouTubeUploadDialog(target.dataset.captureId);
+          break;
+        }
+        if (destination === "facebook") {
+          toast("Facebook account needed", "Direct Facebook publishing is not connected yet.");
           break;
         }
         if (destination === "chat") {
@@ -1355,6 +1449,16 @@ async function handleAction(action, target) {
         closeControlCenter(false);
         toast(destination === "phone" ? "Send to Phone" : destination === "files" ? "Saved to Files" : "Share", result);
       } catch (error) { toast("Couldn’t share capture", error?.message || "Sharing is unavailable."); }
+      break;
+    case "youtube-upload-authorize":
+      try {
+        saveYouTubeUploadDraft(target.dataset.captureId);
+        target.disabled = true;
+        target.textContent = "Opening Google…";
+        window.location.assign("/api/v1/integrations/google/youtube/authorize");
+      } catch (error) {
+        toast("YouTube upload needs one more thing", error?.message || "Check the upload details.");
+      }
       break;
     case "media-toggle":
       await mediaSessionAction("toggle");
@@ -1926,6 +2030,7 @@ window.addEventListener("keydown", (event) => {
 
 captureAccountRecoveryFromUrl();
 captureIntegrationReturnFromUrl();
+captureYouTubeUploadReturnFromUrl();
 
 if (new URLSearchParams(location.search).get("reset") === "1") {
   resetState();
@@ -1946,6 +2051,23 @@ async function start() {
   if (pendingIntegrationNotice) {
     toast(pendingIntegrationNotice.title, pendingIntegrationNotice.message);
     pendingIntegrationNotice = null;
+  }
+  if (pendingYoutubeUploadReturn) {
+    const uploadReturn = pendingYoutubeUploadReturn;
+    pendingYoutubeUploadReturn = null;
+    if (uploadReturn.status === "authorized") {
+      window.setTimeout(() => void resumePendingYouTubeUpload(), 120);
+    } else if (uploadReturn.status === "cancelled") {
+      toast("YouTube upload cancelled", "Nothing was uploaded.");
+    } else if (uploadReturn.status === "signin_required") {
+      toast("Sign in to PARA first", "A PARA Account is required before uploading to YouTube.");
+    } else if (uploadReturn.status === "config_required") {
+      toast("Google setup required", "Add PARA's Google OAuth client credentials on Render.");
+    } else if (uploadReturn.status === "scope_required") {
+      toast("YouTube upload permission missing", "Add the youtube.upload scope in Google Auth Platform → Data Access, then try again.");
+    } else {
+      toast("YouTube authorization failed", "Google could not authorize this upload. Try again.");
+    }
   }
 }
 

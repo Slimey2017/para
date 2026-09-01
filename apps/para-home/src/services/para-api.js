@@ -31,6 +31,28 @@ export const paraApi = {
   steamDisconnect: () => request("/api/v1/integrations/steam/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
   googleStatus: () => request("/api/v1/integrations/google/status", { signal: AbortSignal.timeout(12_000) }),
   googleDisconnect: () => request("/api/v1/integrations/google/disconnect", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(12_000) }),
+  youtubeUploadCapture: async (file, { title, description = "", privacy = "private", madeForKids } = {}) => {
+    const query = new URLSearchParams({
+      title: String(title || ""),
+      description: String(description || ""),
+      privacy: String(privacy || "private"),
+      made_for_kids: madeForKids ? "true" : "false",
+    });
+    const response = await fetch(`/api/v1/integrations/google/youtube/upload?${query}`, {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": file.type || "video/webm" },
+      body: file,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.message || payload.error || `YouTube upload failed: ${response.status}`);
+      error.code = payload.error || "youtube_upload_failed";
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
+  },
   applications: () => request("/api/v1/apps"),
   storeCatalog: () => request("/api/v1/store/catalog"),
   storeProduct: (id) => request(`/api/v1/store/product?id=${encodeURIComponent(id)}`),
