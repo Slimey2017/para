@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -117,6 +117,67 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(payload["project_id"], definition["project_id"])
         self.assertEqual(payload["items"][0]["achievement_key"], "first_win")
         self.assertIn("/api/v1/store/asset?path=", payload["items"][0]["icon_url"])
+
+    def test_online_achievement_progress_maps_cloud_rows_for_para_home(self):
+        row = {
+            "progress_value": 2,
+            "unlocked_at": "2026-09-01T18:00:00Z",
+            "updated_at": "2026-09-01T18:01:00Z",
+            "achievement_definitions": {
+                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "achievement_key": "first_win",
+                "name": "First Victory",
+                "description": "Win once",
+                "points": 25,
+                "kind": "PROGRESS",
+                "target_value": 2,
+                "hidden": False,
+                "icon_path": "developers/user/first-win.png",
+                "status": "PUBLISHED",
+            },
+        }
+        with patch("server._supabase_account_rest_request", return_value=(200, [row])) as request:
+            status, payload = achievement_progress_for_user("access-token")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["online"])
+        self.assertEqual(payload["items"][0]["progress"], 2)
+        self.assertEqual(payload["items"][0]["sync_state"], "cloud")
+        self.assertIn("/api/v1/store/asset?path=", payload["items"][0]["icon_url"])
+        called_path = request.call_args.args[0]
+        self.assertIn("/rest/v1/player_achievement_progress?", called_path)
+        self.assertEqual(request.call_args.kwargs["bearer"], "access-token")
+
+    def test_online_achievement_write_uses_service_role_only_rpc(self):
+        cloud = {
+            "achievement_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "achievement_key": "first_win",
+            "progress": 1,
+            "target": 1,
+            "unlocked": True,
+            "newly_unlocked": True,
+            "icon_path": "developers/user/first-win.png",
+        }
+        with patch("server._supabase_service_rest_request", return_value=(200, cloud)) as request:
+            status, payload = update_online_achievement(
+                "22222222-2222-2222-2222-222222222222",
+                "11111111-1111-1111-1111-111111111111",
+                "first_win",
+                1,
+            )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["online"])
+        self.assertEqual(payload["achievement"]["sync_state"], "cloud")
+        request.assert_called_once_with(
+            "/rest/v1/rpc/record_player_achievement_progress",
+            payload={
+                "target_user_id": "22222222-2222-2222-2222-222222222222",
+                "target_project_id": "11111111-1111-1111-1111-111111111111",
+                "target_achievement_key": "first_win",
+                "target_progress_value": 1,
+            },
+        )
 
     def test_para_account_signup_validates_console_credentials(self):
         status, payload, tokens = auth_sign_up("not-an-email", "short", "Player")

@@ -2,8 +2,8 @@ import { Router } from "./router.js";
 import { FocusManager } from "./focus-manager.js";
 import { GamepadNavigation, keyboardController } from "./gamepad.js";
 import {
-  addProfile, applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getState, postStartupDestination,
-  replaceProfilePreferences, resetState, setProfilePreferences, setSetupAccountChoice,
+  addProfile, applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getProfileRuntime, getState, postStartupDestination,
+  replaceProfilePreferences, resetState, setProfilePreferences, setProfileRuntime, setSetupAccountChoice,
   setSetupChoice, setState, startupDestination, syncStateFromStorage,
 } from "./state.js";
 import {
@@ -991,6 +991,55 @@ async function hydrateProfile(profile) {
   }
 }
 
+function cloudAchievementTime(value) {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function hydrateCloudAchievements(profile) {
+  try {
+    const payload = await paraApi.achievementProgress();
+    const cloudItems = Array.isArray(payload?.items) ? payload.items : [];
+    if (!cloudItems.length) return;
+    const runtime = getProfileRuntime(profile);
+    const localItems = Array.isArray(runtime.achievements) ? runtime.achievements : [];
+    const merged = new Map(localItems.map((item) => [item.id, item]));
+    for (const cloud of cloudItems) {
+      const projectId = String(cloud.project_id || "");
+      const key = String(cloud.achievement_key || "");
+      if (!projectId || !key) continue;
+      const id = `achievement:${projectId}:${key}`;
+      const local = merged.get(id) || {};
+      const unlockedAt = cloudAchievementTime(cloud.unlocked_at);
+      const updatedAt = cloudAchievementTime(cloud.updated_at) || Date.now();
+      const localProgress = Math.max(0, Number(local.progress || 0));
+      const cloudProgress = Math.max(0, Number(cloud.progress || 0));
+      merged.set(id, {
+        ...local,
+        id,
+        achievementId: cloud.achievement_id || local.achievementId,
+        projectId,
+        key,
+        name: cloud.name || local.name || key,
+        description: cloud.description || local.description || "",
+        points: Number(cloud.points || 0),
+        kind: cloud.kind || local.kind || "BINARY",
+        target: Math.max(1, Number(cloud.target || local.target || 1)),
+        hidden: Boolean(cloud.hidden),
+        iconUrl: cloud.icon_url || local.iconUrl || "",
+        progress: Math.max(localProgress, cloudProgress),
+        unlockedAt: local.unlockedAt || unlockedAt,
+        updatedAt: Math.max(Number(local.updatedAt || 0), updatedAt),
+        syncState: cloudProgress >= localProgress ? "cloud" : "pending",
+      });
+    }
+    setProfileRuntime({ achievements: [...merged.values()] }, profile);
+  } catch {
+    // Offline/local achievements remain usable and can be synchronized later.
+  }
+}
+
 function schedulePreferenceSave(profileOverride = "") {
   clearTimeout(preferenceTimer);
   preferenceTimer = setTimeout(async () => {
@@ -1001,7 +1050,7 @@ function schedulePreferenceSave(profileOverride = "") {
 
 async function loginToHome(profile, target) {
   setState({ loggedIn: true, activeProfile: profile });
-  await hydrateProfile(profile);
+  await Promise.allSettled([hydrateProfile(profile), hydrateCloudAchievements(profile)]);
   resetIdleSleep();
   navigate("home", { replace: true }, target);
 }
@@ -1079,7 +1128,7 @@ async function finishCloudAccountAuth(result, target) {
   if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
   markParaAccountConnected(user);
   setState({ activeProfile: name, setupChoices: { accountMode: "online", accountEmail: user.email || "", profileName: name } });
-  await hydrateProfile(name);
+  await Promise.allSettled([hydrateProfile(name), hydrateCloudAchievements(name)]);
   toast("PARA Account connected", name);
   navigate(accountReturnRoute(), { replace: true }, target);
   return true;
@@ -1094,6 +1143,7 @@ async function syncCloudAccountSession() {
       if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
       markParaAccountConnected(user);
       setState({ activeProfile: name, setupChoices: { accountMode: "online", accountEmail: user.email || "", profileName: name } });
+      await hydrateCloudAchievements(name);
       return session;
     }
   } catch { /* offline/local PARA remains usable */ }

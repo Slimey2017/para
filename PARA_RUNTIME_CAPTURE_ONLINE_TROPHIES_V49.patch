@@ -1,0 +1,988 @@
+diff --git a/services/api/server.py b/services/api/server.py
+index 3a3af05..c905dcf 100644
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -69,6 +69,7 @@ EMAIL_VERIFICATION_CLIENT_MAX_SENDS = 5
+ PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"
+ PARA_ACCOUNT_SUPABASE_URL = f"https://{PARA_ACCOUNT_SUPABASE_PROJECT_REF}.supabase.co"
+ PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY"
++PARA_SUPABASE_SERVICE_ROLE_KEY = _env_config("PARA_SUPABASE_SERVICE_ROLE_KEY", "")
+ PARA_ACCOUNT_PUBLIC_URL = "https://para-wjvx.onrender.com/"
+ STEAM_OPENID_DISCOVERY_URL = "https://steamcommunity.com/openid/"
+ STEAM_OPENID_LOGIN_URL = "https://steamcommunity.com/openid/login"
+@@ -176,6 +177,139 @@ def _supabase_account_rest_request(
+         return 502, {"error": "account_storage_unavailable", "message": "PARA could not reach connected account storage."}
+ 
+ 
++
++def _supabase_service_rest_request(
++    path: str,
++    *,
++    method: str = "POST",
++    payload: object | None = None,
++    prefer: str = "",
++) -> tuple[int, object]:
++    """Call a service-role-only PostgREST RPC from PARA's trusted backend."""
++    key = PARA_SUPABASE_SERVICE_ROLE_KEY
++    if not key:
++        return 503, {
++            "error": "cloud_write_not_configured",
++            "message": "PARA Cloud writes are not configured on this server yet.",
++        }
++    headers = {
++        "apikey": key,
++        "Authorization": f"Bearer {key}",
++        "Accept": "application/json",
++    }
++    if prefer:
++        headers["Prefer"] = prefer
++    data = None
++    if payload is not None:
++        headers["Content-Type"] = "application/json"
++        data = json.dumps(payload).encode("utf-8")
++    request = urllib.request.Request(f"{PARA_ACCOUNT_SUPABASE_URL}{path}", data=data, headers=headers, method=method)
++    try:
++        with urllib.request.urlopen(request, timeout=12) as response:
++            body = response.read().decode("utf-8")
++            if not body:
++                return response.status, {}
++            try:
++                return response.status, json.loads(body)
++            except json.JSONDecodeError:
++                return response.status, {"raw": body[:240]}
++    except urllib.error.HTTPError as error:
++        body = error.read().decode("utf-8", "replace")
++        try:
++            parsed = json.loads(body)
++        except json.JSONDecodeError:
++            parsed = {"message": "PARA Cloud write failed."}
++        if not isinstance(parsed, (dict, list)):
++            parsed = {"message": "PARA Cloud write failed."}
++        return error.code, parsed
++    except (urllib.error.URLError, TimeoutError):
++        return 502, {"error": "cloud_storage_unavailable", "message": "PARA could not reach cloud storage."}
++
++
++def achievement_progress_for_user(access_token: str) -> tuple[int, dict]:
++    """Read the signed-in player's achievement progress from Supabase."""
++    select = (
++        "progress_value,unlocked_at,updated_at,"
++        "achievement_definitions!inner("
++        "id,project_id,achievement_key,name,description,points,kind,target_value,hidden,icon_path,status)"
++    )
++    path = "/rest/v1/player_achievement_progress?" + urllib.parse.urlencode({
++        "select": select,
++        "order": "updated_at.desc",
++    })
++    status, payload = _supabase_account_rest_request(path, bearer=access_token)
++    if status >= 400:
++        return status, {
++            "error": "achievement_progress_unavailable",
++            "message": "PARA could not load online achievement progress.",
++        }
++    rows = payload if isinstance(payload, list) else []
++    items = []
++    for row in rows:
++        if not isinstance(row, dict):
++            continue
++        definition = row.get("achievement_definitions")
++        if not isinstance(definition, dict):
++            continue
++        icon_path = str(definition.get("icon_path") or "")
++        items.append({
++            "achievement_id": definition.get("id"),
++            "project_id": definition.get("project_id"),
++            "achievement_key": definition.get("achievement_key"),
++            "name": definition.get("name"),
++            "description": definition.get("description") or "",
++            "points": int(definition.get("points") or 0),
++            "kind": definition.get("kind") or "BINARY",
++            "target": max(1, int(definition.get("target_value") or 1)),
++            "hidden": bool(definition.get("hidden")),
++            "icon_url": f"/api/v1/store/asset?path={urllib.parse.quote(icon_path, safe='')}" if icon_path else None,
++            "progress": max(0, int(row.get("progress_value") or 0)),
++            "unlocked_at": row.get("unlocked_at"),
++            "updated_at": row.get("updated_at"),
++            "sync_state": "cloud",
++        })
++    return 200, {"online": True, "items": items}
++
++
++def update_online_achievement(user_id: str, project_id: str, achievement_key: str, progress_value: object) -> tuple[int, dict]:
++    """Award/progress an achievement through a service-role-only trusted RPC."""
++    try:
++        parsed_project = str(project_id or "").strip()
++        parsed_key = str(achievement_key or "").strip()
++        parsed_progress = int(progress_value)
++    except (TypeError, ValueError):
++        return 400, {"error": "invalid_achievement_progress", "message": "Achievement progress must be a whole number."}
++    uuid_pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
++    if not re.fullmatch(uuid_pattern, str(user_id or "")):
++        return 401, {"error": "not_signed_in", "message": "Sign in to save achievements online."}
++    if not re.fullmatch(uuid_pattern, parsed_project):
++        return 400, {"error": "invalid_project", "message": "This game does not have a valid PARA project id."}
++    if not parsed_key or len(parsed_key) > 120 or parsed_progress < 0:
++        return 400, {"error": "invalid_achievement_progress", "message": "Achievement progress is invalid."}
++
++    status, payload = _supabase_service_rest_request(
++        "/rest/v1/rpc/record_player_achievement_progress",
++        payload={
++            "target_user_id": str(user_id),
++            "target_project_id": parsed_project,
++            "target_achievement_key": parsed_key,
++            "target_progress_value": parsed_progress,
++        },
++    )
++    if status >= 400:
++        message = "PARA could not save this achievement online."
++        if isinstance(payload, dict) and payload.get("message"):
++            message = str(payload.get("message"))
++        return status, {"error": "achievement_cloud_write_failed", "message": message}
++
++    result = payload if isinstance(payload, dict) else {}
++    icon_path = str(result.get("icon_path") or "")
++    if icon_path:
++        result["icon_url"] = f"/api/v1/store/asset?path={urllib.parse.quote(icon_path, safe='')}"
++    result["sync_state"] = "cloud"
++    return 200, {"online": True, "achievement": result}
++
++
+ def _steam_callback_url(state: str) -> str:
+     base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/")
+     return f"{base}/api/v1/integrations/steam/callback?state={urllib.parse.quote(str(state), safe='')}"
+@@ -1739,7 +1873,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     try { localStorage.setItem(HOME_STATE_KEY, JSON.stringify(state)); } catch (_) {}
+   }
+ 
+-  function saveLocalAchievement(definition, requestedProgress) {
++  function saveLocalAchievement(definition, requestedProgress, syncState = 'local', cloudRecord = null) {
+     const state = readHomeState();
+     const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
+     const profileRuntime = { ...(state.profileRuntime || {}) };
+@@ -1755,6 +1889,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     const requested = definition.kind === 'BINARY' ? 1 : Math.max(0, Number(requestedProgress || 0));
+     const progress = Math.min(target, Math.max(previousProgress, requested));
+     const unlocked = progress >= target;
++    const cloudUnlockedAt = cloudRecord?.unlocked_at ? Date.parse(String(cloudRecord.unlocked_at)) : NaN;
++    const authoritativeUnlockedAt = Number.isFinite(cloudUnlockedAt) ? cloudUnlockedAt : null;
+     const newlyUnlocked = unlocked && !existing.unlockedAt;
+     const now = Date.now();
+     const record = {
+@@ -1772,9 +1908,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       hidden: Boolean(definition.hidden),
+       iconUrl: definition.icon_url || '',
+       progress,
+-      unlockedAt: existing.unlockedAt || (unlocked ? now : null),
++      unlockedAt: existing.unlockedAt || authoritativeUnlockedAt || (unlocked ? now : null),
+       updatedAt: now,
+-      syncState: 'local'
++      syncState
+     };
+     runtime.achievements = [record, ...(runtime.achievements || []).filter((item) => item.id !== achievementId)];
+     if (newlyUnlocked) {
+@@ -1798,7 +1934,29 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     const definitions = await loadAchievementDefinitions();
+     const definition = definitions.find((item) => item.achievement_key === achievementKey && item.status === 'PUBLISHED');
+     if (!definition) throw new Error(`Achievement “${achievementKey}” is not published for this game.`);
+-    return saveLocalAchievement(definition, value);
++
++    const requested = definition.kind === 'BINARY' ? 1 : Math.max(0, Number(value || 0));
++    const local = saveLocalAchievement(definition, requested, PROJECT_ID ? 'pending' : 'local');
++    if (!PROJECT_ID) return local;
++
++    try {
++      const endpoint = definition.kind === 'BINARY' ? '/api/v1/achievements/unlock' : '/api/v1/achievements/progress';
++      const response = await fetch(endpoint, {
++        method: 'POST',
++        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
++        body: JSON.stringify({ project_id: PROJECT_ID, achievement_key: achievementKey, progress: requested })
++      });
++      const payload = await response.json().catch(() => ({}));
++      if (!response.ok) {
++        const fallbackState = response.status === 401 ? 'local' : 'pending';
++        return saveLocalAchievement(definition, local.progress, fallbackState);
++      }
++      const cloud = payload?.achievement || {};
++      const record = saveLocalAchievement(definition, Number(cloud.progress ?? requested), 'cloud', cloud);
++      return { ...record, online: true };
++    } catch (_) {
++      return local;
++    }
+   }
+ 
+   const PARA_ACHIEVEMENT_QUEUE_KEY = '__PARA_ACHIEVEMENT_QUEUE__';
+@@ -2283,7 +2441,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     const item = {
+       id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+       type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
+-      createdAt: Date.now(), source: 'PARA', captureVersion: 3
++      createdAt: Date.now(), source: 'PARA', captureVersion: 4,
++      ...(type === 'clip' ? { playbackVerified: true, recorderMimeType: blob.type || 'video/webm' } : {})
+     };
+     await new Promise((resolve, reject) => {
+       const tx = db.transaction(DB_STORE, 'readwrite');
+@@ -2546,45 +2705,218 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     }
+   }
+ 
+-  function recorderMimeType(hasAudio = false) {
+-    const probe = document.createElement('video');
++  const RUNTIME_CAPTURE_PROBE_MS = 1300;
++  const RUNTIME_CAPTURE_PROBE_SLICE_MS = 250;
++  const RUNTIME_CAPTURE_SLICE_MS = 1000;
++  const RUNTIME_CAPTURE_DECODE_TIMEOUT_MS = 7000;
++
++  function runtimeRecorderMimeCandidates(hasAudio = false) {
++    if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable in this browser.');
+     const types = hasAudio
+       ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
+       : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
+-    return types.find((type) => MediaRecorder.isTypeSupported?.(type) && probe.canPlayType(type) !== '') || '';
++    const supported = types.filter((type) => MediaRecorder.isTypeSupported?.(type));
++    return supported.length ? supported : [''];
++  }
++
++  function runtimeRecorderOptions(mimeType = '', videoBitsPerSecond = 8_000_000) {
++    return mimeType ? { mimeType, videoBitsPerSecond } : { videoBitsPerSecond };
++  }
++
++  function runtimeRecorderLabel(mimeType = '') {
++    return mimeType || 'browser default WebM';
++  }
++
++  function runtimeMediaDecodeMessage(video) {
++    const code = Number(video?.error?.code || 0);
++    if (code === 1) return 'Chromium interrupted capture playback.';
++    if (code === 2) return 'Chromium could not read this capture media data.';
++    if (code === 3) return "Chromium rejected this capture's video stream.";
++    if (code === 4) return "Chromium does not support this capture's encoded video stream.";
++    return 'Chromium could not decode the recorded video.';
++  }
++
++  function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = RUNTIME_CAPTURE_SLICE_MS, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
++    const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, videoBitsPerSecond));
++    const session = { recorder, mimeType: recorder.mimeType || mimeType || 'video/webm', chunks: [], error: null };
++    recorder.addEventListener('dataavailable', (event) => {
++      if (!event.data?.size) return;
++      if (storeChunks) session.chunks.push(event.data);
++      onChunk?.(event.data);
++    });
++    recorder.addEventListener('error', () => {
++      session.error = recorder.error || new Error('Gameplay recording failed.');
++    });
++    recorder.start(timesliceMs);
++    return session;
++  }
++
++  async function finalizeRuntimeRecorderSession(session) {
++    const recorder = session?.recorder;
++    if (!recorder) throw new Error('PARA could not create a gameplay recording session.');
++    if (recorder.state !== 'inactive') {
++      await new Promise((resolve, reject) => {
++        const onStop = () => { cleanup(); resolve(); };
++        const onError = () => { const error = session.error || recorder.error || new Error('Gameplay encoder failed.'); cleanup(); reject(error); };
++        const cleanup = () => {
++          recorder.removeEventListener('stop', onStop);
++          recorder.removeEventListener('error', onError);
++        };
++        recorder.addEventListener('stop', onStop);
++        recorder.addEventListener('error', onError);
++        try {
++          recorder.requestData();
++          recorder.stop();
++        } catch (error) {
++          cleanup();
++          reject(error);
++        }
++      });
++    }
++    if (session.error) throw session.error;
++    return new Blob([...session.chunks], { type: recorder.mimeType || session.mimeType || 'video/webm' });
+   }
+ 
+   async function verifyRecordedBlob(blob) {
++    const format = String(arguments[1] || '');
+     if (!blob?.size || blob.size < 1024) throw new Error('PARA did not receive enough gameplay video data.');
+-    const url = URL.createObjectURL(blob);
++    // Use a generic WebM Content-Type for local validation. The original bytes
++    // and exact recorder MIME are preserved when the capture is saved/uploaded.
++    const playbackBlob = String(blob.type || '').toLowerCase().includes('webm') && blob.type !== 'video/webm'
++      ? new Blob([blob], { type: 'video/webm' })
++      : blob;
++    const url = URL.createObjectURL(playbackBlob);
++    const video = document.createElement('video');
++    let frameTimer = 0;
+     try {
++      video.preload = 'auto';
++      video.muted = true;
++      video.playsInline = true;
+       await new Promise((resolve, reject) => {
+-        const video = document.createElement('video');
+-        const timer = setTimeout(() => reject(new Error('The gameplay recording could not be decoded.')), 7000);
+-        const done = () => {
++        let timer = 0;
++        const cleanup = () => {
+           clearTimeout(timer);
++          video.removeEventListener('loadeddata', onLoaded);
++          video.removeEventListener('error', onError);
++        };
++        const onLoaded = () => {
++          cleanup();
+           if (!video.videoWidth || !video.videoHeight) {
+             reject(new Error('The gameplay recording contains no visible video frames.'));
+             return;
+           }
+           resolve();
+         };
+-        video.preload = 'auto';
+-        video.muted = true;
+-        video.playsInline = true;
+-        video.addEventListener('loadeddata', done, { once: true });
+-        video.addEventListener('error', () => {
+-          clearTimeout(timer);
+-          reject(new Error('Chrome could not decode the gameplay recording.'));
+-        }, { once: true });
++        const onError = () => {
++          const message = runtimeMediaDecodeMessage(video);
++          cleanup();
++          reject(new Error(`${message}${format ? ` Recorder format: ${format}.` : ''}`));
++        };
++        video.addEventListener('loadeddata', onLoaded);
++        video.addEventListener('error', onError);
++        timer = setTimeout(() => {
++          cleanup();
++          reject(new Error(`The gameplay recording could not be decoded.${format ? ` Recorder format: ${format}.` : ''}`));
++        }, RUNTIME_CAPTURE_DECODE_TIMEOUT_MS);
+         video.src = url;
+         video.load();
+       });
++
++      const startTime = Number(video.currentTime || 0);
++      let decodedFrame = video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
++      let framePromise = Promise.resolve();
++      if (typeof video.requestVideoFrameCallback === 'function') {
++        framePromise = new Promise((resolve) => {
++          frameTimer = setTimeout(resolve, 1200);
++          video.requestVideoFrameCallback(() => {
++            decodedFrame = true;
++            clearTimeout(frameTimer);
++            resolve();
++          });
++        });
++      }
++      try { await video.play(); }
++      catch (_) { throw new Error(`${runtimeMediaDecodeMessage(video)}${format ? ` Recorder format: ${format}.` : ''}`); }
++
++      const timelinePromise = new Promise((resolve, reject) => {
++        const started = performance.now();
++        const check = () => {
++          if (video.error) {
++            reject(new Error(`${runtimeMediaDecodeMessage(video)}${format ? ` Recorder format: ${format}.` : ''}`));
++            return;
++          }
++          if (Number(video.currentTime || 0) > startTime + .04) { resolve(); return; }
++          if (video.ended) { reject(new Error('The gameplay recording ended before playback could advance.')); return; }
++          if (performance.now() - started > 3500) { reject(new Error('The gameplay recording decoded, but playback did not advance.')); return; }
++          setTimeout(check, 50);
++        };
++        check();
++      });
++      await Promise.all([framePromise, timelinePromise]);
++      const decodedFrames = Number(video.getVideoPlaybackQuality?.().totalVideoFrames || 0);
++      if (!decodedFrame && decodedFrames <= 0) throw new Error('Chromium did not decode a video frame from this gameplay recording.');
++      video.pause();
++      return { width: video.videoWidth, height: video.videoHeight, duration: Number(video.duration || 0) };
+     } finally {
++      clearTimeout(frameTimer);
++      video.pause?.();
++      video.removeAttribute?.('src');
++      video.load?.();
+       URL.revokeObjectURL(url);
+     }
+   }
+ 
++  async function probeRuntimeRecorderMime(stream, mimeType) {
++    const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: RUNTIME_CAPTURE_PROBE_SLICE_MS, videoBitsPerSecond: 4_000_000 });
++    try {
++      await new Promise((resolve) => setTimeout(resolve, RUNTIME_CAPTURE_PROBE_MS));
++      const blob = await finalizeRuntimeRecorderSession(session);
++      await verifyRecordedBlob(blob, runtimeRecorderLabel(session.mimeType || mimeType));
++      return session.mimeType || mimeType || 'video/webm';
++    } catch (error) {
++      if (session.recorder.state !== 'inactive') {
++        try { session.recorder.stop(); } catch (_) {}
++      }
++      throw error;
++    }
++  }
++
++  async function selectRuntimeRecorderMime(stream) {
++    const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
++    const failures = [];
++    for (const candidate of runtimeRecorderMimeCandidates(hasAudio)) {
++      try { return await probeRuntimeRecorderMime(stream, candidate); }
++      catch (error) { failures.push(`${runtimeRecorderLabel(candidate)}: ${error?.message || 'failed'}`); }
++    }
++    throw new Error(`PARA could not find a Chromium-playable gameplay encoder. ${failures.join(' | ')}`.trim());
++  }
++
++  async function requestVerifiedGameRecording(audio = false) {
++    let direct = null;
++    let directError = null;
++    try {
++      direct = await requestCompositedGameStream(audio);
++      const mimeType = await selectRuntimeRecorderMime(direct);
++      return { stream: direct, mimeType, fallback: false };
++    } catch (error) {
++      directError = error;
++      if (direct) stopStream(direct);
++    }
++
++    // The compositor is permission-free but some Chromium builds can produce a
++    // canvas stream that MediaRecorder accepts and Chromium later cannot decode.
++    // In that case use browser self-tab capture, which supplies a browser-native
++    // video track and is considerably more reliable for recording.
++    const fallback = await requestSessionSelfCapture(audio);
++    try {
++      const mimeType = await selectRuntimeRecorderMime(fallback);
++      fallback.__paraFallbackReason = directError?.message || 'The direct gameplay encoder failed validation.';
++      return { stream: fallback, mimeType, fallback: true };
++    } catch (fallbackError) {
++      throw new Error(`PARA could not create a playable gameplay stream. Direct capture: ${directError?.message || 'failed'}. Self-tab capture: ${fallbackError?.message || 'failed'}.`);
++    }
++  }
++
+   const host = document.createElement('div');
+   host.id = 'para-game-system-shell';
+   host.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+@@ -2878,23 +3210,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     closeShell();
+     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+     try {
+-      const stream = await requestGameStream(true);
+-      const hasAudio = stream.getAudioTracks().length > 0;
+-      const type = recorderMimeType(hasAudio);
+-      const options = type ? { mimeType: type, videoBitsPerSecond: 8_000_000 } : { videoBitsPerSecond: 8_000_000 };
+-      const recorder = new MediaRecorder(stream, options);
+-      const chunks = [];
++      const prepared = await requestVerifiedGameRecording(true);
++      const { stream, mimeType } = prepared;
++      const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: RUNTIME_CAPTURE_SLICE_MS, videoBitsPerSecond: 8_000_000 });
+       const startedAt = Date.now();
+-      recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+-      recorder.onerror = () => toast('PARA recording encountered an encoder error');
+-      recorder.start(1000);
++      session.recorder.addEventListener('error', () => toast('PARA recording encountered an encoder error'));
+       manualRecording = {
+-        stream, recorder, chunks, startedAt, stopping: false,
++        stream, recorder: session.recorder, session, startedAt, stopping: false, mimeType,
+         width: stream.__paraCaptureWidth || 0,
+         height: stream.__paraCaptureHeight || 0,
+         captureMode: stream.__paraCaptureMode || ''
+       };
+       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
++      if (prepared.fallback) toast('Recording started · browser-safe capture');
+     } catch (error) {
+       toast(error?.message || 'Recording could not start');
+     }
+@@ -2905,19 +3233,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     if (!active || active.stopping) return;
+     active.stopping = true;
+     try {
+-      if (active.recorder.state !== 'inactive') {
+-        const stopped = new Promise((resolve, reject) => {
+-          active.recorder.addEventListener('stop', resolve, { once: true });
+-          active.recorder.addEventListener('error', () => reject(active.recorder.error || new Error('Video encoder failed.')), { once: true });
+-        });
+-        try { active.recorder.requestData(); } catch (_) {}
+-        active.recorder.stop();
+-        await stopped;
+-      }
+-      // Let Chromium deliver the final dataavailable event before assembling.
+-      await new Promise((resolve) => setTimeout(resolve, 150));
+-      const blob = new Blob(active.chunks, { type: active.recorder.mimeType || 'video/webm' });
+-      await verifyRecordedBlob(blob);
++      const blob = await finalizeRuntimeRecorderSession(active.session);
++      await verifyRecordedBlob(blob, runtimeRecorderLabel(active.mimeType));
+       await saveCapture({
+         type: 'clip',
+         blob,
+@@ -2926,6 +3243,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+         durationMs: Date.now() - active.startedAt,
+         captureMode: active.captureMode || ''
+       });
++      toast('Gameplay capture verified and saved');
+     } catch (error) {
+       toast(error?.message || 'Recording could not be saved');
+     } finally {
+@@ -2939,21 +3257,22 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+     try {
+       if (replay) { toast('PARA Replay is already running'); return; }
+-      const stream = await requestGameStream(true);
++      const prepared = await requestVerifiedGameRecording(true);
++      const { stream, mimeType } = prepared;
+       const hasAudio = stream.getAudioTracks().length > 0;
+-      const type = recorderMimeType(hasAudio);
+-      const options = type ? { mimeType: type, videoBitsPerSecond: 7_000_000 } : { videoBitsPerSecond: 7_000_000 };
+-      const recorder = new MediaRecorder(stream, options);
+       const chunks = [];
+-      recorder.ondataavailable = (event) => {
+-        if (!event.data?.size) return;
+-        chunks.push({ blob: event.data, at: Date.now() });
+-        const cutoff = Date.now() - 30 * 60 * 1000;
+-        while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
+-      };
+-      recorder.start(1000);
++      const session = startRuntimeRecorderSession(stream, mimeType, {
++        timesliceMs: RUNTIME_CAPTURE_SLICE_MS,
++        storeChunks: false,
++        videoBitsPerSecond: 7_000_000,
++        onChunk: (blob) => {
++          chunks.push({ blob, at: Date.now() });
++          const cutoff = Date.now() - 30 * 60 * 1000;
++          while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
++        }
++      });
+       replay = {
+-        stream, recorder, chunks, startedAt: Date.now(),
++        stream, recorder: session.recorder, session, chunks, mimeType, startedAt: Date.now(),
+         width: stream.__paraCaptureWidth || 0,
+         height: stream.__paraCaptureHeight || 0,
+         captureMode: stream.__paraCaptureMode || ''
+@@ -2963,7 +3282,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+         replay = null;
+         toast('PARA Replay stopped');
+       }, { once: true });
+-      const modeLabel = stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames';
++      const modeLabel = prepared.fallback ? 'browser-safe capture' : (stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames');
+       toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · ${modeLabel}`);
+     } catch (error) {
+       toast(error?.message || 'Replay could not start');
+@@ -2978,7 +3297,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       const cutoff = Date.now() - durationMs;
+       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
+       const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
+-      await verifyRecordedBlob(blob);
++      await verifyRecordedBlob(blob, runtimeRecorderLabel(replay.mimeType));
+       await saveCapture({
+         type: 'clip',
+         blob,
+@@ -3382,6 +3701,14 @@ class ParaHandler(SimpleHTTPRequestHandler):
+         if request.path in {"/privacy", "/privacy/"}:
+             self._send_file(HOME_ROOT / "privacy" / "index.html", "text/html; charset=utf-8")
+             return
++        if request.path == "/api/v1/achievements/progress":
++            status, _, access, refreshed_headers = self._authenticated_access()
++            if status != 200:
++                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to load online achievements.", "online": False, "items": []}, refreshed_headers)
++                return
++            progress_status, result = achievement_progress_for_user(access)
++            self._send_json(progress_status, result, refreshed_headers)
++            return
+         if request.path == "/api/v1/integrations/google/connect":
+             status, _, _, refreshed_headers = self._authenticated_access()
+             destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"
+@@ -3706,6 +4033,21 @@ class ParaHandler(SimpleHTTPRequestHandler):
+         if payload is None:
+             self._send_json(400, {"error": "invalid_request"})
+             return
++        if request.path in {"/api/v1/achievements/unlock", "/api/v1/achievements/progress"}:
++            status, session, _, refreshed_headers = self._authenticated_access()
++            if status != 200:
++                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to save achievements online.", "online": False}, refreshed_headers)
++                return
++            user_id = str(session.get("user", {}).get("id") or "")
++            value = 1 if request.path.endswith("/unlock") else payload.get("progress", 0)
++            progress_status, result = update_online_achievement(
++                user_id,
++                str(payload.get("project_id", "")),
++                str(payload.get("achievement_key", "")),
++                value,
++            )
++            self._send_json(progress_status, result, refreshed_headers)
++            return
+         if request.path == "/api/v1/integrations/google/disconnect":
+             status, _, access, refreshed_headers = self._authenticated_access()
+             if status != 200:
+diff --git a/apps/para-home/src/app.js b/apps/para-home/src/app.js
+index fc1fd09..5d38054 100644
+--- a/apps/para-home/src/app.js
++++ b/apps/para-home/src/app.js
+@@ -2,8 +2,8 @@ import { Router } from "./router.js";
+ import { FocusManager } from "./focus-manager.js";
+ import { GamepadNavigation, keyboardController } from "./gamepad.js";
+ import {
+-  addProfile, applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getState, postStartupDestination,
+-  replaceProfilePreferences, resetState, setProfilePreferences, setSetupAccountChoice,
++  addProfile, applyPreferences, DEFAULT_CONTROL_CENTER_ORDER, getProfilePreferences, getProfileRuntime, getState, postStartupDestination,
++  replaceProfilePreferences, resetState, setProfilePreferences, setProfileRuntime, setSetupAccountChoice,
+   setSetupChoice, setState, startupDestination, syncStateFromStorage,
+ } from "./state.js";
+ import {
+@@ -991,6 +991,55 @@ async function hydrateProfile(profile) {
+   }
+ }
+ 
++function cloudAchievementTime(value) {
++  if (!value) return null;
++  const parsed = Date.parse(String(value));
++  return Number.isFinite(parsed) ? parsed : null;
++}
++
++async function hydrateCloudAchievements(profile) {
++  try {
++    const payload = await paraApi.achievementProgress();
++    const cloudItems = Array.isArray(payload?.items) ? payload.items : [];
++    if (!cloudItems.length) return;
++    const runtime = getProfileRuntime(profile);
++    const localItems = Array.isArray(runtime.achievements) ? runtime.achievements : [];
++    const merged = new Map(localItems.map((item) => [item.id, item]));
++    for (const cloud of cloudItems) {
++      const projectId = String(cloud.project_id || "");
++      const key = String(cloud.achievement_key || "");
++      if (!projectId || !key) continue;
++      const id = `achievement:${projectId}:${key}`;
++      const local = merged.get(id) || {};
++      const unlockedAt = cloudAchievementTime(cloud.unlocked_at);
++      const updatedAt = cloudAchievementTime(cloud.updated_at) || Date.now();
++      const localProgress = Math.max(0, Number(local.progress || 0));
++      const cloudProgress = Math.max(0, Number(cloud.progress || 0));
++      merged.set(id, {
++        ...local,
++        id,
++        achievementId: cloud.achievement_id || local.achievementId,
++        projectId,
++        key,
++        name: cloud.name || local.name || key,
++        description: cloud.description || local.description || "",
++        points: Number(cloud.points || 0),
++        kind: cloud.kind || local.kind || "BINARY",
++        target: Math.max(1, Number(cloud.target || local.target || 1)),
++        hidden: Boolean(cloud.hidden),
++        iconUrl: cloud.icon_url || local.iconUrl || "",
++        progress: Math.max(localProgress, cloudProgress),
++        unlockedAt: local.unlockedAt || unlockedAt,
++        updatedAt: Math.max(Number(local.updatedAt || 0), updatedAt),
++        syncState: cloudProgress >= localProgress ? "cloud" : "pending",
++      });
++    }
++    setProfileRuntime({ achievements: [...merged.values()] }, profile);
++  } catch {
++    // Offline/local achievements remain usable and can be synchronized later.
++  }
++}
++
+ function schedulePreferenceSave(profileOverride = "") {
+   clearTimeout(preferenceTimer);
+   preferenceTimer = setTimeout(async () => {
+@@ -1001,7 +1050,7 @@ function schedulePreferenceSave(profileOverride = "") {
+ 
+ async function loginToHome(profile, target) {
+   setState({ loggedIn: true, activeProfile: profile });
+-  await hydrateProfile(profile);
++  await Promise.allSettled([hydrateProfile(profile), hydrateCloudAchievements(profile)]);
+   resetIdleSleep();
+   navigate("home", { replace: true }, target);
+ }
+@@ -1079,7 +1128,7 @@ async function finishCloudAccountAuth(result, target) {
+   if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
+   markParaAccountConnected(user);
+   setState({ activeProfile: name, setupChoices: { accountMode: "online", accountEmail: user.email || "", profileName: name } });
+-  await hydrateProfile(name);
++  await Promise.allSettled([hydrateProfile(name), hydrateCloudAchievements(name)]);
+   toast("PARA Account connected", name);
+   navigate(accountReturnRoute(), { replace: true }, target);
+   return true;
+@@ -1094,6 +1143,7 @@ async function syncCloudAccountSession() {
+       if (!getState().profiles.some((profile) => profile.toLowerCase() === name.toLowerCase())) addProfile(name);
+       markParaAccountConnected(user);
+       setState({ activeProfile: name, setupChoices: { accountMode: "online", accountEmail: user.email || "", profileName: name } });
++      await hydrateCloudAchievements(name);
+       return session;
+     }
+   } catch { /* offline/local PARA remains usable */ }
+diff --git a/apps/para-home/src/services/para-api.js b/apps/para-home/src/services/para-api.js
+index 446ef3c..3369f54 100644
+--- a/apps/para-home/src/services/para-api.js
++++ b/apps/para-home/src/services/para-api.js
+@@ -90,6 +90,9 @@ export const paraApi = {
+   storeCatalog: () => request("/api/v1/store/catalog"),
+   storeProduct: (id) => request(`/api/v1/store/product?id=${encodeURIComponent(id)}`),
+   storeAchievements: (id) => request(`/api/v1/store/achievements?id=${encodeURIComponent(id)}`),
++  achievementProgress: () => request("/api/v1/achievements/progress", { signal: AbortSignal.timeout(12_000) }),
++  unlockAchievement: (projectId, achievementKey) => request("/api/v1/achievements/unlock", { method: "POST", body: JSON.stringify({ project_id: projectId, achievement_key: achievementKey }), signal: AbortSignal.timeout(12_000) }),
++  setAchievementProgress: (projectId, achievementKey, progress) => request("/api/v1/achievements/progress", { method: "POST", body: JSON.stringify({ project_id: projectId, achievement_key: achievementKey, progress }), signal: AbortSignal.timeout(12_000) }),
+   storeCheckoutQuote: (ids) => request("/api/v1/store/checkout/quote", { method: "POST", body: JSON.stringify({ ids }) }),
+   launchApplication: (id) => request("/api/v1/apps/launch", { method: "POST", body: JSON.stringify({ id }) }),
+   system: () => request("/api/v1/system"),
+diff --git a/apps/para-home/src/screens/media.js b/apps/para-home/src/screens/media.js
+index 7cbd732..11ca8d9 100644
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -147,10 +147,12 @@ export function achievementsScreen() {
+          const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
+          const percent = Math.round((progress / target) * 100);
+          const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
++         const syncState = item.syncState === 'cloud' ? 'cloud' : item.syncState === 'pending' ? 'pending' : 'local';
++         const syncLabel = syncState === 'cloud' ? 'CLOUD SYNCED' : syncState === 'pending' ? 'SYNC PENDING' : 'LOCAL ONLY';
+          const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
+          return `<article class="achievement-card ${item.unlockedAt ? 'is-unlocked' : ''}" tabindex="0" ${index === 0 ? 'data-autofocus="true"' : ''}>
+            <div class="achievement-card__icon">${icon}</div>
+-           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
++           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><span class="achievement-sync achievement-sync--${syncState}">${syncLabel}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
+            <b>${Number(item.points || 0)} pts</b>
+          </article>`;
+        }).join('')}</section>`
+diff --git a/apps/para-home/styles.css b/apps/para-home/styles.css
+index 8f7a388..9def502 100644
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -1980,7 +1980,7 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ .para-game-transition.is-revealing { opacity: 0; pointer-events: none; }
+ .para-game-transition.is-revealing .para-game-transition__content { opacity: 0; transform: translateY(-8px) scale(1.01); }
+ @keyframes para-game-transition-scan { from { transform: translateX(-95%); } to { transform: translateX(225%); } }
+-.achievement-list{display:grid;gap:12px;padding-bottom:80px}.achievement-card{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:rgba(11,8,17,.76);outline:none}.achievement-card:focus{border-color:rgba(176,113,255,.72);box-shadow:0 0 0 2px rgba(139,92,246,.16)}.achievement-card.is-unlocked{background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(11,8,17,.84))}.achievement-card__icon{width:70px;height:70px;border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;display:grid;place-items:center;background:#07050b;color:#b985ff;font-size:1.6rem}.achievement-card__icon img{width:100%;height:100%;object-fit:cover}.achievement-card__copy{min-width:0;display:grid;gap:6px}.achievement-card__copy>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:9px}.achievement-card__copy>div span{color:#b985ff;font-size:.62rem;font-weight:850;letter-spacing:.12em}.achievement-card__copy strong{font-size:1rem}.achievement-card__copy p{margin:0;color:rgba(244,239,249,.68);font-size:.82rem}.achievement-card__copy small{color:rgba(244,239,249,.5);font-size:.72rem}.achievement-card>b{color:#d6b6ff;font:800 .78rem ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}.achievement-progress{height:5px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}.achievement-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7c3aed,#b985ff)}@media(max-width:720px){.achievement-card{grid-template-columns:54px minmax(0,1fr)}.achievement-card__icon{width:54px;height:54px}.achievement-card>b{grid-column:2}}
++.achievement-list{display:grid;gap:12px;padding-bottom:80px}.achievement-card{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:rgba(11,8,17,.76);outline:none}.achievement-card:focus{border-color:rgba(176,113,255,.72);box-shadow:0 0 0 2px rgba(139,92,246,.16)}.achievement-card.is-unlocked{background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(11,8,17,.84))}.achievement-card__icon{width:70px;height:70px;border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;display:grid;place-items:center;background:#07050b;color:#b985ff;font-size:1.6rem}.achievement-card__icon img{width:100%;height:100%;object-fit:cover}.achievement-card__copy{min-width:0;display:grid;gap:6px}.achievement-card__copy>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:9px}.achievement-card__copy>div span{color:#b985ff;font-size:.62rem;font-weight:850;letter-spacing:.12em}.achievement-card__copy strong{font-size:1rem}.achievement-card__copy p{margin:0;color:rgba(244,239,249,.68);font-size:.82rem}.achievement-card__copy small{color:rgba(244,239,249,.5);font-size:.72rem}.achievement-card>b{color:#d6b6ff;font:800 .78rem ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}.achievement-progress{height:5px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}.achievement-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7c3aed,#b985ff)}.achievement-card__copy>div .achievement-sync{padding:3px 6px;border:1px solid rgba(255,255,255,.1);border-radius:999px;font-size:.54rem;letter-spacing:.08em;color:rgba(244,239,249,.58)}.achievement-card__copy>div .achievement-sync--cloud{border-color:rgba(119,232,177,.28);color:#8be7b8}.achievement-card__copy>div .achievement-sync--pending{border-color:rgba(255,204,102,.24);color:#f1c86e}@media(max-width:720px){.achievement-card{grid-template-columns:54px minmax(0,1fr)}.achievement-card__icon{width:54px;height:54px}.achievement-card>b{grid-column:2}}
+ 
+ .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+ .setup-privacy-row{width:100%;color:inherit;background:transparent;text-align:left;border-left:0;border-right:0;border-top:0;cursor:pointer}.setup-privacy-row:hover,.setup-privacy-row:focus-visible{background:rgba(155,85,255,.08)}.setup-privacy-row[aria-pressed="true"] b{color:#fff}.setup-privacy-row[aria-pressed="true"]{border-color:rgba(201,151,255,.38)}
+diff --git a/render.yaml b/render.yaml
+index 4b72b22..fe752ec 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -12,6 +12,8 @@ services:
+         value: https://fqkbvxutsijruyawzxxo.supabase.co
+       - key: PARA_SUPABASE_PUBLISHABLE_KEY
+         value: sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY
++      - key: PARA_SUPABASE_SERVICE_ROLE_KEY
++        sync: false
+       - key: PARA_EMAILJS_SERVICE_ID
+         value: service_rozuv2c
+       - key: PARA_EMAILJS_TEMPLATE_ID
+diff --git a/tests/test_api.py b/tests/test_api.py
+index d621d95..2e1313b 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -10,7 +10,7 @@ from unittest.mock import patch
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "services/api"))
+-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats  # noqa: E402
++from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement  # noqa: E402
+ import system_layer  # noqa: E402
+ 
+ 
+@@ -118,6 +118,67 @@ class ApiContractTests(unittest.TestCase):
+         self.assertEqual(payload["items"][0]["achievement_key"], "first_win")
+         self.assertIn("/api/v1/store/asset?path=", payload["items"][0]["icon_url"])
+ 
++    def test_online_achievement_progress_maps_cloud_rows_for_para_home(self):
++        row = {
++            "progress_value": 2,
++            "unlocked_at": "2026-09-01T18:00:00Z",
++            "updated_at": "2026-09-01T18:01:00Z",
++            "achievement_definitions": {
++                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
++                "project_id": "11111111-1111-1111-1111-111111111111",
++                "achievement_key": "first_win",
++                "name": "First Victory",
++                "description": "Win once",
++                "points": 25,
++                "kind": "PROGRESS",
++                "target_value": 2,
++                "hidden": False,
++                "icon_path": "developers/user/first-win.png",
++                "status": "PUBLISHED",
++            },
++        }
++        with patch("server._supabase_account_rest_request", return_value=(200, [row])) as request:
++            status, payload = achievement_progress_for_user("access-token")
++        self.assertEqual(status, 200)
++        self.assertTrue(payload["online"])
++        self.assertEqual(payload["items"][0]["progress"], 2)
++        self.assertEqual(payload["items"][0]["sync_state"], "cloud")
++        self.assertIn("/api/v1/store/asset?path=", payload["items"][0]["icon_url"])
++        called_path = request.call_args.args[0]
++        self.assertIn("/rest/v1/player_achievement_progress?", called_path)
++        self.assertEqual(request.call_args.kwargs["bearer"], "access-token")
++
++    def test_online_achievement_write_uses_service_role_only_rpc(self):
++        cloud = {
++            "achievement_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
++            "project_id": "11111111-1111-1111-1111-111111111111",
++            "achievement_key": "first_win",
++            "progress": 1,
++            "target": 1,
++            "unlocked": True,
++            "newly_unlocked": True,
++            "icon_path": "developers/user/first-win.png",
++        }
++        with patch("server._supabase_service_rest_request", return_value=(200, cloud)) as request:
++            status, payload = update_online_achievement(
++                "22222222-2222-2222-2222-222222222222",
++                "11111111-1111-1111-1111-111111111111",
++                "first_win",
++                1,
++            )
++        self.assertEqual(status, 200)
++        self.assertTrue(payload["online"])
++        self.assertEqual(payload["achievement"]["sync_state"], "cloud")
++        request.assert_called_once_with(
++            "/rest/v1/rpc/record_player_achievement_progress",
++            payload={
++                "target_user_id": "22222222-2222-2222-2222-222222222222",
++                "target_project_id": "11111111-1111-1111-1111-111111111111",
++                "target_achievement_key": "first_win",
++                "target_progress_value": 1,
++            },
++        )
++
+     def test_para_account_signup_validates_console_credentials(self):
+         status, payload, tokens = auth_sign_up("not-an-email", "short", "Player")
+         self.assertEqual(status, 400)
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index 0c4ad6e..488f01b 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -664,6 +664,44 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn("frame-ancestors 'self'", server)
+ 
+ 
++    def test_v49_runtime_capture_and_online_trophies_are_regression_guarded(self):
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
++        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
++        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
++        migration = (ROOT / "supabase/secure_online_achievement_runtime.sql").read_text(encoding="utf-8")
++
++        for marker in [
++            "requestVerifiedGameRecording",
++            "probeRuntimeRecorderMime",
++            "RUNTIME_CAPTURE_SLICE_MS = 1000",
++            "Chromium rejected this capture's video stream.",
++            "browser-safe capture",
++            "captureVersion: 4",
++        ]:
++            self.assertIn(marker, server)
++        for marker in [
++            "PARA_SUPABASE_SERVICE_ROLE_KEY",
++            "/api/v1/achievements/progress",
++            "/api/v1/achievements/unlock",
++            "record_player_achievement_progress",
++        ]:
++            self.assertIn(marker, server)
++        self.assertIn("achievementProgress:", api)
++        self.assertIn("unlockAchievement:", api)
++        self.assertIn("setAchievementProgress:", api)
++        self.assertIn("hydrateCloudAchievements", app)
++        self.assertIn('syncState: cloudProgress >= localProgress ? "cloud" : "pending"', app)
++        self.assertIn("CLOUD SYNCED", media)
++        self.assertIn("SYNC PENDING", media)
++        self.assertIn("- key: PARA_SUPABASE_SERVICE_ROLE_KEY", render)
++        self.assertIn("sync: false", render)
++        self.assertIn("security definer", migration.lower())
++        self.assertIn("revoke all on function public.record_player_achievement_progress", migration.lower())
++        self.assertIn("to service_role", migration.lower())
++        self.assertNotIn("to authenticated", migration.lower().split("grant execute", 1)[-1])
++
+     def test_v43_account_settings_are_real_account_hub(self):
+         system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
+         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+diff --git a/mnt/data/para_v49_work/base/para/supabase/secure_online_achievement_runtime.sql b/supabase/secure_online_achievement_runtime.sql
+new file mode 100644
+index 0000000..73843f8
+--- /dev/null
++++ b/supabase/secure_online_achievement_runtime.sql
+@@ -0,0 +1,90 @@
++-- PARA V49: trusted online achievement writes.
++-- Browser clients remain unable to INSERT/UPDATE player_achievement_progress directly.
++-- PARA's authenticated backend calls this RPC with the service-role key after resolving
++-- the signed-in PARA Account from its HttpOnly session cookie.
++
++create or replace function public.record_player_achievement_progress(
++  target_user_id uuid,
++  target_project_id uuid,
++  target_achievement_key text,
++  target_progress_value bigint
++) returns jsonb
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  def public.achievement_definitions%rowtype;
++  existing public.player_achievement_progress%rowtype;
++  next_value bigint;
++  did_unlock boolean := false;
++  newly_unlocked boolean := false;
++begin
++  if target_user_id is null then
++    raise exception 'Target user is required';
++  end if;
++  if target_progress_value < 0 then
++    raise exception 'Progress cannot be negative';
++  end if;
++
++  select ad.* into def
++  from public.achievement_definitions ad
++  join public.projects p on p.id = ad.project_id
++  where ad.project_id = target_project_id
++    and ad.achievement_key = target_achievement_key
++    and ad.status = 'PUBLISHED'
++    and p.status = 'PUBLISHED';
++
++  if def.id is null then
++    raise exception 'Published achievement not found';
++  end if;
++
++  select * into existing
++  from public.player_achievement_progress
++  where user_id = target_user_id and achievement_id = def.id
++  for update;
++
++  next_value := least(
++    def.target_value,
++    greatest(
++      coalesce(existing.progress_value, 0),
++      case when def.kind = 'BINARY' then 1 else target_progress_value end
++    )
++  );
++  did_unlock := next_value >= def.target_value;
++  newly_unlocked := did_unlock and existing.unlocked_at is null;
++
++  insert into public.player_achievement_progress (
++    user_id, achievement_id, progress_value, unlocked_at
++  ) values (
++    target_user_id,
++    def.id,
++    next_value,
++    case when did_unlock then now() else null end
++  )
++  on conflict (user_id, achievement_id) do update set
++    progress_value = greatest(public.player_achievement_progress.progress_value, excluded.progress_value),
++    unlocked_at = coalesce(public.player_achievement_progress.unlocked_at, excluded.unlocked_at),
++    updated_at = now();
++
++  return jsonb_build_object(
++    'achievement_id', def.id,
++    'project_id', def.project_id,
++    'achievement_key', def.achievement_key,
++    'name', def.name,
++    'description', def.description,
++    'points', def.points,
++    'kind', def.kind,
++    'progress', next_value,
++    'target', def.target_value,
++    'unlocked', did_unlock,
++    'newly_unlocked', newly_unlocked,
++    'unlocked_at', case when did_unlock then coalesce(existing.unlocked_at, now()) else null end,
++    'hidden', def.hidden,
++    'icon_path', def.icon_path
++  );
++end;
++$$;
++
++revoke all on function public.record_player_achievement_progress(uuid, uuid, text, bigint) from public, anon, authenticated;
++grant execute on function public.record_player_achievement_progress(uuid, uuid, text, bigint) to service_role;

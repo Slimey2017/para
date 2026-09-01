@@ -69,6 +69,7 @@ EMAIL_VERIFICATION_CLIENT_MAX_SENDS = 5
 PARA_ACCOUNT_SUPABASE_PROJECT_REF = "fqkbvxutsijruyawzxxo"
 PARA_ACCOUNT_SUPABASE_URL = f"https://{PARA_ACCOUNT_SUPABASE_PROJECT_REF}.supabase.co"
 PARA_ACCOUNT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_aKSE87nlJmUddelmwAwa9Q_5sz5ZESY"
+PARA_SUPABASE_SERVICE_ROLE_KEY = _env_config("PARA_SUPABASE_SERVICE_ROLE_KEY", "")
 PARA_ACCOUNT_PUBLIC_URL = "https://para-wjvx.onrender.com/"
 STEAM_OPENID_DISCOVERY_URL = "https://steamcommunity.com/openid/"
 STEAM_OPENID_LOGIN_URL = "https://steamcommunity.com/openid/login"
@@ -174,6 +175,139 @@ def _supabase_account_rest_request(
         return error.code, parsed
     except (urllib.error.URLError, TimeoutError):
         return 502, {"error": "account_storage_unavailable", "message": "PARA could not reach connected account storage."}
+
+
+
+def _supabase_service_rest_request(
+    path: str,
+    *,
+    method: str = "POST",
+    payload: object | None = None,
+    prefer: str = "",
+) -> tuple[int, object]:
+    """Call a service-role-only PostgREST RPC from PARA's trusted backend."""
+    key = PARA_SUPABASE_SERVICE_ROLE_KEY
+    if not key:
+        return 503, {
+            "error": "cloud_write_not_configured",
+            "message": "PARA Cloud writes are not configured on this server yet.",
+        }
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(f"{PARA_ACCOUNT_SUPABASE_URL}{path}", data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            body = response.read().decode("utf-8")
+            if not body:
+                return response.status, {}
+            try:
+                return response.status, json.loads(body)
+            except json.JSONDecodeError:
+                return response.status, {"raw": body[:240]}
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = {"message": "PARA Cloud write failed."}
+        if not isinstance(parsed, (dict, list)):
+            parsed = {"message": "PARA Cloud write failed."}
+        return error.code, parsed
+    except (urllib.error.URLError, TimeoutError):
+        return 502, {"error": "cloud_storage_unavailable", "message": "PARA could not reach cloud storage."}
+
+
+def achievement_progress_for_user(access_token: str) -> tuple[int, dict]:
+    """Read the signed-in player's achievement progress from Supabase."""
+    select = (
+        "progress_value,unlocked_at,updated_at,"
+        "achievement_definitions!inner("
+        "id,project_id,achievement_key,name,description,points,kind,target_value,hidden,icon_path,status)"
+    )
+    path = "/rest/v1/player_achievement_progress?" + urllib.parse.urlencode({
+        "select": select,
+        "order": "updated_at.desc",
+    })
+    status, payload = _supabase_account_rest_request(path, bearer=access_token)
+    if status >= 400:
+        return status, {
+            "error": "achievement_progress_unavailable",
+            "message": "PARA could not load online achievement progress.",
+        }
+    rows = payload if isinstance(payload, list) else []
+    items = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        definition = row.get("achievement_definitions")
+        if not isinstance(definition, dict):
+            continue
+        icon_path = str(definition.get("icon_path") or "")
+        items.append({
+            "achievement_id": definition.get("id"),
+            "project_id": definition.get("project_id"),
+            "achievement_key": definition.get("achievement_key"),
+            "name": definition.get("name"),
+            "description": definition.get("description") or "",
+            "points": int(definition.get("points") or 0),
+            "kind": definition.get("kind") or "BINARY",
+            "target": max(1, int(definition.get("target_value") or 1)),
+            "hidden": bool(definition.get("hidden")),
+            "icon_url": f"/api/v1/store/asset?path={urllib.parse.quote(icon_path, safe='')}" if icon_path else None,
+            "progress": max(0, int(row.get("progress_value") or 0)),
+            "unlocked_at": row.get("unlocked_at"),
+            "updated_at": row.get("updated_at"),
+            "sync_state": "cloud",
+        })
+    return 200, {"online": True, "items": items}
+
+
+def update_online_achievement(user_id: str, project_id: str, achievement_key: str, progress_value: object) -> tuple[int, dict]:
+    """Award/progress an achievement through a service-role-only trusted RPC."""
+    try:
+        parsed_project = str(project_id or "").strip()
+        parsed_key = str(achievement_key or "").strip()
+        parsed_progress = int(progress_value)
+    except (TypeError, ValueError):
+        return 400, {"error": "invalid_achievement_progress", "message": "Achievement progress must be a whole number."}
+    uuid_pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    if not re.fullmatch(uuid_pattern, str(user_id or "")):
+        return 401, {"error": "not_signed_in", "message": "Sign in to save achievements online."}
+    if not re.fullmatch(uuid_pattern, parsed_project):
+        return 400, {"error": "invalid_project", "message": "This game does not have a valid PARA project id."}
+    if not parsed_key or len(parsed_key) > 120 or parsed_progress < 0:
+        return 400, {"error": "invalid_achievement_progress", "message": "Achievement progress is invalid."}
+
+    status, payload = _supabase_service_rest_request(
+        "/rest/v1/rpc/record_player_achievement_progress",
+        payload={
+            "target_user_id": str(user_id),
+            "target_project_id": parsed_project,
+            "target_achievement_key": parsed_key,
+            "target_progress_value": parsed_progress,
+        },
+    )
+    if status >= 400:
+        message = "PARA could not save this achievement online."
+        if isinstance(payload, dict) and payload.get("message"):
+            message = str(payload.get("message"))
+        return status, {"error": "achievement_cloud_write_failed", "message": message}
+
+    result = payload if isinstance(payload, dict) else {}
+    icon_path = str(result.get("icon_path") or "")
+    if icon_path:
+        result["icon_url"] = f"/api/v1/store/asset?path={urllib.parse.quote(icon_path, safe='')}"
+    result["sync_state"] = "cloud"
+    return 200, {"online": True, "achievement": result}
 
 
 def _steam_callback_url(state: str) -> str:
@@ -1739,7 +1873,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     try { localStorage.setItem(HOME_STATE_KEY, JSON.stringify(state)); } catch (_) {}
   }
 
-  function saveLocalAchievement(definition, requestedProgress) {
+  function saveLocalAchievement(definition, requestedProgress, syncState = 'local', cloudRecord = null) {
     const state = readHomeState();
     const profile = state.activeProfile || state.setupChoices?.profileName || 'P1';
     const profileRuntime = { ...(state.profileRuntime || {}) };
@@ -1755,6 +1889,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const requested = definition.kind === 'BINARY' ? 1 : Math.max(0, Number(requestedProgress || 0));
     const progress = Math.min(target, Math.max(previousProgress, requested));
     const unlocked = progress >= target;
+    const cloudUnlockedAt = cloudRecord?.unlocked_at ? Date.parse(String(cloudRecord.unlocked_at)) : NaN;
+    const authoritativeUnlockedAt = Number.isFinite(cloudUnlockedAt) ? cloudUnlockedAt : null;
     const newlyUnlocked = unlocked && !existing.unlockedAt;
     const now = Date.now();
     const record = {
@@ -1772,9 +1908,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       hidden: Boolean(definition.hidden),
       iconUrl: definition.icon_url || '',
       progress,
-      unlockedAt: existing.unlockedAt || (unlocked ? now : null),
+      unlockedAt: existing.unlockedAt || authoritativeUnlockedAt || (unlocked ? now : null),
       updatedAt: now,
-      syncState: 'local'
+      syncState
     };
     runtime.achievements = [record, ...(runtime.achievements || []).filter((item) => item.id !== achievementId)];
     if (newlyUnlocked) {
@@ -1798,7 +1934,29 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const definitions = await loadAchievementDefinitions();
     const definition = definitions.find((item) => item.achievement_key === achievementKey && item.status === 'PUBLISHED');
     if (!definition) throw new Error(`Achievement “${achievementKey}” is not published for this game.`);
-    return saveLocalAchievement(definition, value);
+
+    const requested = definition.kind === 'BINARY' ? 1 : Math.max(0, Number(value || 0));
+    const local = saveLocalAchievement(definition, requested, PROJECT_ID ? 'pending' : 'local');
+    if (!PROJECT_ID) return local;
+
+    try {
+      const endpoint = definition.kind === 'BINARY' ? '/api/v1/achievements/unlock' : '/api/v1/achievements/progress';
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: PROJECT_ID, achievement_key: achievementKey, progress: requested })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const fallbackState = response.status === 401 ? 'local' : 'pending';
+        return saveLocalAchievement(definition, local.progress, fallbackState);
+      }
+      const cloud = payload?.achievement || {};
+      const record = saveLocalAchievement(definition, Number(cloud.progress ?? requested), 'cloud', cloud);
+      return { ...record, online: true };
+    } catch (_) {
+      return local;
+    }
   }
 
   const PARA_ACHIEVEMENT_QUEUE_KEY = '__PARA_ACHIEVEMENT_QUEUE__';
@@ -2283,7 +2441,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const item = {
       id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
-      createdAt: Date.now(), source: 'PARA', captureVersion: 3
+      createdAt: Date.now(), source: 'PARA', captureVersion: 4,
+      ...(type === 'clip' ? { playbackVerified: true, recorderMimeType: blob.type || 'video/webm' } : {})
     };
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB_STORE, 'readwrite');
@@ -2546,42 +2705,215 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
-  function recorderMimeType(hasAudio = false) {
-    const probe = document.createElement('video');
+  const RUNTIME_CAPTURE_PROBE_MS = 1300;
+  const RUNTIME_CAPTURE_PROBE_SLICE_MS = 250;
+  const RUNTIME_CAPTURE_SLICE_MS = 1000;
+  const RUNTIME_CAPTURE_DECODE_TIMEOUT_MS = 7000;
+
+  function runtimeRecorderMimeCandidates(hasAudio = false) {
+    if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable in this browser.');
     const types = hasAudio
       ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
       : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
-    return types.find((type) => MediaRecorder.isTypeSupported?.(type) && probe.canPlayType(type) !== '') || '';
+    const supported = types.filter((type) => MediaRecorder.isTypeSupported?.(type));
+    return supported.length ? supported : [''];
+  }
+
+  function runtimeRecorderOptions(mimeType = '', videoBitsPerSecond = 8_000_000) {
+    return mimeType ? { mimeType, videoBitsPerSecond } : { videoBitsPerSecond };
+  }
+
+  function runtimeRecorderLabel(mimeType = '') {
+    return mimeType || 'browser default WebM';
+  }
+
+  function runtimeMediaDecodeMessage(video) {
+    const code = Number(video?.error?.code || 0);
+    if (code === 1) return 'Chromium interrupted capture playback.';
+    if (code === 2) return 'Chromium could not read this capture media data.';
+    if (code === 3) return "Chromium rejected this capture's video stream.";
+    if (code === 4) return "Chromium does not support this capture's encoded video stream.";
+    return 'Chromium could not decode the recorded video.';
+  }
+
+  function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = RUNTIME_CAPTURE_SLICE_MS, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
+    const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, videoBitsPerSecond));
+    const session = { recorder, mimeType: recorder.mimeType || mimeType || 'video/webm', chunks: [], error: null };
+    recorder.addEventListener('dataavailable', (event) => {
+      if (!event.data?.size) return;
+      if (storeChunks) session.chunks.push(event.data);
+      onChunk?.(event.data);
+    });
+    recorder.addEventListener('error', () => {
+      session.error = recorder.error || new Error('Gameplay recording failed.');
+    });
+    recorder.start(timesliceMs);
+    return session;
+  }
+
+  async function finalizeRuntimeRecorderSession(session) {
+    const recorder = session?.recorder;
+    if (!recorder) throw new Error('PARA could not create a gameplay recording session.');
+    if (recorder.state !== 'inactive') {
+      await new Promise((resolve, reject) => {
+        const onStop = () => { cleanup(); resolve(); };
+        const onError = () => { const error = session.error || recorder.error || new Error('Gameplay encoder failed.'); cleanup(); reject(error); };
+        const cleanup = () => {
+          recorder.removeEventListener('stop', onStop);
+          recorder.removeEventListener('error', onError);
+        };
+        recorder.addEventListener('stop', onStop);
+        recorder.addEventListener('error', onError);
+        try {
+          recorder.requestData();
+          recorder.stop();
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      });
+    }
+    if (session.error) throw session.error;
+    return new Blob([...session.chunks], { type: recorder.mimeType || session.mimeType || 'video/webm' });
   }
 
   async function verifyRecordedBlob(blob) {
+    const format = String(arguments[1] || '');
     if (!blob?.size || blob.size < 1024) throw new Error('PARA did not receive enough gameplay video data.');
-    const url = URL.createObjectURL(blob);
+    // Use a generic WebM Content-Type for local validation. The original bytes
+    // and exact recorder MIME are preserved when the capture is saved/uploaded.
+    const playbackBlob = String(blob.type || '').toLowerCase().includes('webm') && blob.type !== 'video/webm'
+      ? new Blob([blob], { type: 'video/webm' })
+      : blob;
+    const url = URL.createObjectURL(playbackBlob);
+    const video = document.createElement('video');
+    let frameTimer = 0;
     try {
+      video.preload = 'auto';
+      video.muted = true;
+      video.playsInline = true;
       await new Promise((resolve, reject) => {
-        const video = document.createElement('video');
-        const timer = setTimeout(() => reject(new Error('The gameplay recording could not be decoded.')), 7000);
-        const done = () => {
+        let timer = 0;
+        const cleanup = () => {
           clearTimeout(timer);
+          video.removeEventListener('loadeddata', onLoaded);
+          video.removeEventListener('error', onError);
+        };
+        const onLoaded = () => {
+          cleanup();
           if (!video.videoWidth || !video.videoHeight) {
             reject(new Error('The gameplay recording contains no visible video frames.'));
             return;
           }
           resolve();
         };
-        video.preload = 'auto';
-        video.muted = true;
-        video.playsInline = true;
-        video.addEventListener('loadeddata', done, { once: true });
-        video.addEventListener('error', () => {
-          clearTimeout(timer);
-          reject(new Error('Chrome could not decode the gameplay recording.'));
-        }, { once: true });
+        const onError = () => {
+          const message = runtimeMediaDecodeMessage(video);
+          cleanup();
+          reject(new Error(`${message}${format ? ` Recorder format: ${format}.` : ''}`));
+        };
+        video.addEventListener('loadeddata', onLoaded);
+        video.addEventListener('error', onError);
+        timer = setTimeout(() => {
+          cleanup();
+          reject(new Error(`The gameplay recording could not be decoded.${format ? ` Recorder format: ${format}.` : ''}`));
+        }, RUNTIME_CAPTURE_DECODE_TIMEOUT_MS);
         video.src = url;
         video.load();
       });
+
+      const startTime = Number(video.currentTime || 0);
+      let decodedFrame = video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+      let framePromise = Promise.resolve();
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        framePromise = new Promise((resolve) => {
+          frameTimer = setTimeout(resolve, 1200);
+          video.requestVideoFrameCallback(() => {
+            decodedFrame = true;
+            clearTimeout(frameTimer);
+            resolve();
+          });
+        });
+      }
+      try { await video.play(); }
+      catch (_) { throw new Error(`${runtimeMediaDecodeMessage(video)}${format ? ` Recorder format: ${format}.` : ''}`); }
+
+      const timelinePromise = new Promise((resolve, reject) => {
+        const started = performance.now();
+        const check = () => {
+          if (video.error) {
+            reject(new Error(`${runtimeMediaDecodeMessage(video)}${format ? ` Recorder format: ${format}.` : ''}`));
+            return;
+          }
+          if (Number(video.currentTime || 0) > startTime + .04) { resolve(); return; }
+          if (video.ended) { reject(new Error('The gameplay recording ended before playback could advance.')); return; }
+          if (performance.now() - started > 3500) { reject(new Error('The gameplay recording decoded, but playback did not advance.')); return; }
+          setTimeout(check, 50);
+        };
+        check();
+      });
+      await Promise.all([framePromise, timelinePromise]);
+      const decodedFrames = Number(video.getVideoPlaybackQuality?.().totalVideoFrames || 0);
+      if (!decodedFrame && decodedFrames <= 0) throw new Error('Chromium did not decode a video frame from this gameplay recording.');
+      video.pause();
+      return { width: video.videoWidth, height: video.videoHeight, duration: Number(video.duration || 0) };
     } finally {
+      clearTimeout(frameTimer);
+      video.pause?.();
+      video.removeAttribute?.('src');
+      video.load?.();
       URL.revokeObjectURL(url);
+    }
+  }
+
+  async function probeRuntimeRecorderMime(stream, mimeType) {
+    const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: RUNTIME_CAPTURE_PROBE_SLICE_MS, videoBitsPerSecond: 4_000_000 });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, RUNTIME_CAPTURE_PROBE_MS));
+      const blob = await finalizeRuntimeRecorderSession(session);
+      await verifyRecordedBlob(blob, runtimeRecorderLabel(session.mimeType || mimeType));
+      return session.mimeType || mimeType || 'video/webm';
+    } catch (error) {
+      if (session.recorder.state !== 'inactive') {
+        try { session.recorder.stop(); } catch (_) {}
+      }
+      throw error;
+    }
+  }
+
+  async function selectRuntimeRecorderMime(stream) {
+    const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
+    const failures = [];
+    for (const candidate of runtimeRecorderMimeCandidates(hasAudio)) {
+      try { return await probeRuntimeRecorderMime(stream, candidate); }
+      catch (error) { failures.push(`${runtimeRecorderLabel(candidate)}: ${error?.message || 'failed'}`); }
+    }
+    throw new Error(`PARA could not find a Chromium-playable gameplay encoder. ${failures.join(' | ')}`.trim());
+  }
+
+  async function requestVerifiedGameRecording(audio = false) {
+    let direct = null;
+    let directError = null;
+    try {
+      direct = await requestCompositedGameStream(audio);
+      const mimeType = await selectRuntimeRecorderMime(direct);
+      return { stream: direct, mimeType, fallback: false };
+    } catch (error) {
+      directError = error;
+      if (direct) stopStream(direct);
+    }
+
+    // The compositor is permission-free but some Chromium builds can produce a
+    // canvas stream that MediaRecorder accepts and Chromium later cannot decode.
+    // In that case use browser self-tab capture, which supplies a browser-native
+    // video track and is considerably more reliable for recording.
+    const fallback = await requestSessionSelfCapture(audio);
+    try {
+      const mimeType = await selectRuntimeRecorderMime(fallback);
+      fallback.__paraFallbackReason = directError?.message || 'The direct gameplay encoder failed validation.';
+      return { stream: fallback, mimeType, fallback: true };
+    } catch (fallbackError) {
+      throw new Error(`PARA could not create a playable gameplay stream. Direct capture: ${directError?.message || 'failed'}. Self-tab capture: ${fallbackError?.message || 'failed'}.`);
     }
   }
 
@@ -2878,23 +3210,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     closeShell();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
-      const stream = await requestGameStream(true);
-      const hasAudio = stream.getAudioTracks().length > 0;
-      const type = recorderMimeType(hasAudio);
-      const options = type ? { mimeType: type, videoBitsPerSecond: 8_000_000 } : { videoBitsPerSecond: 8_000_000 };
-      const recorder = new MediaRecorder(stream, options);
-      const chunks = [];
+      const prepared = await requestVerifiedGameRecording(true);
+      const { stream, mimeType } = prepared;
+      const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: RUNTIME_CAPTURE_SLICE_MS, videoBitsPerSecond: 8_000_000 });
       const startedAt = Date.now();
-      recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
-      recorder.onerror = () => toast('PARA recording encountered an encoder error');
-      recorder.start(1000);
+      session.recorder.addEventListener('error', () => toast('PARA recording encountered an encoder error'));
       manualRecording = {
-        stream, recorder, chunks, startedAt, stopping: false,
+        stream, recorder: session.recorder, session, startedAt, stopping: false, mimeType,
         width: stream.__paraCaptureWidth || 0,
         height: stream.__paraCaptureHeight || 0,
         captureMode: stream.__paraCaptureMode || ''
       };
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
+      if (prepared.fallback) toast('Recording started · browser-safe capture');
     } catch (error) {
       toast(error?.message || 'Recording could not start');
     }
@@ -2905,19 +3233,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (!active || active.stopping) return;
     active.stopping = true;
     try {
-      if (active.recorder.state !== 'inactive') {
-        const stopped = new Promise((resolve, reject) => {
-          active.recorder.addEventListener('stop', resolve, { once: true });
-          active.recorder.addEventListener('error', () => reject(active.recorder.error || new Error('Video encoder failed.')), { once: true });
-        });
-        try { active.recorder.requestData(); } catch (_) {}
-        active.recorder.stop();
-        await stopped;
-      }
-      // Let Chromium deliver the final dataavailable event before assembling.
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      const blob = new Blob(active.chunks, { type: active.recorder.mimeType || 'video/webm' });
-      await verifyRecordedBlob(blob);
+      const blob = await finalizeRuntimeRecorderSession(active.session);
+      await verifyRecordedBlob(blob, runtimeRecorderLabel(active.mimeType));
       await saveCapture({
         type: 'clip',
         blob,
@@ -2926,6 +3243,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         durationMs: Date.now() - active.startedAt,
         captureMode: active.captureMode || ''
       });
+      toast('Gameplay capture verified and saved');
     } catch (error) {
       toast(error?.message || 'Recording could not be saved');
     } finally {
@@ -2939,21 +3257,22 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       if (replay) { toast('PARA Replay is already running'); return; }
-      const stream = await requestGameStream(true);
+      const prepared = await requestVerifiedGameRecording(true);
+      const { stream, mimeType } = prepared;
       const hasAudio = stream.getAudioTracks().length > 0;
-      const type = recorderMimeType(hasAudio);
-      const options = type ? { mimeType: type, videoBitsPerSecond: 7_000_000 } : { videoBitsPerSecond: 7_000_000 };
-      const recorder = new MediaRecorder(stream, options);
       const chunks = [];
-      recorder.ondataavailable = (event) => {
-        if (!event.data?.size) return;
-        chunks.push({ blob: event.data, at: Date.now() });
-        const cutoff = Date.now() - 30 * 60 * 1000;
-        while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
-      };
-      recorder.start(1000);
+      const session = startRuntimeRecorderSession(stream, mimeType, {
+        timesliceMs: RUNTIME_CAPTURE_SLICE_MS,
+        storeChunks: false,
+        videoBitsPerSecond: 7_000_000,
+        onChunk: (blob) => {
+          chunks.push({ blob, at: Date.now() });
+          const cutoff = Date.now() - 30 * 60 * 1000;
+          while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
+        }
+      });
       replay = {
-        stream, recorder, chunks, startedAt: Date.now(),
+        stream, recorder: session.recorder, session, chunks, mimeType, startedAt: Date.now(),
         width: stream.__paraCaptureWidth || 0,
         height: stream.__paraCaptureHeight || 0,
         captureMode: stream.__paraCaptureMode || ''
@@ -2963,7 +3282,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         replay = null;
         toast('PARA Replay stopped');
       }, { once: true });
-      const modeLabel = stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames';
+      const modeLabel = prepared.fallback ? 'browser-safe capture' : (stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames');
       toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · ${modeLabel}`);
     } catch (error) {
       toast(error?.message || 'Replay could not start');
@@ -2978,7 +3297,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const cutoff = Date.now() - durationMs;
       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
       const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
-      await verifyRecordedBlob(blob);
+      await verifyRecordedBlob(blob, runtimeRecorderLabel(replay.mimeType));
       await saveCapture({
         type: 'clip',
         blob,
@@ -3382,6 +3701,14 @@ class ParaHandler(SimpleHTTPRequestHandler):
         if request.path in {"/privacy", "/privacy/"}:
             self._send_file(HOME_ROOT / "privacy" / "index.html", "text/html; charset=utf-8")
             return
+        if request.path == "/api/v1/achievements/progress":
+            status, _, access, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to load online achievements.", "online": False, "items": []}, refreshed_headers)
+                return
+            progress_status, result = achievement_progress_for_user(access)
+            self._send_json(progress_status, result, refreshed_headers)
+            return
         if request.path == "/api/v1/integrations/google/connect":
             status, _, _, refreshed_headers = self._authenticated_access()
             destination_base = PARA_ACCOUNT_PUBLIC_URL.rstrip("/") + "/#/setup?integration=google"
@@ -3705,6 +4032,21 @@ class ParaHandler(SimpleHTTPRequestHandler):
         payload = self._read_json()
         if payload is None:
             self._send_json(400, {"error": "invalid_request"})
+            return
+        if request.path in {"/api/v1/achievements/unlock", "/api/v1/achievements/progress"}:
+            status, session, _, refreshed_headers = self._authenticated_access()
+            if status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to save achievements online.", "online": False}, refreshed_headers)
+                return
+            user_id = str(session.get("user", {}).get("id") or "")
+            value = 1 if request.path.endswith("/unlock") else payload.get("progress", 0)
+            progress_status, result = update_online_achievement(
+                user_id,
+                str(payload.get("project_id", "")),
+                str(payload.get("achievement_key", "")),
+                value,
+            )
+            self._send_json(progress_status, result, refreshed_headers)
             return
         if request.path == "/api/v1/integrations/google/disconnect":
             status, _, access, refreshed_headers = self._authenticated_access()

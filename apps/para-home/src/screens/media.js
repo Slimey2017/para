@@ -147,10 +147,12 @@ export function achievementsScreen() {
          const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
          const percent = Math.round((progress / target) * 100);
          const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
+         const syncState = item.syncState === 'cloud' ? 'cloud' : item.syncState === 'pending' ? 'pending' : 'local';
+         const syncLabel = syncState === 'cloud' ? 'CLOUD SYNCED' : syncState === 'pending' ? 'SYNC PENDING' : 'LOCAL ONLY';
          const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
          return `<article class="achievement-card ${item.unlockedAt ? 'is-unlocked' : ''}" tabindex="0" ${index === 0 ? 'data-autofocus="true"' : ''}>
            <div class="achievement-card__icon">${icon}</div>
-           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
+           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><span class="achievement-sync achievement-sync--${syncState}">${syncLabel}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
            <b>${Number(item.points || 0)} pts</b>
          </article>`;
        }).join('')}</section>`

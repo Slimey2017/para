@@ -664,6 +664,44 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'self'", server)
 
 
+    def test_v49_runtime_capture_and_online_trophies_are_regression_guarded(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        migration = (ROOT / "supabase/secure_online_achievement_runtime.sql").read_text(encoding="utf-8")
+
+        for marker in [
+            "requestVerifiedGameRecording",
+            "probeRuntimeRecorderMime",
+            "RUNTIME_CAPTURE_SLICE_MS = 1000",
+            "Chromium rejected this capture's video stream.",
+            "browser-safe capture",
+            "captureVersion: 4",
+        ]:
+            self.assertIn(marker, server)
+        for marker in [
+            "PARA_SUPABASE_SERVICE_ROLE_KEY",
+            "/api/v1/achievements/progress",
+            "/api/v1/achievements/unlock",
+            "record_player_achievement_progress",
+        ]:
+            self.assertIn(marker, server)
+        self.assertIn("achievementProgress:", api)
+        self.assertIn("unlockAchievement:", api)
+        self.assertIn("setAchievementProgress:", api)
+        self.assertIn("hydrateCloudAchievements", app)
+        self.assertIn('syncState: cloudProgress >= localProgress ? "cloud" : "pending"', app)
+        self.assertIn("CLOUD SYNCED", media)
+        self.assertIn("SYNC PENDING", media)
+        self.assertIn("- key: PARA_SUPABASE_SERVICE_ROLE_KEY", render)
+        self.assertIn("sync: false", render)
+        self.assertIn("security definer", migration.lower())
+        self.assertIn("revoke all on function public.record_player_achievement_progress", migration.lower())
+        self.assertIn("to service_role", migration.lower())
+        self.assertNotIn("to authenticated", migration.lower().split("grant execute", 1)[-1])
+
     def test_v43_account_settings_are_real_account_hub(self):
         system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
