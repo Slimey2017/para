@@ -1,0 +1,135 @@
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -2583,6 +2583,68 @@
+     return [...new Map(tracks.map((track) => [track.id, track])).values()];
+   }
+ 
++  function directCaptureCandidates() {
++    const viewportArea = Math.max(1, (innerWidth || 1) * (innerHeight || 1));
++    return captureVisualCandidates()
++      .filter(({ element }) => typeof element.captureStream === 'function')
++      .map((candidate) => ({
++        ...candidate,
++        area: Math.max(0, candidate.rect.width * candidate.rect.height),
++        viewportCoverage: Math.max(0, candidate.rect.width * candidate.rect.height) / viewportArea,
++      }))
++      .sort((a, b) => {
++        const canvasBiasA = a.element instanceof HTMLCanvasElement ? 1 : 0;
++        const canvasBiasB = b.element instanceof HTMLCanvasElement ? 1 : 0;
++        if (canvasBiasA !== canvasBiasB) return canvasBiasB - canvasBiasA;
++        return b.area - a.area;
++      });
++  }
++
++  async function requestDirectGameSurfaceStream(audio = false) {
++    const candidates = directCaptureCandidates();
++    const candidate = candidates.find((item) => item.viewportCoverage >= .18) || candidates[0];
++    if (!candidate) throw new Error('PARA found no game surface with a direct capture stream.');
++
++    const { element, rect } = candidate;
++    let rawStream;
++    try {
++      rawStream = element instanceof HTMLCanvasElement ? element.captureStream(30) : element.captureStream();
++    } catch (_) {
++      throw new Error('The game surface refused direct stream capture.');
++    }
++    const videoTrack = rawStream?.getVideoTracks?.()[0];
++    if (!videoTrack) {
++      rawStream?.getTracks?.().forEach((track) => { try { track.stop(); } catch (_) {} });
++      throw new Error('The game surface did not expose a video track.');
++    }
++    try { videoTrack.contentHint = 'motion'; } catch (_) {}
++
++    const tracks = [videoTrack];
++    if (audio) {
++      const audioTracks = [
++        ...(rawStream.getAudioTracks?.() || []),
++        ...capturedGameAudioTracks(),
++      ].filter((track) => track?.readyState !== 'ended');
++      const audioTrack = audioTracks[0];
++      if (audioTrack) {
++        try { tracks.push(audioTrack === rawStream.getAudioTracks?.()[0] ? audioTrack : audioTrack.clone()); } catch (_) {}
++      }
++    }
++
++    const stream = new MediaStream(tracks);
++    const settings = videoTrack.getSettings?.() || {};
++    stream.__paraCaptureWidth = Math.max(2, Number(settings.width || element.videoWidth || element.width || rect.width || innerWidth || 1280));
++    stream.__paraCaptureHeight = Math.max(2, Number(settings.height || element.videoHeight || element.height || rect.height || innerHeight || 720));
++    stream.__paraCaptureMode = element instanceof HTMLCanvasElement ? 'direct-canvas-stream' : 'direct-video-stream';
++    stream.__paraCleanup = () => {
++      rawStream?.getTracks?.().forEach((track) => { try { track.stop(); } catch (_) {} });
++      tracks.slice(1).forEach((track) => {
++        if (!(rawStream?.getTracks?.() || []).includes(track)) { try { track.stop(); } catch (_) {} }
++      });
++    };
++    return stream;
++  }
++
+   function canvasHasVisualVariation(canvas) {
+     const probe = document.createElement('canvas');
+     probe.width = 64;
+@@ -2703,9 +2765,21 @@
+   }
+ 
+   async function requestGameStream(audio = false) {
+-    // V50: no browser tab/screen capture fallback. PARA records game-renderer
+-    // frames directly and lets the server normalize the temporary WebM.
+-    return requestCompositedGameStream(audio);
++    // V51: capture the renderer's own stream before trying to redraw it into a
++    // second canvas. WebGL canvases commonly use preserveDrawingBuffer=false;
++    // drawImage/getImageData can look blank even while canvas.captureStream()
++    // can capture the live renderer correctly. No tab/screen recorder fallback.
++    let directError = null;
++    try { return await requestDirectGameSurfaceStream(audio); }
++    catch (error) { directError = error; }
++    try { return await requestCompositedGameStream(audio); }
++    catch (error) {
++      const message = String(error?.message || 'PARA could not capture the game renderer.');
++      if (directError && message.includes('blank direct-capture surface')) {
++        throw new Error(`The renderer could not be captured directly. ${directError.message || ''}`.trim());
++      }
++      throw error;
++    }
+   }
+ 
+   const RUNTIME_CAPTURE_SLICE_MS = 1000;
+@@ -2907,7 +2981,8 @@
+       .dock{position:absolute;left:50%;bottom:max(29px,5.2vh);width:min(1040px,calc(100vw - 40px));transform:translate3d(-50%,0,0);will-change:transform;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px}
+       .context{width:min(760px,calc(100vw - 80px));min-height:108px;margin-bottom:4px;padding:16px 18px;display:none;align-items:center;justify-content:space-between;gap:18px;border:1px solid rgba(212,176,255,.25);border-radius:20px;background:rgba(10,7,15,.9);box-shadow:0 18px 55px rgba(0,0,0,.5);}
+       .context.show{display:flex}
+-      .contextCopy span,.contextCopy strong,.contextCopy small{display:block}
++      .contextCopy{min-width:0;max-width:100%}
++      .contextCopy span,.contextCopy strong,.contextCopy small{display:block;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+       .contextCopy span{color:#c89cff;font:850 10px/1 system-ui,sans-serif;letter-spacing:.13em;text-transform:uppercase}
+       .contextCopy strong{margin-top:5px;font-size:18px}
+       .contextCopy small{margin-top:5px;color:rgba(235,227,242,.62);font-size:12px}
+@@ -2925,7 +3000,7 @@
+       .tile:hover strong,.tile:focus-visible strong,.tile.focused strong{opacity:1}
+       .prompt{display:flex;align-items:center;justify-content:center;gap:6px;color:rgba(217,207,226,.48);font:650 10px/1 system-ui,sans-serif}
+       .prompt b{min-width:21px;height:19px;padding:0 5px;display:grid;place-items:center;border:1px solid rgba(205,165,255,.36);border-radius:6px;color:rgba(255,255,255,.82);font-size:9px}
+-      #toast{position:fixed;left:50%;bottom:138px;transform:translate(-50%,18px);padding:10px 14px;border:1px solid rgba(203,162,255,.28);border-radius:12px;color:#fff;background:rgba(8,6,12,.92);font:700 12px/1.3 system-ui,sans-serif;opacity:0;pointer-events:none;transition:.18s ease}
++      #toast{position:fixed;left:50%;bottom:138px;width:max-content;max-width:min(560px,calc(100vw - 24px));transform:translate(-50%,18px);padding:10px 14px;border:1px solid rgba(203,162,255,.28);border-radius:12px;color:#fff;background:rgba(8,6,12,.92);font:700 12px/1.35 system-ui,sans-serif;text-align:center;white-space:normal;overflow-wrap:anywhere;word-break:break-word;opacity:0;pointer-events:none;transition:.18s ease}
+       #toast.show{opacity:1;transform:translate(-50%,0)}
+       #achievementToast{position:fixed;top:max(24px,3vh);right:max(24px,3vw);width:min(390px,calc(100vw - 32px));min-height:92px;padding:14px 16px;display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:13px;align-items:center;border:1px solid rgba(213,177,255,.5);border-radius:18px;color:#fff;background:linear-gradient(135deg,rgba(18,12,27,.97),rgba(8,6,13,.97));box-shadow:0 22px 70px rgba(0,0,0,.58),0 0 32px rgba(147,72,237,.18);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;opacity:0;transform:translate3d(24px,0,0) scale(.98);pointer-events:none;transition:opacity .2s ease,transform .22s ease}
+       #achievementToast.show{opacity:1;transform:translate3d(0,0,0) scale(1)}
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -725,6 +725,17 @@
+         self.assertIn("imageio-ffmpeg==0.6.0", requirements)
+         self.assertIn("pip install -r requirements.txt", render)
+ 
++    def test_v51_direct_renderer_stream_and_control_center_text_wrapping(self):
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++        self.assertIn("requestDirectGameSurfaceStream", server)
++        self.assertIn("element.captureStream(30)", server)
++        self.assertIn("direct-canvas-stream", server)
++        self.assertIn("preserveDrawingBuffer=false", server)
++        self.assertNotIn("getDisplayMedia", server)
++        self.assertIn("max-width:min(560px,calc(100vw - 24px))", server)
++        self.assertIn("overflow-wrap:anywhere", server)
++        self.assertIn("word-break:break-word", server)
++
+     def test_v43_account_settings_are_real_account_hub(self):
+         system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
+         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")

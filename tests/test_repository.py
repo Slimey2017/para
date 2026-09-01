@@ -725,6 +725,17 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("imageio-ffmpeg==0.6.0", requirements)
         self.assertIn("pip install -r requirements.txt", render)
 
+    def test_v51_direct_renderer_stream_and_control_center_text_wrapping(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn("requestDirectGameSurfaceStream", server)
+        self.assertIn("element.captureStream(30)", server)
+        self.assertIn("direct-canvas-stream", server)
+        self.assertIn("preserveDrawingBuffer=false", server)
+        self.assertNotIn("getDisplayMedia", server)
+        self.assertIn("max-width:min(560px,calc(100vw - 24px))", server)
+        self.assertIn("overflow-wrap:anywhere", server)
+        self.assertIn("word-break:break-word", server)
+
     def test_v43_account_settings_are_real_account_hub(self):
         system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
