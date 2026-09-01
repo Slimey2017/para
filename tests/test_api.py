@@ -4,13 +4,14 @@ import sys
 import json
 from pathlib import Path
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -493,6 +494,33 @@ class ApiContractTests(unittest.TestCase):
         status, payload = auth_update_user("token", password="1234567")
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"], "weak_password")
+
+
+    def test_capture_normalizer_outputs_h264_mp4(self):
+        import server
+        ffmpeg = server._ffmpeg_executable()
+        if not ffmpeg:
+            self.skipTest("ffmpeg unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.webm"
+            output = Path(temporary) / "output.mp4"
+            generated = subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30",
+                "-t", "1", "-c:v", "libvpx", "-pix_fmt", "yuv420p", str(source),
+            ], capture_output=True, text=True, check=False)
+            if generated.returncode != 0:
+                self.skipTest(f"ffmpeg WebM fixture unavailable: {generated.stderr[-200:]}")
+            status, payload = normalize_capture_file(source, output, timeout=30)
+            self.assertEqual(status, 200, payload)
+            self.assertTrue(payload["normalized"])
+            self.assertEqual(payload["mime_type"], "video/mp4")
+            self.assertEqual(payload["video_codec"], "h264")
+            self.assertTrue(output.is_file())
+            body = output.read_bytes()
+            self.assertIn(b"ftyp", body[:64])
+            self.assertIn(b"moov", body)
+            self.assertLess(body.find(b"moov"), body.find(b"mdat"))
 
     def test_unknown_route_returns_not_found(self):
         status, payload = resolve("/api/v1/does-not-exist")

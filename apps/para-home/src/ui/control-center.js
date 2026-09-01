@@ -89,9 +89,7 @@ function contextMarkup(id) {
     return `<div class="control-center-context__copy"><span>Notifications</span><strong>${count ? `${count} new` : "You’re all caught up"}</strong><small>${notifications.length ? `${notifications.length} in history` : "No notifications yet"}</small></div>${notifications.length ? actionButton("View Notifications", `data-route="notifications"`, true) : ""}`;
   }
   if (id === "captures") {
-    const recording = manualRecordingStatus();
-    const replay = replayStatus();
-    return `<div class="control-center-context__copy"><span>Capture</span><strong>${recording.active ? "Recording now" : replay.active ? "PARA Replay ready" : "Capture gameplay"}</strong><small>${recording.active ? "Stop to save this recording" : replay.active ? "Save what happened, take a screenshot, or start a full recording" : "Screenshots, recordings, and recent gameplay"}</small></div><div class="capture-quick-actions">${actionButton("▣ Screenshot", `data-action="capture-screenshot"`, true)}${actionButton("↺ Save Recent", `data-action="open-replay-menu"`)}${actionButton(recording.active ? "■ Stop & Save" : "● Start Recording", `data-action="toggle-manual-recording"`)}${actionButton("▤ Media Gallery", `data-route="media-gallery"`)}</div>`;
+    return `<div class="control-center-context__copy"><span>Capture</span><strong>Capture from inside a game</strong><small>PARA no longer records the browser tab. Press the PARA button while a game is running to record direct game frames or save Replay.</small></div><div class="capture-quick-actions">${actionButton("▤ Media Gallery", `data-route="media-gallery"`, true)}</div>`;
   }
   if (id === "music") {
     const media = currentData.media || mediaSessionState();

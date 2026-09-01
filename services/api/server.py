@@ -13,6 +13,9 @@ import json
 import mimetypes
 import os
 import secrets
+import shutil
+import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -88,6 +91,9 @@ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_UPLOAD_SESSION_COOKIE = "para_youtube_upload_session"
 YOUTUBE_UPLOAD_SESSION_TTL_SECONDS = 45 * 60
 YOUTUBE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
+CAPTURE_NORMALIZE_MAX_BYTES = 256 * 1024 * 1024
+CAPTURE_NORMALIZE_TIMEOUT_SECONDS = 180
+CAPTURE_NORMALIZE_CONTENT_TYPES = {"video/webm", "video/x-matroska", "application/octet-stream"}
 GOOGLE_OAUTH_STATE_COOKIE = "para_google_oauth_state"
 GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60
 GOOGLE_OAUTH_SCOPES = (
@@ -101,6 +107,7 @@ _youtube_upload_lock = threading.Lock()
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
+_capture_transcode_slots = threading.BoundedSemaphore(1)
 
 
 def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
@@ -1344,6 +1351,83 @@ def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:
 
 
 
+
+def _ffmpeg_executable() -> str:
+    """Resolve the server-side encoder used to normalize browser captures."""
+    configured = _env_config("PARA_FFMPEG_PATH", "")
+    if configured and Path(configured).is_file():
+        return configured
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+    try:
+        import imageio_ffmpeg  # type: ignore
+
+        bundled = str(imageio_ffmpeg.get_ffmpeg_exe() or "")
+        if bundled and Path(bundled).is_file():
+            return bundled
+    except Exception:
+        pass
+    return ""
+
+
+def normalize_capture_file(input_path: Path, output_path: Path, *, timeout: int = CAPTURE_NORMALIZE_TIMEOUT_SECONDS) -> tuple[int, dict]:
+    """Transcode a temporary browser WebM into a boring H.264/AAC MP4."""
+    ffmpeg = _ffmpeg_executable()
+    if not ffmpeg:
+        return 503, {
+            "error": "capture_encoder_unavailable",
+            "message": "PARA capture processing is unavailable on this server.",
+        }
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+        "-fflags", "+genpts+discardcorrupt",
+        "-err_detect", "ignore_err",
+        "-i", str(input_path),
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "22",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "160k",
+        "-ar", "48000",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return 504, {
+            "error": "capture_processing_timeout",
+            "message": "PARA capture processing took too long. Try a shorter clip.",
+        }
+    except OSError:
+        return 503, {
+            "error": "capture_encoder_unavailable",
+            "message": "PARA could not start the capture encoder.",
+        }
+    if completed.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
+        detail = re.sub(r"\s+", " ", str(completed.stderr or "").strip())[-500:]
+        return 422, {
+            "error": "capture_processing_failed",
+            "message": "PARA could not normalize this gameplay recording.",
+            "detail": detail,
+        }
+    return 200, {
+        "normalized": True,
+        "mime_type": "video/mp4",
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "size": output_path.stat().st_size,
+    }
+
+
 def _store_build_storage_prefix(item: dict) -> str:
     """Return the physical Storage prefix for a published developer build.
 
@@ -1762,14 +1846,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   try { parent.postMessage({ type: 'para-game-runtime-ready', id: RUNTIME_ID }, location.origin); } catch (_) {}
 
-  const PARA_CAPTURE_HANDLE = `para-self-capture:${location.origin}`;
   const DB_NAME = 'para-media-gallery';
   const DB_STORE = 'captures';
   let shellOpen = false;
   let contextName = '';
   let manualRecording = null;
   let replay = null;
-  let sessionSelfCapture = null;
   let gamepadPrevious = [];
   let paraPressedAt = 0;
   let paraHeld = false;
@@ -2054,8 +2136,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   addEventListener('pagehide', () => {
     recordGameActivity();
     clearInterval(activityTimer);
-    try { sessionSelfCapture?.getTracks?.().forEach((track) => track.stop()); } catch (_) {}
-    sessionSelfCapture = null;
   }, { once: true });
 
   // Mirror WebAudio into a capture stream before the game scripts initialize.
@@ -2414,17 +2494,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   };
   window.requestAnimationFrame(paraInputTick);
 
-  function configureCaptureHandle() {
-    try {
-      navigator.mediaDevices?.setCaptureHandleConfig?.({
-        handle: PARA_CAPTURE_HANDLE,
-        exposeOrigin: false,
-        permittedOrigins: ['*']
-      });
-    } catch (_) {}
-  }
-  configureCaptureHandle();
-
   function openDb() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, 1);
@@ -2436,13 +2505,20 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     });
   }
 
-  async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0, captureMode = '' }) {
+  async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '' }) {
     const db = await openDb();
     const item = {
       id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
-      createdAt: Date.now(), source: 'PARA', captureVersion: 4,
-      ...(type === 'clip' ? { playbackVerified: true, recorderMimeType: blob.type || 'video/webm' } : {})
+      createdAt: Date.now(), source: 'PARA', captureVersion: 5,
+      ...(type === 'clip' ? {
+        playbackVerified: true,
+        recorderMimeType: sourceMimeType || 'video/webm',
+        sourceMimeType: sourceMimeType || 'video/webm',
+        normalized: blob.type === 'video/mp4',
+        videoCodec: blob.type === 'video/mp4' ? 'h264' : '',
+        audioCodec: blob.type === 'video/mp4' ? 'aac' : '',
+      } : {})
     };
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB_STORE, 'readwrite');
@@ -2626,87 +2702,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return stream;
   }
 
-  function liveSessionSelfCapture() {
-    if (!sessionSelfCapture) return null;
-    if (sessionSelfCapture.getVideoTracks().some((track) => track.readyState === 'live')) return sessionSelfCapture;
-    sessionSelfCapture = null;
-    return null;
-  }
-
-  async function requestSessionSelfCapture(audio = false) {
-    const existing = liveSessionSelfCapture();
-    if (existing) {
-      const stream = new MediaStream([
-        ...existing.getVideoTracks(),
-        ...(audio ? existing.getAudioTracks() : [])
-      ]);
-      stream.__paraCaptureWidth = Number(existing.getVideoTracks()[0]?.getSettings?.().width || innerWidth || 0);
-      stream.__paraCaptureHeight = Number(existing.getVideoTracks()[0]?.getSettings?.().height || innerHeight || 0);
-      stream.__paraCaptureMode = 'self-tab-element';
-      stream.__paraKeepAlive = true;
-      return stream;
-    }
-
-    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('This game needs browser self-tab capture, which is unavailable here.');
-    toast('This renderer needs one Chrome permission once. Choose This Tab.');
-    const display = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true,
-      preferCurrentTab: true,
-      selfBrowserSurface: 'include',
-      surfaceSwitching: 'exclude',
-      monitorTypeSurfaces: 'exclude'
-    });
-    const videoTrack = display.getVideoTracks()[0];
-    if (!videoTrack) {
-      display.getTracks().forEach((track) => track.stop());
-      throw new Error('Chrome did not provide a game video track.');
-    }
-    const captureHandle = videoTrack.getCaptureHandle?.();
-    if (captureHandle?.handle && captureHandle.handle !== PARA_CAPTURE_HANDLE) {
-      display.getTracks().forEach((track) => track.stop());
-      throw new Error('Choose This Tab so PARA records the game instead of another tab or window.');
-    }
-
-    // Chromium 132+ can remove PARA's system shell from the recording and
-    // capture only the game document body. This still needs the browser's
-    // one-time self-tab permission because a hosted web app cannot bypass it.
-    try {
-      if (globalThis.RestrictionTarget?.fromElement && typeof videoTrack.restrictTo === 'function' && document.body) {
-        document.body.style.isolation ||= 'isolate';
-        document.body.style.transformStyle = 'flat';
-        const target = await RestrictionTarget.fromElement(document.body);
-        await videoTrack.restrictTo(target);
-      }
-    } catch (_) {}
-    try { videoTrack.contentHint = 'motion'; } catch (_) {}
-    sessionSelfCapture = display;
-    videoTrack.addEventListener('ended', () => { if (sessionSelfCapture === display) sessionSelfCapture = null; }, { once: true });
-
-    const stream = new MediaStream([
-      videoTrack,
-      ...(audio ? display.getAudioTracks() : [])
-    ]);
-    const settings = videoTrack.getSettings?.() || {};
-    stream.__paraCaptureWidth = Number(settings.width || innerWidth || 0);
-    stream.__paraCaptureHeight = Number(settings.height || innerHeight || 0);
-    stream.__paraCaptureMode = 'self-tab-element';
-    stream.__paraKeepAlive = true;
-    return stream;
-  }
-
   async function requestGameStream(audio = false) {
-    try {
-      return await requestCompositedGameStream(audio);
-    } catch (directError) {
-      const stream = await requestSessionSelfCapture(audio);
-      stream.__paraFallbackReason = directError?.message || 'Direct game capture was blank.';
-      return stream;
-    }
+    // V50: no browser tab/screen capture fallback. PARA records game-renderer
+    // frames directly and lets the server normalize the temporary WebM.
+    return requestCompositedGameStream(audio);
   }
 
-  const RUNTIME_CAPTURE_PROBE_MS = 1300;
-  const RUNTIME_CAPTURE_PROBE_SLICE_MS = 250;
   const RUNTIME_CAPTURE_SLICE_MS = 1000;
   const RUNTIME_CAPTURE_DECODE_TIMEOUT_MS = 7000;
 
@@ -2724,16 +2725,16 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   function runtimeRecorderLabel(mimeType = '') {
-    return mimeType || 'browser default WebM';
+    return mimeType || 'browser temporary WebM';
   }
 
   function runtimeMediaDecodeMessage(video) {
     const code = Number(video?.error?.code || 0);
     if (code === 1) return 'Chromium interrupted capture playback.';
     if (code === 2) return 'Chromium could not read this capture media data.';
-    if (code === 3) return "Chromium rejected this capture's video stream.";
-    if (code === 4) return "Chromium does not support this capture's encoded video stream.";
-    return 'Chromium could not decode the recorded video.';
+    if (code === 3) return "Chromium rejected the normalized capture's video stream.";
+    if (code === 4) return "Chromium does not support the normalized capture's encoded video stream.";
+    return 'Chromium could not decode the normalized gameplay video.';
   }
 
   function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = RUNTIME_CAPTURE_SLICE_MS, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
@@ -2774,18 +2775,14 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       });
     }
     if (session.error) throw session.error;
-    return new Blob([...session.chunks], { type: recorder.mimeType || session.mimeType || 'video/webm' });
+    const blob = new Blob([...session.chunks], { type: recorder.mimeType || session.mimeType || 'video/webm' });
+    if (!blob.size || blob.size < 1024) throw new Error('PARA did not receive enough gameplay video data.');
+    return blob;
   }
 
-  async function verifyRecordedBlob(blob) {
-    const format = String(arguments[1] || '');
-    if (!blob?.size || blob.size < 1024) throw new Error('PARA did not receive enough gameplay video data.');
-    // Use a generic WebM Content-Type for local validation. The original bytes
-    // and exact recorder MIME are preserved when the capture is saved/uploaded.
-    const playbackBlob = String(blob.type || '').toLowerCase().includes('webm') && blob.type !== 'video/webm'
-      ? new Blob([blob], { type: 'video/webm' })
-      : blob;
-    const url = URL.createObjectURL(playbackBlob);
+  async function verifyNormalizedCapture(blob) {
+    if (!blob?.size || blob.size < 1024) throw new Error('PARA capture processing returned an empty video.');
+    const url = URL.createObjectURL(blob);
     const video = document.createElement('video');
     let frameTimer = 0;
     try {
@@ -2802,7 +2799,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         const onLoaded = () => {
           cleanup();
           if (!video.videoWidth || !video.videoHeight) {
-            reject(new Error('The gameplay recording contains no visible video frames.'));
+            reject(new Error('The normalized capture contains no visible video frames.'));
             return;
           }
           resolve();
@@ -2810,18 +2807,17 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         const onError = () => {
           const message = runtimeMediaDecodeMessage(video);
           cleanup();
-          reject(new Error(`${message}${format ? ` Recorder format: ${format}.` : ''}`));
+          reject(new Error(message));
         };
         video.addEventListener('loadeddata', onLoaded);
         video.addEventListener('error', onError);
         timer = setTimeout(() => {
           cleanup();
-          reject(new Error(`The gameplay recording could not be decoded.${format ? ` Recorder format: ${format}.` : ''}`));
+          reject(new Error('The normalized MP4 could not be decoded.'));
         }, RUNTIME_CAPTURE_DECODE_TIMEOUT_MS);
         video.src = url;
         video.load();
       });
-
       const startTime = Number(video.currentTime || 0);
       let decodedFrame = video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
       let framePromise = Promise.resolve();
@@ -2836,25 +2832,21 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         });
       }
       try { await video.play(); }
-      catch (_) { throw new Error(`${runtimeMediaDecodeMessage(video)}${format ? ` Recorder format: ${format}.` : ''}`); }
-
+      catch (_) { throw new Error(runtimeMediaDecodeMessage(video)); }
       const timelinePromise = new Promise((resolve, reject) => {
         const started = performance.now();
         const check = () => {
-          if (video.error) {
-            reject(new Error(`${runtimeMediaDecodeMessage(video)}${format ? ` Recorder format: ${format}.` : ''}`));
-            return;
-          }
+          if (video.error) { reject(new Error(runtimeMediaDecodeMessage(video))); return; }
           if (Number(video.currentTime || 0) > startTime + .04) { resolve(); return; }
-          if (video.ended) { reject(new Error('The gameplay recording ended before playback could advance.')); return; }
-          if (performance.now() - started > 3500) { reject(new Error('The gameplay recording decoded, but playback did not advance.')); return; }
+          if (video.ended) { reject(new Error('The normalized capture ended before playback could advance.')); return; }
+          if (performance.now() - started > 3500) { reject(new Error('The normalized capture decoded, but playback did not advance.')); return; }
           setTimeout(check, 50);
         };
         check();
       });
       await Promise.all([framePromise, timelinePromise]);
       const decodedFrames = Number(video.getVideoPlaybackQuality?.().totalVideoFrames || 0);
-      if (!decodedFrame && decodedFrames <= 0) throw new Error('Chromium did not decode a video frame from this gameplay recording.');
+      if (!decodedFrame && decodedFrames <= 0) throw new Error('Chromium did not decode a frame from the normalized MP4.');
       video.pause();
       return { width: video.videoWidth, height: video.videoHeight, duration: Number(video.duration || 0) };
     } finally {
@@ -2866,55 +2858,37 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
-  async function probeRuntimeRecorderMime(stream, mimeType) {
-    const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: RUNTIME_CAPTURE_PROBE_SLICE_MS, videoBitsPerSecond: 4_000_000 });
-    try {
-      await new Promise((resolve) => setTimeout(resolve, RUNTIME_CAPTURE_PROBE_MS));
-      const blob = await finalizeRuntimeRecorderSession(session);
-      await verifyRecordedBlob(blob, runtimeRecorderLabel(session.mimeType || mimeType));
-      return session.mimeType || mimeType || 'video/webm';
-    } catch (error) {
-      if (session.recorder.state !== 'inactive') {
-        try { session.recorder.stop(); } catch (_) {}
-      }
-      throw error;
+  async function normalizeRuntimeCapture(rawBlob, captureMode = '') {
+    const response = await fetch('/api/v1/capture/normalize', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': rawBlob.type || 'video/webm',
+        'X-PARA-Capture-Mode': captureMode || 'game-frames',
+      },
+      body: rawBlob,
+    });
+    if (!response.ok) {
+      let payload = null;
+      try { payload = await response.json(); } catch (_) {}
+      const detail = payload?.detail ? ` ${payload.detail}` : '';
+      throw new Error(`${payload?.message || `Capture processing failed (${response.status}).`}${detail}`.trim());
     }
+    const output = await response.blob();
+    const mp4 = output.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
+    await verifyNormalizedCapture(mp4);
+    return mp4;
   }
 
-  async function selectRuntimeRecorderMime(stream) {
+  function selectRuntimeRecorderMime(stream) {
     const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
-    const failures = [];
-    for (const candidate of runtimeRecorderMimeCandidates(hasAudio)) {
-      try { return await probeRuntimeRecorderMime(stream, candidate); }
-      catch (error) { failures.push(`${runtimeRecorderLabel(candidate)}: ${error?.message || 'failed'}`); }
-    }
-    throw new Error(`PARA could not find a Chromium-playable gameplay encoder. ${failures.join(' | ')}`.trim());
+    return runtimeRecorderMimeCandidates(hasAudio)[0] || '';
   }
 
   async function requestVerifiedGameRecording(audio = false) {
-    let direct = null;
-    let directError = null;
-    try {
-      direct = await requestCompositedGameStream(audio);
-      const mimeType = await selectRuntimeRecorderMime(direct);
-      return { stream: direct, mimeType, fallback: false };
-    } catch (error) {
-      directError = error;
-      if (direct) stopStream(direct);
-    }
-
-    // The compositor is permission-free but some Chromium builds can produce a
-    // canvas stream that MediaRecorder accepts and Chromium later cannot decode.
-    // In that case use browser self-tab capture, which supplies a browser-native
-    // video track and is considerably more reliable for recording.
-    const fallback = await requestSessionSelfCapture(audio);
-    try {
-      const mimeType = await selectRuntimeRecorderMime(fallback);
-      fallback.__paraFallbackReason = directError?.message || 'The direct gameplay encoder failed validation.';
-      return { stream: fallback, mimeType, fallback: true };
-    } catch (fallbackError) {
-      throw new Error(`PARA could not create a playable gameplay stream. Direct capture: ${directError?.message || 'failed'}. Self-tab capture: ${fallbackError?.message || 'failed'}.`);
-    }
+    const stream = await requestGameStream(audio);
+    const mimeType = selectRuntimeRecorderMime(stream);
+    return { stream, mimeType, fallback: false };
   }
 
   const host = document.createElement('div');
@@ -3222,7 +3196,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         captureMode: stream.__paraCaptureMode || ''
       };
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
-      if (prepared.fallback) toast('Recording started · browser-safe capture');
+      toast('Recording started · direct game frames');
     } catch (error) {
       toast(error?.message || 'Recording could not start');
     }
@@ -3233,15 +3207,17 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (!active || active.stopping) return;
     active.stopping = true;
     try {
-      const blob = await finalizeRuntimeRecorderSession(active.session);
-      await verifyRecordedBlob(blob, runtimeRecorderLabel(active.mimeType));
+      const rawBlob = await finalizeRuntimeRecorderSession(active.session);
+      toast('Processing capture · creating MP4');
+      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames');
       await saveCapture({
         type: 'clip',
         blob,
         width: active.width || 0,
         height: active.height || 0,
         durationMs: Date.now() - active.startedAt,
-        captureMode: active.captureMode || ''
+        captureMode: active.captureMode || '',
+        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm'
       });
       toast('Gameplay capture verified and saved');
     } catch (error) {
@@ -3282,8 +3258,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         replay = null;
         toast('PARA Replay stopped');
       }, { once: true });
-      const modeLabel = prepared.fallback ? 'browser-safe capture' : (stream.__paraCaptureMode === 'self-tab-element' ? 'full renderer' : 'game frames');
-      toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · ${modeLabel}`);
+      toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · direct game frames`);
     } catch (error) {
       toast(error?.message || 'Replay could not start');
     }
@@ -3296,15 +3271,17 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       await new Promise((resolve) => setTimeout(resolve, 220));
       const cutoff = Date.now() - durationMs;
       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
-      const blob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
-      await verifyRecordedBlob(blob, runtimeRecorderLabel(replay.mimeType));
+      const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
+      toast('Processing replay · creating MP4');
+      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames');
       await saveCapture({
         type: 'clip',
         blob,
         width: replay.width || 0,
         height: replay.height || 0,
         durationMs: Math.min(durationMs, Date.now() - replay.startedAt),
-        captureMode: replay.captureMode || ''
+        captureMode: replay.captureMode || '',
+        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm'
       });
       toast('Recent gameplay verified and saved to PARA Media');
     } catch (error) {
@@ -3579,6 +3556,16 @@ class ParaHandler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        for key, value in extra_headers or []:
+            self.send_header(key, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_bytes(self, status: int, body: bytes, content_type: str, extra_headers: list[tuple[str, str]] | None = None) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "private, no-store")
         for key, value in extra_headers or []:
             self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
@@ -3900,6 +3887,77 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path == "/api/v1/capture/normalize":
+            # Public hosted PARA requires an account before spending server CPU on
+            # video transcoding. Loopback/local PARA can normalize without cloud auth.
+            server_host = str(self.server.server_address[0] if self.server and self.server.server_address else "")
+            try:
+                local_server = ipaddress.ip_address(server_host).is_loopback
+            except ValueError:
+                local_server = False
+            refreshed_headers: list[tuple[str, str]] = []
+            if not local_server:
+                status, _, _, refreshed_headers = self._authenticated_access()
+                if status != 200:
+                    self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+                    return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length < 1024 or length > CAPTURE_NORMALIZE_MAX_BYTES:
+                self._send_json(413, {
+                    "error": "capture_size_invalid",
+                    "message": "Choose a non-empty gameplay capture smaller than 256 MB.",
+                }, refreshed_headers)
+                return
+            content_type = str(self.headers.get("Content-Type") or "video/webm").split(";", 1)[0].strip().lower()
+            if content_type not in CAPTURE_NORMALIZE_CONTENT_TYPES:
+                self._send_json(415, {
+                    "error": "capture_format_invalid",
+                    "message": "PARA capture processing currently accepts temporary WebM recordings only.",
+                }, refreshed_headers)
+                return
+            if not _capture_transcode_slots.acquire(timeout=2):
+                self._send_json(429, {
+                    "error": "capture_encoder_busy",
+                    "message": "PARA is already processing another capture. Try again in a moment.",
+                }, refreshed_headers)
+                return
+            try:
+                with tempfile.TemporaryDirectory(prefix="para-capture-") as temporary:
+                    input_path = Path(temporary) / "capture.webm"
+                    output_path = Path(temporary) / "capture.mp4"
+                    remaining = length
+                    with input_path.open("wb") as destination:
+                        while remaining > 0:
+                            chunk = self.rfile.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                break
+                            destination.write(chunk)
+                            remaining -= len(chunk)
+                    if remaining != 0 or input_path.stat().st_size != length:
+                        self._send_json(400, {
+                            "error": "capture_upload_incomplete",
+                            "message": "The capture upload ended before PARA received the complete recording.",
+                        }, refreshed_headers)
+                        return
+                    transcode_status, transcode = normalize_capture_file(input_path, output_path)
+                    if transcode_status != 200:
+                        self._send_json(transcode_status, transcode, refreshed_headers)
+                        return
+                    body = output_path.read_bytes()
+                    headers = [
+                        *refreshed_headers,
+                        ("X-PARA-Capture-Normalized", "1"),
+                        ("X-PARA-Video-Codec", "h264"),
+                        ("X-PARA-Audio-Codec", "aac"),
+                    ]
+                    self._send_bytes(200, body, "video/mp4", headers)
+                    return
+            finally:
+                _capture_transcode_slots.release()
+
         if request.path == "/api/v1/integrations/google/youtube/upload":
             status, _, para_access, refreshed_headers = self._authenticated_access()
             clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)

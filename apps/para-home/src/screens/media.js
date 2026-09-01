@@ -28,7 +28,7 @@ function durationLabel(ms = 0) {
 }
 
 function details(item) {
-  if (item.type === "clip") return `${durationLabel(item.durationMs)} · ${item.mimeType?.includes("webm") ? "WebM" : "Video"}`;
+  if (item.type === "clip") return `${durationLabel(item.durationMs)} · ${item.mimeType?.includes("mp4") ? "MP4" : item.mimeType?.includes("webm") ? "WebM" : "Video"}`;
   return `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}${item.width ? " · " : ""}Screenshot`;
 }
 

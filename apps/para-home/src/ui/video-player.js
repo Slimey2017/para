@@ -22,7 +22,7 @@ function mediaErrorMessage(video, error = null) {
   const code = Number(video?.error?.code || 0);
   if (code === 1 || error?.name === "AbortError") return "Playback was interrupted. Press Play again.";
   if (code === 2) return "PARA could not read this capture from local storage.";
-  if (code === 3) return "Chrome could not decode this WebM capture.";
+  if (code === 3) return "Chrome could not decode this capture.";
   if (code === 4 || error?.name === "NotSupportedError") return "Chrome rejected this capture's video stream.";
   if (error?.name === "NotAllowedError") return "Chrome blocked playback. Press Play again.";
   return error?.message ? `Playback failed: ${error.message}` : "PARA could not play this capture.";
@@ -119,7 +119,7 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
         if (typeof video.fastSeek === "function") video.fastSeek(target);
         else video.currentTime = target;
       } catch {
-        // Some MediaRecorder WebM files are playable before they become seekable.
+        // Some legacy MediaRecorder captures are playable before they become seekable.
         // Playback should keep working even when timeline seeking is unavailable.
       }
     };
@@ -187,8 +187,8 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
       update();
     };
     const onLoaded = () => {
-      // Do not seek to an absurd timestamp to "repair" WebM duration metadata.
-      // MediaRecorder WebM often reports Infinity/unknown duration but is still
+      // Do not seek to an absurd timestamp to "repair" legacy capture duration metadata.
+      // Older MediaRecorder files can report Infinity/unknown duration but are still
       // perfectly playable. The old repair seek could strand the video at EOF.
       setStatus("");
       update();
@@ -222,8 +222,8 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
 
     // Do not reject an IndexedDB capture solely from canPlayType(). Older PARA
     // recordings can carry an over-specific MediaRecorder codec string even
-    // when Chromium can decode the underlying WebM bytes. The playback Blob is
-    // normalized to video/webm by capture-service and the browser gets the final
+    // when Chromium can decode the underlying capture bytes. capture-service gives
+    // the browser the final playback MIME (MP4 for V50, WebM for legacy clips)
     // say by actually loading the source.
     player.dataset.mimeHint = mimeType && video.canPlayType?.(mimeType) === "" ? "unknown" : "supported";
     setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");

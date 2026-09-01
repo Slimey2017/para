@@ -72,7 +72,8 @@ class RepositoryTests(unittest.TestCase):
 
     def test_render_blueprint_uses_real_api(self):
         blueprint = (ROOT / "render.yaml").read_text(encoding="utf-8")
-        self.assertIn("buildCommand: ./scripts/check.sh", blueprint)
+        self.assertIn("python3 -m pip install -r requirements.txt", blueprint)
+        self.assertIn("./scripts/check.sh", blueprint)
         self.assertIn("startCommand: ./scripts/render-start.sh", blueprint)
         self.assertIn("healthCheckPath: /api/v1/health", blueprint)
         launcher = (ROOT / "scripts/render-start.sh").read_text(encoding="utf-8")
@@ -370,8 +371,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn(".capture-hero__fullscreen", css)
         self.assertIn("data-video-status", player)
         self.assertIn("video.canPlayType", player)
-        self.assertIn("playback did not advance", capture)
-        self.assertIn("assertPlayableVideo", capture)
+        # V50 moved recording validation out of the Home/browser-tab recorder.
+        # Keep legacy WebM playback support here while new clips arrive as MP4.
+        self.assertIn('return "video/webm"', capture)
+        self.assertIn('return "video/mp4"', capture)
+        self.assertNotIn("MediaRecorder", capture)
 
     def test_v47_webm_playback_uses_generic_blob_mime_and_direct_video_src(self):
         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
@@ -390,24 +394,21 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("player.dataset.mimeHint", player)
         self.assertNotIn("Unsupported media type", player)
 
-    def test_v48_capture_recorder_preflights_codec_flushes_final_chunk_and_rejects_bad_video(self):
+    def test_v48_capture_safety_is_superseded_by_v50_runtime_normalization(self):
         capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
-        self.assertIn('"video/webm;codecs=vp8,opus"', capture)
-        self.assertLess(capture.index('"video/webm;codecs=vp8,opus"'), capture.index('"video/webm;codecs=vp9,opus"'))
-        self.assertIn("CAPTURE_CHUNK_MS = 1000", capture)
-        self.assertIn("recorder.start(timesliceMs)", capture)
-        self.assertIn("async function flushRecorderData", capture)
-        self.assertIn("async function finalizeRecorderSession", capture)
-        self.assertIn("final dataavailable event is queued", capture)
-        self.assertIn("async function probeRecorderMimeType", capture)
-        self.assertIn("async function selectRecorderMimeType", capture)
-        self.assertIn("MediaRecorder.isTypeSupported", capture)
-        self.assertIn("requestVideoFrameCallback", capture)
-        self.assertIn("playback did not advance", capture)
-        self.assertIn("Chrome rejected this capture's video stream.", capture)
-        self.assertIn("playbackVerified: true", capture)
-        self.assertIn("recorderMimeType", capture)
-        self.assertNotIn("function recorderMimeType()", capture)
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        # V48 hardened a browser-tab WebM recorder. V50 intentionally removes
+        # that recorder and treats WebM only as a temporary runtime transport.
+        self.assertNotIn("getDisplayMedia", capture)
+        self.assertNotIn("MediaRecorder", capture)
+        self.assertIn("PARA no longer records the browser tab", capture)
+        self.assertIn('captureCanvas.captureStream(30)', server)
+        self.assertIn('new MediaRecorder(stream, runtimeRecorderOptions', server)
+        self.assertIn('normalizeRuntimeCapture', server)
+        self.assertIn('/api/v1/capture/normalize', server)
+        self.assertIn('captureVersion: 5', server)
+        self.assertIn('playbackVerified: true', server)
+        self.assertIn('video/mp4', server)
 
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
@@ -548,19 +549,19 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("const GAME_ACTIVITY_ID = `store:${RUNTIME_ID}`", server)
         self.assertIn("localStorage.setItem(HOME_STATE_KEY", server)
 
-    def test_game_capture_prefers_direct_frames_then_reuses_self_tab_fallback(self):
+    def test_game_capture_uses_direct_frames_without_self_tab_fallback(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         self.assertIn('captureCanvas.captureStream(30)', server)
         self.assertIn('async function requestGameStream(audio = false)', server)
         self.assertIn('requestCompositedGameStream(audio)', server)
-        self.assertIn('requestSessionSelfCapture(audio)', server)
-        self.assertIn('navigator.mediaDevices.getDisplayMedia', server)
-        self.assertIn("preferCurrentTab: true", server)
-        self.assertIn("sessionSelfCapture", server)
-        self.assertIn("RestrictionTarget.fromElement(document.body)", server)
         self.assertIn('createMediaStreamDestination()', server)
-        self.assertIn('async function verifyRecordedBlob(blob)', server)
-        self.assertIn('The gameplay recording could not be decoded.', server)
+        self.assertIn('normalizeRuntimeCapture', server)
+        self.assertNotIn('requestSessionSelfCapture(audio)', server)
+        self.assertNotIn('navigator.mediaDevices.getDisplayMedia', server)
+        self.assertNotIn("preferCurrentTab: true", server)
+        self.assertNotIn("sessionSelfCapture", server)
+        self.assertNotIn("RestrictionTarget.fromElement(document.body)", server)
+        self.assertNotIn('Choose This Tab', server)
 
     def test_game_control_center_matches_home_button_contract_and_avoids_fullscreen_blur(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
@@ -664,7 +665,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'self'", server)
 
 
-    def test_v49_runtime_capture_and_online_trophies_are_regression_guarded(self):
+    def test_v49_online_trophies_are_regression_guarded(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
         api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
@@ -672,15 +673,6 @@ class RepositoryTests(unittest.TestCase):
         render = (ROOT / "render.yaml").read_text(encoding="utf-8")
         migration = (ROOT / "supabase/secure_online_achievement_runtime.sql").read_text(encoding="utf-8")
 
-        for marker in [
-            "requestVerifiedGameRecording",
-            "probeRuntimeRecorderMime",
-            "RUNTIME_CAPTURE_SLICE_MS = 1000",
-            "Chromium rejected this capture's video stream.",
-            "browser-safe capture",
-            "captureVersion: 4",
-        ]:
-            self.assertIn(marker, server)
         for marker in [
             "PARA_SUPABASE_SERVICE_ROLE_KEY",
             "/api/v1/achievements/progress",
@@ -701,6 +693,37 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("revoke all on function public.record_player_achievement_progress", migration.lower())
         self.assertIn("to service_role", migration.lower())
         self.assertNotIn("to authenticated", migration.lower().split("grant execute", 1)[-1])
+
+    def test_v50_capture_uses_direct_frames_and_server_mp4_normalization(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+        for marker in [
+            "/api/v1/capture/normalize",
+            "normalize_capture_file",
+            '"-c:v", "libx264"',
+            '"-c:a", "aac"',
+            '"-movflags", "+faststart"',
+            "normalizeRuntimeCapture",
+            "requestCompositedGameStream",
+            "captureVersion: 5",
+            "video/mp4",
+        ]:
+            self.assertIn(marker, server)
+        self.assertNotIn("getDisplayMedia", server)
+        self.assertNotIn("Choose This Tab", server)
+        self.assertNotIn("self-tab", server)
+        self.assertNotIn("getDisplayMedia", capture)
+        self.assertNotIn("MediaRecorder", capture)
+        self.assertIn("PARA no longer records the browser tab", capture)
+        self.assertIn("MP4", media)
+        self.assertIn("Capture from inside a game", control)
+        self.assertIn("imageio-ffmpeg==0.6.0", requirements)
+        self.assertIn("pip install -r requirements.txt", render)
 
     def test_v43_account_settings_are_real_account_hub(self):
         system = (ROOT / "apps/para-home/src/screens/system.js").read_text(encoding="utf-8")
