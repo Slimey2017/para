@@ -1,0 +1,1390 @@
+diff --git a/apps/para-home/src/screens/browser.js b/apps/para-home/src/screens/browser.js
+index df2b9b3..0bbc6ad 100644
+--- a/apps/para-home/src/screens/browser.js
++++ b/apps/para-home/src/screens/browser.js
+@@ -80,7 +80,7 @@ export function browserScreen() {
+   return page({
+     title: "Browser", description: "", eyebrow: "", className: "browser-page browser-app-page",
+     body: `<section class="para-browser para-browser--app" data-para-browser>
+-      <header class="browser-app-chrome">
++      <header class="browser-app-bar">
+         <div class="browser-app-tabstrip" aria-label="Browser tabs">
+           <div class="browser-app-brand"><span class="browser-app-mark">P</span><strong>Para Browser</strong></div>
+           <div class="browser-tabs" data-browser-tabs></div>
+diff --git a/apps/para-home/src/screens/media.js b/apps/para-home/src/screens/media.js
+index a7f6dee..2b41231 100644
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -32,24 +32,16 @@ function durationLabel(ms = 0) {
+ }
+ 
+ function captureState(item = {}) {
+-  const state = String(item.captureState || "ready").toLowerCase();
+-  return ["queued", "processing", "saving", "failed", "ready"].includes(state) ? state : "ready";
++  // V56 removed the server-side conversion pipeline. Any stored clip blob is
++  // the capture itself, including recordings left behind by older processing states.
++  if (item?.type === "clip" && item?.blob) return "ready";
++  return "ready";
+ }
+ 
+-function captureStateLabel(item = {}) {
+-  const state = captureState(item);
+-  if (state === "queued") return Number(item.queueAhead || 0) > 0 ? `Queued · ${Number(item.queueAhead)} ahead` : "Queued";
+-  if (state === "processing") return "Processing MP4";
+-  if (state === "saving") return "Saving to Media Gallery";
+-  if (state === "failed") return "MP4 failed · original kept";
+-  return "Ready";
+-}
+ 
+ function details(item) {
+   if (item.type === "clip") {
+-    const format = item.mimeType?.includes("mp4") ? "MP4" : item.mimeType?.includes("webm") ? "WebM" : "Video";
+-    const state = captureState(item);
+-    return `${durationLabel(item.durationMs)} · ${format}${state === "ready" ? "" : ` · ${captureStateLabel(item)}`}`;
++    return `${durationLabel(item.durationMs)} · Video`;
+   }
+   return `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}${item.width ? " · " : ""}Screenshot`;
+ }
+@@ -59,9 +51,7 @@ function heroMarkup(item) {
+   const url = mediaUrl(item);
+   const state = captureState(item);
+   const isReady = state === "ready";
+-  const statusMarkup = item.type === "clip" && !isReady
+-    ? `<div class="capture-processing-banner capture-processing-banner--${state}"><strong>${escapeHtml(captureStateLabel(item))}</strong><span>${state === "failed" ? escapeHtml(item.failureMessage || "PARA kept the original WebM recording so the video is not lost.") : "The original recording is already stored locally. PARA will only mark this video ready after the MP4 is verified and read back from Media Gallery."}</span></div>`
+-    : "";
++  const statusMarkup = "";
+   const mediaStage = item.type === "clip"
+     ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
+     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
+@@ -69,7 +59,7 @@ function heroMarkup(item) {
+     ${mediaStage}
+     <div class="capture-hero__info">
+       ${statusMarkup}
+-      <div><span>${item.type === "clip" ? (isReady ? "GAMEPLAY VIDEO" : "LOCAL RECORDING") : "SCREENSHOT"}</span><h2>${item.type === "clip" ? (state === "failed" ? "Original gameplay recording" : state === "ready" ? "Gameplay capture" : "Gameplay capture processing") : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
++      <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
+       <div class="capture-hero__actions" data-focus-zone="capture-actions">
+         <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
+         ${item.type === "clip" && isReady ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
+@@ -87,7 +77,7 @@ function railMarkup(items) {
+     const url = mediaUrl(item);
+     const media = item.type === "clip" ? `<video src="${url}" preload="metadata" muted playsinline></video>` : `<img src="${url}" alt="">`;
+     const state = captureState(item);
+-    return `<button type="button" class="capture-thumb capture-thumb--${state} ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${state === "ready" ? durationLabel(item.durationMs) : escapeHtml(captureStateLabel(item))}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${state === "ready" ? fmt.format(item.createdAt) : escapeHtml(captureStateLabel(item))}</small></span></button>`;
++    return `<button type="button" class="capture-thumb capture-thumb--${state} ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${durationLabel(item.durationMs)}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${fmt.format(item.createdAt)}</small></span></button>`;
+   }).join("")}</div></section>`;
+ }
+ 
+diff --git a/apps/para-home/src/services/capture-service.js b/apps/para-home/src/services/capture-service.js
+index e071d0b..7d9084a 100644
+--- a/apps/para-home/src/services/capture-service.js
++++ b/apps/para-home/src/services/capture-service.js
+@@ -57,7 +57,7 @@ export async function deleteCapture(id) {
+ }
+ 
+ function runtimeOnlyError(action = "capture gameplay") {
+-  return new Error(`Open a game to ${action}. PARA no longer records the browser tab; gameplay capture runs inside the game and is normalized to MP4.`);
++  return new Error(`Open a game to ${action}. PARA records gameplay inside the game and saves the recording directly to Media Gallery.`);
+ }
+ 
+ function emitCaptureState() {
+@@ -67,8 +67,8 @@ function emitCaptureState() {
+   }));
+ }
+ 
+-// V50 deliberately removes browser-tab capture from PARA Home. Game screenshots
+-// are captured from the game renderer by the injected runtime, without a tab picker.
++// PARA Home does not record the surrounding page. Game screenshots and video
++// are captured from the game renderer by the injected runtime.
+ export async function captureScreenshot() {
+   throw runtimeOnlyError("take a gameplay screenshot");
+ }
+diff --git a/apps/para-home/src/ui/video-player.js b/apps/para-home/src/ui/video-player.js
+index 481318c..7f6cb18 100644
+--- a/apps/para-home/src/ui/video-player.js
++++ b/apps/para-home/src/ui/video-player.js
+@@ -22,19 +22,19 @@ function mediaErrorMessage(video, error = null) {
+   const code = Number(video?.error?.code || 0);
+   if (code === 1 || error?.name === "AbortError") return "Playback was interrupted. Press Play again.";
+   if (code === 2) return "PARA could not read this capture from local storage.";
+-  if (code === 3) return "Chrome could not decode this capture.";
+-  if (code === 4 || error?.name === "NotSupportedError") return "Chrome rejected this capture's video stream.";
+-  if (error?.name === "NotAllowedError") return "Chrome blocked playback. Press Play again.";
++  if (code === 3) return "PARA could not decode this capture.";
++  if (code === 4 || error?.name === "NotSupportedError") return "This capture format could not be played.";
++  if (error?.name === "NotAllowedError") return "Playback was blocked. Press Play again.";
+   return error?.message ? `Playback failed: ${error.message}` : "PARA could not play this capture.";
+ }
+ 
+ export function paraVideoPlayerMarkup({ src, mimeType = "", durationMs = 0, className = "", autoplay = false } = {}) {
+   const expectedSeconds = Math.max(0, Number(durationMs || 0) / 1000);
+   return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}" data-video-mime="${escapeAttr(mimeType)}">
+-    <video src="${escapeAttr(src)}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>Your browser could not play this PARA recording.</video>
++    <video src="${escapeAttr(src)}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>PARA could not play this recording.</video>
+     <button type="button" class="para-video-player__bigplay" data-video-action="toggle" aria-label="Play video">▶</button>
+     <div class="para-video-player__status" data-video-status hidden><span></span><strong data-video-status-text>Loading video…</strong></div>
+-    <div class="para-video-player__chrome">
++    <div class="para-video-player__controls-shell">
+       <input class="para-video-player__seek" type="range" min="0" max="1000" step="1" value="0" data-video-seek aria-label="Video position">
+       <div class="para-video-player__controls">
+         <button type="button" data-video-action="toggle" aria-label="Play or pause"><span data-video-play-icon>▶</span></button>
+@@ -222,8 +222,8 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
+ 
+     // Do not reject an IndexedDB capture solely from canPlayType(). Older PARA
+     // recordings can carry an over-specific MediaRecorder codec string even
+-    // when Chromium can decode the underlying capture bytes. capture-service gives
+-    // the browser the final playback MIME (MP4 for V50, WebM for legacy clips)
++    // when the media engine can decode the underlying capture bytes. capture-service gives
++    // the player a conservative playback MIME for existing captures
+     // say by actually loading the source.
+     player.dataset.mimeHint = mimeType && video.canPlayType?.(mimeType) === "" ? "unknown" : "supported";
+     setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");
+diff --git a/apps/para-home/styles.css b/apps/para-home/styles.css
+index 8caca2f..b9276f9 100644
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -1228,7 +1228,7 @@ html[data-reduced-motion=true] .home-continue-item,html[data-reduced-motion=true
+   .settings-controller-tip { display: none; }
+ }
+ 
+-/* PARA console-feel pass: couch-first, controller-first, no browser chrome. */
++/* PARA console-feel pass: couch-first, controller-first, no surrounding browser UI. */
+ html,body,#para-app{overscroll-behavior:none} body{user-select:none;-webkit-user-select:none} img{-webkit-user-drag:none;user-drag:none} a{color:inherit;text-decoration:none} button,input,textarea,select{font:inherit} *{scrollbar-color:rgba(159,91,255,.35) transparent} *::-webkit-scrollbar{width:6px;height:6px} *::-webkit-scrollbar-thumb{background:rgba(159,91,255,.32);border-radius:99px} *::-webkit-scrollbar-track{background:transparent}
+ button,[tabindex="0"],.os-card,.os-row{transition:transform .18s var(--spring),box-shadow .18s ease,border-color .18s ease,background .18s ease,opacity .18s ease,filter .18s ease}
+ [data-input-device="controller"] button[data-focused="true"],[data-input-device="controller"] [tabindex="0"][data-focused="true"]{transform:translateY(-3px) scale(1.018);border-color:rgba(211,174,255,.72)!important;box-shadow:0 0 0 2px rgba(157,83,255,.12),0 10px 34px rgba(0,0,0,.34),0 0 24px rgba(147,65,243,.18)!important;outline:none!important}
+@@ -1551,7 +1551,7 @@ html:not([data-parapoint="active"]) .parapoint-cursor { display:none; }
+   background:#08070d;
+   box-shadow:0 28px 90px rgba(0,0,0,.44), inset 0 1px rgba(255,255,255,.04);
+ }
+-.browser-app-chrome {
++.browser-app-bar {
+   background:linear-gradient(180deg,rgba(18,14,28,.99),rgba(10,8,16,.985));
+   border-bottom:1px solid rgba(255,255,255,.07);
+ }
+@@ -1739,15 +1739,15 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+   display:grid!important;
+   grid-template-columns:minmax(0,1fr)!important;
+   grid-template-rows:auto minmax(0,1fr) auto!important;
+-  grid-template-areas:"chrome" "stage" "help"!important;
++  grid-template-areas:"bar" "stage" "help"!important;
+   width:100%!important;
+   height:100%!important;
+   min-width:0!important;
+   min-height:0!important;
+   overflow:hidden!important;
+ }
+-.para-browser--app > .browser-app-chrome {
+-  grid-area:chrome!important;
++.para-browser--app > .browser-app-bar {
++  grid-area:bar!important;
+   min-width:0;
+ }
+ .para-browser--app > .para-browser-stage {
+@@ -2097,7 +2097,7 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ .para-video-player__bigplay{position:absolute;left:50%;top:50%;z-index:3;width:76px;height:76px;display:grid;place-items:center;transform:translate(-50%,-50%);padding:0 0 0 4px;border:1px solid rgba(255,255,255,.26);border-radius:50%;background:rgba(8,5,14,.72);backdrop-filter:blur(15px);color:#fff;font-size:1.55rem;cursor:pointer;box-shadow:0 18px 54px rgba(0,0,0,.42);transition:opacity .18s ease,transform .18s ease,background .18s ease}
+ .para-video-player__bigplay.is-playing{opacity:0;transform:translate(-50%,-50%) scale(.86);pointer-events:none}.para-video-player:hover .para-video-player__bigplay.is-playing,.para-video-player:focus-within .para-video-player__bigplay.is-playing{opacity:.5;pointer-events:auto}
+ .para-video-player__status{position:absolute;left:16px;top:16px;z-index:5;display:flex;align-items:center;gap:8px;max-width:min(440px,calc(100% - 32px));padding:8px 11px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(8,5,13,.74);backdrop-filter:blur(12px);color:rgba(255,255,255,.78);font-size:.7rem;box-shadow:0 10px 26px rgba(0,0,0,.26)}.para-video-player__status[hidden]{display:none}.para-video-player__status span{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:#b978ff;box-shadow:0 0 14px rgba(185,120,255,.7);animation:paraVideoPulse 1s ease-in-out infinite}.para-video-player__status strong{font-weight:760}.para-video-player__status.is-error{border-color:rgba(255,104,124,.32);color:#ffd4da;background:rgba(48,8,17,.86)}.para-video-player__status.is-error span{background:#ff667c;box-shadow:0 0 14px rgba(255,82,107,.58);animation:none}@keyframes paraVideoPulse{50%{opacity:.35;transform:scale(.75)}}
+-.para-video-player__chrome{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:40px 16px 14px;background:linear-gradient(0deg,rgba(0,0,0,.94),rgba(0,0,0,.54),transparent);opacity:.25;transition:opacity .18s ease}.para-video-player:hover .para-video-player__chrome,.para-video-player:focus-within .para-video-player__chrome,.para-video-player:fullscreen .para-video-player__chrome{opacity:1}
++.para-video-player__controls-shell{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:40px 16px 14px;background:linear-gradient(0deg,rgba(0,0,0,.94),rgba(0,0,0,.54),transparent);opacity:.25;transition:opacity .18s ease}.para-video-player:hover .para-video-player__controls-shell,.para-video-player:focus-within .para-video-player__controls-shell,.para-video-player:fullscreen .para-video-player__controls-shell{opacity:1}
+ .para-video-player__seek{width:100%;height:5px;margin:0 0 9px;accent-color:#a85cff;cursor:pointer}.para-video-player__controls{display:flex;align-items:center;gap:8px}.para-video-player__controls button{min-width:38px;height:36px;padding:0 9px;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:rgba(255,255,255,.075);color:#fff;font-weight:800;cursor:pointer}.para-video-player__controls button:hover,.para-video-player__controls button:focus-visible{outline:0;border-color:rgba(188,125,255,.7);background:rgba(143,69,236,.3)}
+ .para-video-player__time{display:flex;align-items:center;gap:5px;margin-left:3px;color:rgba(255,255,255,.72);font-size:.7rem;white-space:nowrap}.para-video-player__time b{color:#fff;font-weight:760}.para-video-player__time i{font-style:normal;opacity:.45}.para-video-player__spacer{flex:1}.para-video-player__volume{width:76px;accent-color:#a85cff}.para-video-player__speed{height:36px;padding:0 8px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(8,5,13,.86);color:#fff;font:750 .68rem/1 system-ui}.para-video-player:focus-visible{box-shadow:inset 0 0 0 3px rgba(189,126,255,.72)}
+ .para-video-player--viewer{min-height:0}.capture-viewer__stage .para-video-player{width:min(100%,1600px);height:100%}.capture-hero__media--video{cursor:default}.capture-hero__media--video:after{display:none}.capture-action--youtube{border-color:rgba(255,82,82,.24);background:linear-gradient(135deg,rgba(194,30,46,.24),rgba(91,24,135,.14))}.capture-action--youtube b{background:rgba(255,48,64,.15)}
+@@ -2175,7 +2175,7 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ .friends-empty h2{margin:0;color:#fff;font-size:1.55rem}.friends-empty p{max-width:520px;margin:10px auto 0;color:rgba(239,231,246,.58);font-size:.86rem;line-height:1.55}.friends-empty small{display:block;margin-top:14px;color:rgba(213,195,228,.4);font-size:.7rem;line-height:1.45}
+ @media(max-width:720px){.friends-console__bar{align-items:flex-start;flex-direction:column}.friends-tabs{width:100%;overflow-x:auto}.friends-tabs button{flex:1}.friends-console__content{padding:34px 20px}}
+ 
+-/* V55: capture truth-state UI. A video is only "ready" after MP4 verification and IndexedDB readback. */
++/* Capture status styling retained for compatibility with older gallery records. */
+ .capture-processing-banner{padding:12px 13px;border:1px solid rgba(190,145,255,.22);border-radius:14px;background:rgba(116,55,181,.09)}
+ .capture-processing-banner strong,.capture-processing-banner span{display:block;max-width:100%;overflow-wrap:anywhere}
+ .capture-processing-banner strong{color:#d3a7ff;font-size:.72rem;font-weight:900;letter-spacing:.04em}
+diff --git a/requirements.txt b/requirements.txt
+index 7d1df4c..05216e0 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1 +1 @@
+-imageio-ffmpeg==0.6.0
++# PARA currently has no Python package dependencies.
+diff --git a/services/api/server.py b/services/api/server.py
+index fbee3d7..9b863e8 100644
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -13,9 +13,6 @@ import json
+ import mimetypes
+ import os
+ import secrets
+-import shutil
+-import subprocess
+-import tempfile
+ import threading
+ import time
+ from datetime import datetime, timezone
+@@ -91,11 +88,6 @@ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+ YOUTUBE_UPLOAD_SESSION_COOKIE = "para_youtube_upload_session"
+ YOUTUBE_UPLOAD_SESSION_TTL_SECONDS = 45 * 60
+ YOUTUBE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
+-CAPTURE_NORMALIZE_MAX_BYTES = 256 * 1024 * 1024
+-CAPTURE_NORMALIZE_TIMEOUT_SECONDS = 180
+-CAPTURE_NORMALIZE_CONTENT_TYPES = {"video/webm", "video/x-matroska", "application/octet-stream"}
+-CAPTURE_NORMALIZE_QUEUE_MAX = 8
+-CAPTURE_NORMALIZE_JOB_TTL_SECONDS = 30 * 60
+ GOOGLE_OAUTH_STATE_COOKIE = "para_google_oauth_state"
+ GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60
+ GOOGLE_OAUTH_SCOPES = (
+@@ -109,11 +101,6 @@ _youtube_upload_lock = threading.Lock()
+ _email_verifications: dict[str, dict] = {}
+ _email_verification_client_sends: dict[str, list[float]] = {}
+ _email_verification_lock = threading.Lock()
+-_capture_jobs: dict[str, dict] = {}
+-_capture_pending_jobs: list[str] = []
+-_capture_jobs_lock = threading.Lock()
+-_capture_jobs_ready = threading.Condition(_capture_jobs_lock)
+-_capture_worker_thread: threading.Thread | None = None
+ 
+ 
+ def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
+@@ -1358,263 +1345,6 @@ def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:
+ 
+ 
+ 
+-def _ffmpeg_executable() -> str:
+-    """Resolve the server-side encoder used to normalize browser captures."""
+-    configured = _env_config("PARA_FFMPEG_PATH", "")
+-    if configured and Path(configured).is_file():
+-        return configured
+-    system_ffmpeg = shutil.which("ffmpeg")
+-    if system_ffmpeg:
+-        return system_ffmpeg
+-    try:
+-        import imageio_ffmpeg  # type: ignore
+-
+-        bundled = str(imageio_ffmpeg.get_ffmpeg_exe() or "")
+-        if bundled and Path(bundled).is_file():
+-            return bundled
+-    except Exception:
+-        pass
+-    return ""
+-
+-
+-def normalize_capture_file(input_path: Path, output_path: Path, *, timeout: int = CAPTURE_NORMALIZE_TIMEOUT_SECONDS) -> tuple[int, dict]:
+-    """Transcode a temporary browser WebM into a boring H.264/AAC MP4."""
+-    ffmpeg = _ffmpeg_executable()
+-    if not ffmpeg:
+-        return 503, {
+-            "error": "capture_encoder_unavailable",
+-            "message": "PARA capture processing is unavailable on this server.",
+-        }
+-    command = [
+-        ffmpeg,
+-        "-hide_banner",
+-        "-loglevel", "error",
+-        "-y",
+-        "-fflags", "+genpts+discardcorrupt",
+-        "-err_detect", "ignore_err",
+-        "-i", str(input_path),
+-        "-map", "0:v:0",
+-        "-map", "0:a:0?",
+-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+-        "-c:v", "libx264",
+-        "-preset", "veryfast",
+-        "-crf", "22",
+-        "-pix_fmt", "yuv420p",
+-        "-c:a", "aac",
+-        "-b:a", "160k",
+-        "-ar", "48000",
+-        "-movflags", "+faststart",
+-        str(output_path),
+-    ]
+-    try:
+-        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+-    except subprocess.TimeoutExpired:
+-        return 504, {
+-            "error": "capture_processing_timeout",
+-            "message": "PARA capture processing took too long. Try a shorter clip.",
+-        }
+-    except OSError:
+-        return 503, {
+-            "error": "capture_encoder_unavailable",
+-            "message": "PARA could not start the capture encoder.",
+-        }
+-    if completed.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
+-        detail = re.sub(r"\s+", " ", str(completed.stderr or "").strip())[-500:]
+-        return 422, {
+-            "error": "capture_processing_failed",
+-            "message": "PARA could not normalize this gameplay recording.",
+-            "detail": detail,
+-        }
+-    return 200, {
+-        "normalized": True,
+-        "mime_type": "video/mp4",
+-        "video_codec": "h264",
+-        "audio_codec": "aac",
+-        "size": output_path.stat().st_size,
+-    }
+-
+-
+-
+-def _capture_cleanup_locked(now: float | None = None) -> None:
+-    """Drop finished capture jobs after their short result-retention window."""
+-    current = time.time() if now is None else now
+-    stale: list[str] = []
+-    for job_id, job in _capture_jobs.items():
+-        if job.get("state") not in {"completed", "failed"}:
+-            continue
+-        finished = float(job.get("finished_at") or job.get("created_at") or current)
+-        if current - finished >= CAPTURE_NORMALIZE_JOB_TTL_SECONDS:
+-            stale.append(job_id)
+-    for job_id in stale:
+-        job = _capture_jobs.pop(job_id, None) or {}
+-        try:
+-            shutil.rmtree(str(job.get("temp_dir") or ""), ignore_errors=True)
+-        except Exception:
+-            pass
+-
+-
+-def _capture_ahead_locked(job_id: str) -> int:
+-    job = _capture_jobs.get(job_id) or {}
+-    if job.get("state") == "processing":
+-        return 0
+-    processing = 1 if any(candidate.get("state") == "processing" for candidate in _capture_jobs.values()) else 0
+-    try:
+-        pending_index = _capture_pending_jobs.index(job_id)
+-    except ValueError:
+-        pending_index = 0
+-    return max(0, processing + pending_index)
+-
+-
+-def _capture_queue_worker() -> None:
+-    while True:
+-        with _capture_jobs_ready:
+-            while not _capture_pending_jobs:
+-                _capture_jobs_ready.wait()
+-            job_id = _capture_pending_jobs.pop(0)
+-            job = _capture_jobs.get(job_id)
+-            if not job:
+-                continue
+-            job["state"] = "processing"
+-            job["started_at"] = time.time()
+-            input_path = Path(str(job["input_path"]))
+-            output_path = Path(str(job["output_path"]))
+-
+-        try:
+-            status, payload = normalize_capture_file(input_path, output_path)
+-        except Exception as error:  # keep the worker alive if one encoder job crashes
+-            status, payload = 500, {
+-                "error": "capture_processing_failed",
+-                "message": "PARA capture processing failed unexpectedly.",
+-                "detail": str(error)[-300:],
+-            }
+-
+-        with _capture_jobs_ready:
+-            current = _capture_jobs.get(job_id)
+-            if not current:
+-                continue
+-            current["status_code"] = int(status)
+-            current["result"] = payload
+-            current["finished_at"] = time.time()
+-            current["state"] = "completed" if status == 200 else "failed"
+-            _capture_cleanup_locked()
+-            _capture_jobs_ready.notify_all()
+-
+-
+-def _ensure_capture_worker_locked() -> None:
+-    global _capture_worker_thread
+-    if _capture_worker_thread and _capture_worker_thread.is_alive():
+-        return
+-    _capture_worker_thread = threading.Thread(
+-        target=_capture_queue_worker,
+-        name="para-capture-normalizer",
+-        daemon=True,
+-    )
+-    _capture_worker_thread.start()
+-
+-
+-def enqueue_capture_normalization(input_path: Path, output_path: Path, temp_dir: Path, owner: str) -> tuple[int, dict]:
+-    """Queue one uploaded capture instead of rejecting it when the encoder is busy."""
+-    with _capture_jobs_ready:
+-        _capture_cleanup_locked()
+-        if len(_capture_pending_jobs) >= CAPTURE_NORMALIZE_QUEUE_MAX:
+-            return 503, {
+-                "error": "capture_queue_full",
+-                "message": "PARA's capture queue is full. Your recording was not discarded; try saving again in a moment.",
+-            }
+-        _ensure_capture_worker_locked()
+-        job_id = secrets.token_urlsafe(18)
+-        now = time.time()
+-        _capture_jobs[job_id] = {
+-            "id": job_id,
+-            "owner": owner,
+-            "state": "queued",
+-            "created_at": now,
+-            "input_path": str(input_path),
+-            "output_path": str(output_path),
+-            "temp_dir": str(temp_dir),
+-            "status_code": 202,
+-            "result": {},
+-        }
+-        _capture_pending_jobs.append(job_id)
+-        ahead = _capture_ahead_locked(job_id)
+-        _capture_jobs_ready.notify()
+-        return 202, {
+-            "job_id": job_id,
+-            "state": "queued" if ahead else "processing",
+-            "ahead": ahead,
+-            "message": f"Queued capture · {ahead} ahead" if ahead else "Processing capture · creating MP4",
+-        }
+-
+-
+-def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
+-    with _capture_jobs_ready:
+-        _capture_cleanup_locked()
+-        job = _capture_jobs.get(job_id)
+-        if not job or str(job.get("owner") or "") != owner:
+-            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
+-        state = str(job.get("state") or "queued")
+-        ahead = _capture_ahead_locked(job_id) if state == "queued" else 0
+-        payload = {
+-            "job_id": job_id,
+-            "state": state,
+-            "ahead": ahead,
+-            "message": (
+-                f"Queued capture · {ahead} ahead"
+-                if state == "queued"
+-                else "Processing capture · creating MP4"
+-                if state == "processing"
+-                else "MP4 ready · saving to Media Gallery"
+-                if state == "completed"
+-                else str((job.get("result") or {}).get("message") or "Capture processing failed.")
+-            ),
+-        }
+-        if state == "failed":
+-            payload.update(job.get("result") or {})
+-            payload["state"] = "failed"
+-        return 200, payload
+-
+-
+-def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int, bytes | dict]:
+-    """Return a finished MP4 without deleting it until the browser confirms its local save."""
+-    with _capture_jobs_ready:
+-        _capture_cleanup_locked()
+-        job = _capture_jobs.get(job_id)
+-        if not job or str(job.get("owner") or "") != owner:
+-            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
+-        state = str(job.get("state") or "queued")
+-        if state in {"queued", "processing"}:
+-            return 409, {
+-                "error": "capture_not_ready",
+-                "state": state,
+-                "ahead": _capture_ahead_locked(job_id) if state == "queued" else 0,
+-                "message": "PARA is still processing this capture.",
+-            }
+-        if state == "failed":
+-            return int(job.get("status_code") or 422), dict(job.get("result") or {})
+-        output_path = Path(str(job.get("output_path") or ""))
+-
+-    try:
+-        body = output_path.read_bytes()
+-    except OSError:
+-        return 500, {"error": "capture_result_missing", "message": "PARA finished the job but could not read the MP4 result."}
+-    return 200, body
+-
+-
+-def acknowledge_capture_normalization_result(job_id: str, owner: str) -> tuple[int, dict]:
+-    """Delete a completed encoder result only after Media Gallery confirms persistence."""
+-    with _capture_jobs_ready:
+-        _capture_cleanup_locked()
+-        job = _capture_jobs.get(job_id)
+-        if not job or str(job.get("owner") or "") != owner:
+-            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
+-        state = str(job.get("state") or "queued")
+-        if state in {"queued", "processing"}:
+-            return 409, {"error": "capture_not_ready", "state": state, "message": "PARA is still processing this capture."}
+-        temp_dir = str(job.get("temp_dir") or "")
+-        _capture_jobs.pop(job_id, None)
+-    shutil.rmtree(temp_dir, ignore_errors=True)
+-    return 200, {"acknowledged": True, "job_id": job_id}
+-
+ 
+ def _store_build_storage_prefix(item: dict) -> str:
+     """Return the physical Storage prefix for a published developer build.
+@@ -2789,45 +2519,27 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     return persisted;
+   }
+ 
+-  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready', normalizeJobId = '', failureMessage = '' }) {
++  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready' }) {
++    const recorderMimeType = sourceMimeType || blob?.type || 'video/webm';
+     const item = {
+       id: id || crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+-      type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
+-      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 6,
+-      captureState, normalizeJobId, failureMessage,
++      type, blob, mimeType: blob.type || recorderMimeType, width, height, durationMs, captureMode,
++      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 7,
++      captureState,
+       ...(type === 'clip' ? {
+-        playbackVerified: captureState === 'ready',
+-        recorderMimeType: sourceMimeType || 'video/webm',
+-        sourceMimeType: sourceMimeType || 'video/webm',
+-        normalized: captureState === 'ready' && blob.type === 'video/mp4',
+-        videoCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'h264' : '',
+-        audioCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'aac' : '',
++        playbackVerified: false,
++        storageVerified: captureState === 'ready',
++        recorderMimeType,
++        sourceMimeType: recorderMimeType,
++        normalized: false,
++        videoCodec: recorderMimeType.includes('vp9') ? 'vp9' : recorderMimeType.includes('vp8') ? 'vp8' : '',
++        audioCodec: recorderMimeType.includes('opus') ? 'opus' : '',
+       } : {})
+     };
+     await writeCaptureRecord(item, captureState === 'ready' ? 'saved' : captureState);
+     return verifyPersistedCapture(item.id, blob, captureState);
+   }
+ 
+-  async function patchCaptureState(id, patch = {}, reason = 'updated') {
+-    const existing = await readCaptureRecord(id);
+-    if (!existing) return null;
+-    const next = { ...existing, ...patch, updatedAt: Date.now() };
+-    await writeCaptureRecord(next, reason);
+-    return readCaptureRecord(id);
+-  }
+-
+-  async function acknowledgeCaptureJob(jobId) {
+-    if (!jobId) return false;
+-    try {
+-      const response = await fetch(`/api/v1/capture/normalize/ack?id=${encodeURIComponent(jobId)}`, {
+-        method: 'POST',
+-        credentials: 'same-origin',
+-        headers: { 'Accept': 'application/json' },
+-      });
+-      return response.ok;
+-    } catch (_) { return false; }
+-  }
+-
+   function stopStream(stream) {
+     try { stream?.__paraCleanup?.(); } catch (_) {}
+     if (stream?.__paraKeepAlive) return;
+@@ -3080,7 +2792,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+   }
+ 
+   const RUNTIME_CAPTURE_SLICE_MS = 1000;
+-  const RUNTIME_CAPTURE_DECODE_TIMEOUT_MS = 7000;
+ 
+   function runtimeRecorderMimeCandidates(hasAudio = false) {
+     if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable in this browser.');
+@@ -3095,18 +2806,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     return mimeType ? { mimeType, videoBitsPerSecond } : { videoBitsPerSecond };
+   }
+ 
+-  function runtimeRecorderLabel(mimeType = '') {
+-    return mimeType || 'browser temporary WebM';
+-  }
+-
+-  function runtimeMediaDecodeMessage(video) {
+-    const code = Number(video?.error?.code || 0);
+-    if (code === 1) return 'Chromium interrupted capture playback.';
+-    if (code === 2) return 'Chromium could not read this capture media data.';
+-    if (code === 3) return "Chromium rejected the normalized capture's video stream.";
+-    if (code === 4) return "Chromium does not support the normalized capture's encoded video stream.";
+-    return 'Chromium could not decode the normalized gameplay video.';
+-  }
+ 
+   function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = RUNTIME_CAPTURE_SLICE_MS, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
+     const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, videoBitsPerSecond));
+@@ -3151,193 +2850,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     return blob;
+   }
+ 
+-  async function verifyNormalizedCapture(blob) {
+-    if (!blob?.size || blob.size < 1024) throw new Error('PARA capture processing returned an empty video.');
+-    const url = URL.createObjectURL(blob);
+-    const video = document.createElement('video');
+-    let frameTimer = 0;
+-    try {
+-      video.preload = 'auto';
+-      video.muted = true;
+-      video.playsInline = true;
+-      await new Promise((resolve, reject) => {
+-        let timer = 0;
+-        const cleanup = () => {
+-          clearTimeout(timer);
+-          video.removeEventListener('loadeddata', onLoaded);
+-          video.removeEventListener('error', onError);
+-        };
+-        const onLoaded = () => {
+-          cleanup();
+-          if (!video.videoWidth || !video.videoHeight) {
+-            reject(new Error('The normalized capture contains no visible video frames.'));
+-            return;
+-          }
+-          resolve();
+-        };
+-        const onError = () => {
+-          const message = runtimeMediaDecodeMessage(video);
+-          cleanup();
+-          reject(new Error(message));
+-        };
+-        video.addEventListener('loadeddata', onLoaded);
+-        video.addEventListener('error', onError);
+-        timer = setTimeout(() => {
+-          cleanup();
+-          reject(new Error('The normalized MP4 could not be decoded.'));
+-        }, RUNTIME_CAPTURE_DECODE_TIMEOUT_MS);
+-        video.src = url;
+-        video.load();
+-      });
+-      const startTime = Number(video.currentTime || 0);
+-      let decodedFrame = video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+-      let framePromise = Promise.resolve();
+-      if (typeof video.requestVideoFrameCallback === 'function') {
+-        framePromise = new Promise((resolve) => {
+-          frameTimer = setTimeout(resolve, 1200);
+-          video.requestVideoFrameCallback(() => {
+-            decodedFrame = true;
+-            clearTimeout(frameTimer);
+-            resolve();
+-          });
+-        });
+-      }
+-      try { await video.play(); }
+-      catch (_) { throw new Error(runtimeMediaDecodeMessage(video)); }
+-      const timelinePromise = new Promise((resolve, reject) => {
+-        const started = performance.now();
+-        const check = () => {
+-          if (video.error) { reject(new Error(runtimeMediaDecodeMessage(video))); return; }
+-          if (Number(video.currentTime || 0) > startTime + .04) { resolve(); return; }
+-          if (video.ended) { reject(new Error('The normalized capture ended before playback could advance.')); return; }
+-          if (performance.now() - started > 3500) { reject(new Error('The normalized capture decoded, but playback did not advance.')); return; }
+-          setTimeout(check, 50);
+-        };
+-        check();
+-      });
+-      await Promise.all([framePromise, timelinePromise]);
+-      const decodedFrames = Number(video.getVideoPlaybackQuality?.().totalVideoFrames || 0);
+-      if (!decodedFrame && decodedFrames <= 0) throw new Error('Chromium did not decode a frame from the normalized MP4.');
+-      video.pause();
+-      return { width: video.videoWidth, height: video.videoHeight, duration: Number(video.duration || 0) };
+-    } finally {
+-      clearTimeout(frameTimer);
+-      video.pause?.();
+-      video.removeAttribute?.('src');
+-      video.load?.();
+-      URL.revokeObjectURL(url);
+-    }
+-  }
+-
+-  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture', onState = null) {
+-    const kind = captureKind === 'replay' ? 'replay' : 'capture';
+-    let response = null;
+-    let initialPayload = null;
+-    for (let submitAttempt = 0; submitAttempt < 60; submitAttempt += 1) {
+-      response = await fetch('/api/v1/capture/normalize', {
+-        method: 'POST',
+-        credentials: 'same-origin',
+-        headers: {
+-          'Content-Type': rawBlob.type || 'video/webm',
+-          'X-PARA-Capture-Mode': captureMode || 'game-frames',
+-        },
+-        body: rawBlob,
+-      });
+-      if (response.status !== 503) break;
+-      try { initialPayload = await response.json(); } catch (_) { initialPayload = null; }
+-      if (initialPayload?.error !== 'capture_queue_full') break;
+-      toast(`Capture queue is full · waiting to save ${kind}`);
+-      await new Promise((resolve) => setTimeout(resolve, 1_500));
+-      response = null;
+-      initialPayload = null;
+-    }
+-    if (!response) throw new Error('PARA capture processing stayed busy for too long.');
+-
+-    let output = null;
+-    if (response.status === 202) {
+-      let queued = initialPayload;
+-      if (!queued) {
+-        try { queued = await response.json(); } catch (_) {}
+-      }
+-      const jobId = String(queued?.job_id || '');
+-      if (!jobId) throw new Error('PARA accepted the capture but did not return a processing job.');
+-      try { onState?.({ state: Number(queued?.ahead || 0) > 0 ? 'queued' : 'processing', jobId, ahead: Math.max(0, Number(queued?.ahead || 0)) }); } catch (_) {}
+-
+-      const deadline = Date.now() + (10 * 60 * 1000);
+-      let lastMessage = '';
+-      const showStatus = (message) => {
+-        const text = String(message || '');
+-        if (!text || text === lastMessage) return;
+-        lastMessage = text;
+-        toast(text);
+-      };
+-      if (Number(queued?.ahead || 0) > 0) showStatus(`Queued ${kind} · ${Number(queued.ahead)} ahead`);
+-      else showStatus(`Processing ${kind} · creating MP4`);
+-
+-      while (Date.now() < deadline) {
+-        await new Promise((resolve) => setTimeout(resolve, 750));
+-        const statusResponse = await fetch(`/api/v1/capture/normalize/status?id=${encodeURIComponent(jobId)}`, {
+-          credentials: 'same-origin',
+-          headers: { 'Accept': 'application/json' },
+-        });
+-        let statusPayload = null;
+-        try { statusPayload = await statusResponse.json(); } catch (_) {}
+-        if (!statusResponse.ok) {
+-          throw new Error(statusPayload?.message || `Capture queue status failed (${statusResponse.status}).`);
+-        }
+-        const state = String(statusPayload?.state || '');
+-        if (state === 'queued') {
+-          const ahead = Math.max(0, Number(statusPayload?.ahead || 0));
+-          try { onState?.({ state: 'queued', jobId, ahead }); } catch (_) {}
+-          showStatus(ahead > 0 ? `Queued ${kind} · ${ahead} ahead` : `Queued ${kind}`);
+-          continue;
+-        }
+-        if (state === 'processing') {
+-          try { onState?.({ state: 'processing', jobId, ahead: 0 }); } catch (_) {}
+-          showStatus(`Processing ${kind} · creating MP4`);
+-          continue;
+-        }
+-        if (state === 'failed') {
+-          const detail = statusPayload?.detail ? ` ${statusPayload.detail}` : '';
+-          throw new Error(`${statusPayload?.message || 'PARA could not process this gameplay recording.'}${detail}`.trim());
+-        }
+-        if (state === 'completed') {
+-          try { onState?.({ state: 'saving', jobId, ahead: 0 }); } catch (_) {}
+-          showStatus(`MP4 ready · saving ${kind} to Media Gallery`);
+-          break;
+-        }
+-      }
+-      if (Date.now() >= deadline) throw new Error('PARA capture processing took too long in the queue.');
+-
+-      const resultResponse = await fetch(`/api/v1/capture/normalize/result?id=${encodeURIComponent(jobId)}`, {
+-        credentials: 'same-origin',
+-        headers: { 'Accept': 'video/mp4' },
+-      });
+-      if (!resultResponse.ok) {
+-        let payload = null;
+-        try { payload = await resultResponse.json(); } catch (_) {}
+-        const detail = payload?.detail ? ` ${payload.detail}` : '';
+-        throw new Error(`${payload?.message || `Capture processing failed (${resultResponse.status}).`}${detail}`.trim());
+-      }
+-      output = await resultResponse.blob();
+-    } else {
+-      // Backward compatibility for a V50/V51 server during a rolling deploy.
+-      if (!response.ok) {
+-        let payload = initialPayload;
+-        if (!payload) {
+-          try { payload = await response.json(); } catch (_) {}
+-        }
+-        const detail = payload?.detail ? ` ${payload.detail}` : '';
+-        throw new Error(`${payload?.message || `Capture processing failed (${response.status}).`}${detail}`.trim());
+-      }
+-      output = await response.blob();
+-    }
+-
+-    const mp4 = output?.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
+-    await verifyNormalizedCapture(mp4);
+-    try { onState?.({ state: 'verified' }); } catch (_) {}
+-    return mp4;
+-  }
+ 
+   function selectRuntimeRecorderMime(stream) {
+     const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
+@@ -3666,62 +3178,24 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     const active = manualRecording;
+     if (!active || active.stopping) return;
+     active.stopping = true;
+-    let staged = null;
+-    let captureJobId = '';
+-    let captureStateUpdates = Promise.resolve();
+     try {
+       const rawBlob = await finalizeRuntimeRecorderSession(active.session);
+       if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('The recording was empty.');
+       const durationMs = Date.now() - active.startedAt;
+-      staged = await saveCapture({
+-        type: 'clip',
+-        blob: rawBlob,
+-        width: active.width || 0,
+-        height: active.height || 0,
+-        durationMs,
+-        captureMode: active.captureMode || '',
+-        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
+-        captureState: 'processing'
+-      });
+-      toast('Recording secured locally · processing MP4');
+-      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture', (status) => {
+-        captureJobId = String(status?.jobId || captureJobId || '');
+-        const state = String(status?.state || 'processing');
+-        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
+-          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
+-          normalizeJobId: captureJobId,
+-          queueAhead: Math.max(0, Number(status?.ahead || 0)),
+-          failureMessage: ''
+-        }, state)).catch(() => null);
+-      });
+-      await captureStateUpdates;
+       const saved = await saveCapture({
+-        id: staged.id,
+-        createdAt: staged.createdAt,
+         type: 'clip',
+-        blob,
++        blob: rawBlob,
+         width: active.width || 0,
+         height: active.height || 0,
+         durationMs,
+         captureMode: active.captureMode || '',
+         sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
+-        captureState: 'ready',
+-        normalizeJobId: captureJobId
++        captureState: 'ready'
+       });
+-      await verifyPersistedCapture(saved.id, blob, 'ready');
+-      void acknowledgeCaptureJob(captureJobId);
++      await verifyPersistedCapture(saved.id, rawBlob, 'ready');
+       toast('Gameplay capture saved to Media Gallery');
+     } catch (error) {
+-      if (staged?.id) {
+-        try {
+-          await patchCaptureState(staged.id, {
+-            captureState: 'failed',
+-            normalizeJobId: captureJobId,
+-            failureMessage: String(error?.message || 'MP4 processing failed.')
+-          }, 'failed');
+-        } catch (_) {}
+-      }
+-      toast(staged ? 'MP4 processing failed · original recording kept in Media Gallery' : (error?.message || 'Recording could not be saved'));
++      toast(error?.message || 'Recording could not be saved');
+     } finally {
+       manualRecording = null;
+       stopStream(active.stream);
+@@ -3765,10 +3239,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+   }
+ 
+   async function saveReplay(durationMs) {
+-    if (!replay) { toast('Start PARA Replay first'); return; }
+-    let staged = null;
+-    let captureJobId = '';
+-    let captureStateUpdates = Promise.resolve();
++    if (!replay) throw new Error('PARA Replay is not running.');
+     try {
+       replay.recorder.requestData();
+       await new Promise((resolve) => setTimeout(resolve, 220));
+@@ -3777,55 +3248,20 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
+       if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('Replay has not buffered enough gameplay yet.');
+       const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
+-      staged = await saveCapture({
+-        type: 'clip',
+-        blob: rawBlob,
+-        width: replay.width || 0,
+-        height: replay.height || 0,
+-        durationMs: actualDuration,
+-        captureMode: replay.captureMode || '',
+-        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
+-        captureState: 'processing'
+-      });
+-      toast('Replay secured locally · processing MP4');
+-      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay', (status) => {
+-        captureJobId = String(status?.jobId || captureJobId || '');
+-        const state = String(status?.state || 'processing');
+-        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
+-          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
+-          normalizeJobId: captureJobId,
+-          queueAhead: Math.max(0, Number(status?.ahead || 0)),
+-          failureMessage: ''
+-        }, state)).catch(() => null);
+-      });
+-      await captureStateUpdates;
+       const saved = await saveCapture({
+-        id: staged.id,
+-        createdAt: staged.createdAt,
+         type: 'clip',
+-        blob,
++        blob: rawBlob,
+         width: replay.width || 0,
+         height: replay.height || 0,
+         durationMs: actualDuration,
+         captureMode: replay.captureMode || '',
+         sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
+-        captureState: 'ready',
+-        normalizeJobId: captureJobId
++        captureState: 'ready'
+       });
+-      await verifyPersistedCapture(saved.id, blob, 'ready');
+-      void acknowledgeCaptureJob(captureJobId);
++      await verifyPersistedCapture(saved.id, rawBlob, 'ready');
+       toast('Recent gameplay saved to Media Gallery');
+     } catch (error) {
+-      if (staged?.id) {
+-        try {
+-          await patchCaptureState(staged.id, {
+-            captureState: 'failed',
+-            normalizeJobId: captureJobId,
+-            failureMessage: String(error?.message || 'MP4 processing failed.')
+-          }, 'failed');
+-        } catch (_) {}
+-      }
+-      toast(staged ? 'Replay MP4 failed · original recording kept in Media Gallery' : (error?.message || 'Replay could not be saved'));
++      toast(error?.message || 'Replay could not be saved');
+     }
+   }
+ 
+@@ -4196,27 +3632,6 @@ class ParaHandler(SimpleHTTPRequestHandler):
+             return 401, {"signed_in": False, "user": None}, "", refreshed_headers
+         return 200, session, access, refreshed_headers
+ 
+-    def _capture_access_owner(self) -> tuple[int, str, list[tuple[str, str]]]:
+-        """Return a stable owner id for capture queue jobs.
+-
+-        Hosted PARA requires a signed-in account. Loopback/local PARA keeps the
+-        capture pipeline available without cloud auth.
+-        """
+-        server_host = str(self.server.server_address[0] if self.server and self.server.server_address else "")
+-        try:
+-            local_server = ipaddress.ip_address(server_host).is_loopback
+-        except ValueError:
+-            local_server = False
+-        if local_server:
+-            return 200, "local", []
+-        status, session, _, refreshed_headers = self._authenticated_access()
+-        if status != 200:
+-            return 401, "", refreshed_headers
+-        owner = str(session.get("user", {}).get("id") or "")
+-        if not owner:
+-            return 401, "", refreshed_headers
+-        return 200, owner, refreshed_headers
+-
+     def _send_file(self, path: Path, content_type: str | None = None) -> None:
+         try:
+             body = path.read_bytes()
+@@ -4250,28 +3665,6 @@ class ParaHandler(SimpleHTTPRequestHandler):
+         if request.path in {"/privacy", "/privacy/"}:
+             self._send_file(HOME_ROOT / "privacy" / "index.html", "text/html; charset=utf-8")
+             return
+-        if request.path in {"/api/v1/capture/normalize/status", "/api/v1/capture/normalize/result"}:
+-            access_status, owner, refreshed_headers = self._capture_access_owner()
+-            if access_status != 200:
+-                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+-                return
+-            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
+-            if request.path.endswith("/status"):
+-                job_status, payload = capture_normalization_status(job_id, owner)
+-                self._send_json(job_status, payload, refreshed_headers)
+-                return
+-            result_status, result = consume_capture_normalization_result(job_id, owner)
+-            if result_status != 200 or not isinstance(result, (bytes, bytearray)):
+-                self._send_json(result_status, result if isinstance(result, dict) else {"error": "capture_result_missing"}, refreshed_headers)
+-                return
+-            headers = [
+-                *refreshed_headers,
+-                ("X-PARA-Capture-Normalized", "1"),
+-                ("X-PARA-Video-Codec", "h264"),
+-                ("X-PARA-Audio-Codec", "aac"),
+-            ]
+-            self._send_bytes(200, bytes(result), "video/mp4", headers)
+-            return
+         if request.path == "/api/v1/achievements/progress":
+             status, _, access, refreshed_headers = self._authenticated_access()
+             if status != 200:
+@@ -4471,73 +3864,6 @@ class ParaHandler(SimpleHTTPRequestHandler):
+ 
+     def do_POST(self) -> None:  # noqa: N802
+         request = urlparse(self.path)
+-        if request.path == "/api/v1/capture/normalize/ack":
+-            access_status, owner, refreshed_headers = self._capture_access_owner()
+-            if access_status != 200:
+-                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+-                return
+-            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
+-            ack_status, payload = acknowledge_capture_normalization_result(job_id, owner)
+-            self._send_json(ack_status, payload, refreshed_headers)
+-            return
+-        if request.path == "/api/v1/capture/normalize":
+-            access_status, owner, refreshed_headers = self._capture_access_owner()
+-            if access_status != 200:
+-                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+-                return
+-            try:
+-                length = int(self.headers.get("Content-Length", "0"))
+-            except ValueError:
+-                length = 0
+-            if length < 1024 or length > CAPTURE_NORMALIZE_MAX_BYTES:
+-                self._send_json(413, {
+-                    "error": "capture_size_invalid",
+-                    "message": "Choose a non-empty gameplay capture smaller than 256 MB.",
+-                }, refreshed_headers)
+-                return
+-            content_type = str(self.headers.get("Content-Type") or "video/webm").split(";", 1)[0].strip().lower()
+-            if content_type not in CAPTURE_NORMALIZE_CONTENT_TYPES:
+-                self._send_json(415, {
+-                    "error": "capture_format_invalid",
+-                    "message": "PARA capture processing currently accepts temporary WebM recordings only.",
+-                }, refreshed_headers)
+-                return
+-
+-            temporary = Path(tempfile.mkdtemp(prefix="para-capture-job-"))
+-            input_path = temporary / "capture.webm"
+-            output_path = temporary / "capture.mp4"
+-            remaining = length
+-            try:
+-                with input_path.open("wb") as destination:
+-                    while remaining > 0:
+-                        chunk = self.rfile.read(min(1024 * 1024, remaining))
+-                        if not chunk:
+-                            break
+-                        destination.write(chunk)
+-                        remaining -= len(chunk)
+-                if remaining != 0 or input_path.stat().st_size != length:
+-                    shutil.rmtree(temporary, ignore_errors=True)
+-                    self._send_json(400, {
+-                        "error": "capture_upload_incomplete",
+-                        "message": "The capture upload ended before PARA received the complete recording.",
+-                    }, refreshed_headers)
+-                    return
+-            except OSError:
+-                shutil.rmtree(temporary, ignore_errors=True)
+-                self._send_json(500, {
+-                    "error": "capture_upload_failed",
+-                    "message": "PARA could not stage this capture for processing.",
+-                }, refreshed_headers)
+-                return
+-
+-            queue_status, payload = enqueue_capture_normalization(input_path, output_path, temporary, owner)
+-            if queue_status != 202:
+-                shutil.rmtree(temporary, ignore_errors=True)
+-                self._send_json(queue_status, payload, refreshed_headers)
+-                return
+-            self._send_json(202, payload, [*refreshed_headers, ("Retry-After", "1")])
+-            return
+-
+         if request.path == "/api/v1/integrations/google/youtube/upload":
+             status, _, para_access, refreshed_headers = self._authenticated_access()
+             clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)
+diff --git a/tests/test_api.py b/tests/test_api.py
+index 1accff9..1ceae7f 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -4,14 +4,13 @@ import sys
+ import json
+ from pathlib import Path
+ import os
+-import subprocess
+ import tempfile
+ import unittest
+ from unittest.mock import patch
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "services/api"))
+-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result, acknowledge_capture_normalization_result  # noqa: E402
++from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement  # noqa: E402
+ import system_layer  # noqa: E402
+ 
+ 
+@@ -496,112 +495,16 @@ class ApiContractTests(unittest.TestCase):
+         self.assertEqual(payload["error"], "weak_password")
+ 
+ 
+-    def test_capture_normalizer_outputs_h264_mp4(self):
++    def test_capture_transcoder_is_not_part_of_the_api(self):
+         import server
+-        ffmpeg = server._ffmpeg_executable()
+-        if not ffmpeg:
+-            self.skipTest("ffmpeg unavailable")
+-        with tempfile.TemporaryDirectory() as temporary:
+-            source = Path(temporary) / "source.webm"
+-            output = Path(temporary) / "output.mp4"
+-            generated = subprocess.run([
+-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+-                "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30",
+-                "-t", "1", "-c:v", "libvpx", "-pix_fmt", "yuv420p", str(source),
+-            ], capture_output=True, text=True, check=False)
+-            if generated.returncode != 0:
+-                self.skipTest(f"ffmpeg WebM fixture unavailable: {generated.stderr[-200:]}")
+-            status, payload = normalize_capture_file(source, output, timeout=30)
+-            self.assertEqual(status, 200, payload)
+-            self.assertTrue(payload["normalized"])
+-            self.assertEqual(payload["mime_type"], "video/mp4")
+-            self.assertEqual(payload["video_codec"], "h264")
+-            self.assertTrue(output.is_file())
+-            body = output.read_bytes()
+-            self.assertIn(b"ftyp", body[:64])
+-            self.assertIn(b"moov", body)
+-            self.assertLess(body.find(b"moov"), body.find(b"mdat"))
+-
+-    def test_capture_queue_serializes_jobs_instead_of_returning_busy_429(self):
+-        import server
+-        import threading
+-        import time
+-
+-        with server._capture_jobs_ready:
+-            for job in server._capture_jobs.values():
+-                server.shutil.rmtree(str(job.get("temp_dir") or ""), ignore_errors=True)
+-            server._capture_jobs.clear()
+-            server._capture_pending_jobs.clear()
+-
+-        first_started = threading.Event()
+-        release_first = threading.Event()
+-        order = []
+-
+-        def fake_normalize(input_path, output_path, *, timeout=server.CAPTURE_NORMALIZE_TIMEOUT_SECONDS):
+-            order.append(input_path.name)
+-            if len(order) == 1:
+-                first_started.set()
+-                release_first.wait(2)
+-            output_path.write_bytes(b"0" * 2048)
+-            return 200, {
+-                "normalized": True,
+-                "mime_type": "video/mp4",
+-                "video_codec": "h264",
+-                "audio_codec": "aac",
+-                "size": 2048,
+-            }
+-
+-        temporary_dirs = []
+-        try:
+-            with patch("server.normalize_capture_file", side_effect=fake_normalize):
+-                payloads = []
+-                for index in range(2):
+-                    temporary = Path(tempfile.mkdtemp(prefix=f"para-queue-test-{index}-"))
+-                    temporary_dirs.append(temporary)
+-                    source = temporary / "capture.webm"
+-                    output = temporary / "capture.mp4"
+-                    source.write_bytes(b"webm" * 512)
+-                    status, payload = enqueue_capture_normalization(source, output, temporary, "test-owner")
+-                    self.assertEqual(status, 202)
+-                    self.assertNotEqual(status, 429)
+-                    payloads.append(payload)
+-
+-                self.assertTrue(first_started.wait(1))
+-                second_status, second = capture_normalization_status(payloads[1]["job_id"], "test-owner")
+-                self.assertEqual(second_status, 200)
+-                self.assertEqual(second["state"], "queued")
+-                self.assertGreaterEqual(second["ahead"], 1)
+-
+-                release_first.set()
+-                deadline = time.time() + 3
+-                while time.time() < deadline:
+-                    states = [capture_normalization_status(payload["job_id"], "test-owner")[1].get("state") for payload in payloads]
+-                    if states == ["completed", "completed"]:
+-                        break
+-                    time.sleep(0.02)
+-                self.assertEqual(states, ["completed", "completed"])
+-
+-                for payload in payloads:
+-                    job_id = payload["job_id"]
+-                    result_status, body = consume_capture_normalization_result(job_id, "test-owner")
+-                    self.assertEqual(result_status, 200)
+-                    self.assertIsInstance(body, bytes)
+-                    self.assertEqual(len(body), 2048)
+-                    # V55 keeps the finished MP4 available until the browser confirms
+-                    # that IndexedDB readback succeeded, so a transient client failure
+-                    # can fetch the same result again instead of losing it.
+-                    retry_status, retry_body = consume_capture_normalization_result(job_id, "test-owner")
+-                    self.assertEqual(retry_status, 200)
+-                    self.assertEqual(retry_body, body)
+-                    ack_status, ack = acknowledge_capture_normalization_result(job_id, "test-owner")
+-                    self.assertEqual(ack_status, 200)
+-                    self.assertTrue(ack["acknowledged"])
+-                    missing_status, _ = capture_normalization_status(job_id, "test-owner")
+-                    self.assertEqual(missing_status, 404)
+-        finally:
+-            release_first.set()
+-            for temporary in temporary_dirs:
+-                server.shutil.rmtree(temporary, ignore_errors=True)
++        for name in [
++            "normalize_capture_file",
++            "enqueue_capture_normalization",
++            "capture_normalization_status",
++            "consume_capture_normalization_result",
++            "acknowledge_capture_normalization_result",
++        ]:
++            self.assertFalse(hasattr(server, name), name)
+ 
+     def test_unknown_route_returns_not_found(self):
+         status, payload = resolve("/api/v1/does-not-exist")
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index f1b542e..da06326 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -371,8 +371,8 @@ class RepositoryTests(unittest.TestCase):
+         self.assertNotIn(".capture-hero__fullscreen", css)
+         self.assertIn("data-video-status", player)
+         self.assertIn("video.canPlayType", player)
+-        # V50 moved recording validation out of the Home/browser-tab recorder.
+-        # Keep legacy WebM playback support here while new clips arrive as MP4.
++        # Gameplay recording stays in the injected runtime. New clips are stored directly
++        # as WebM while legacy MP4 captures remain playable.
+         self.assertIn('return "video/webm"', capture)
+         self.assertIn('return "video/mp4"', capture)
+         self.assertNotIn("MediaRecorder", capture)
+@@ -394,21 +394,19 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn("player.dataset.mimeHint", player)
+         self.assertNotIn("Unsupported media type", player)
+ 
+-    def test_v48_capture_safety_is_superseded_by_v50_runtime_normalization(self):
++    def test_v56_runtime_capture_saves_recorder_output_directly(self):
+         capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
+         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+-        # V48 hardened a browser-tab WebM recorder. V50 intentionally removes
+-        # that recorder and treats WebM only as a temporary runtime transport.
+         self.assertNotIn("getDisplayMedia", capture)
+         self.assertNotIn("MediaRecorder", capture)
+-        self.assertIn("PARA no longer records the browser tab", capture)
++        self.assertIn("saves the recording directly to Media Gallery", capture)
+         self.assertIn('captureCanvas.captureStream(30)', server)
+         self.assertIn('new MediaRecorder(stream, runtimeRecorderOptions', server)
+-        self.assertIn('normalizeRuntimeCapture', server)
+-        self.assertIn('/api/v1/capture/normalize', server)
+-        self.assertIn('captureVersion: 5', server)
+-        self.assertIn('playbackVerified: true', server)
+-        self.assertIn('video/mp4', server)
++        self.assertIn("sourceMimeType: rawBlob.type", server)
++        self.assertIn("captureVersion: 7", server)
++        self.assertIn("normalized: false", server)
++        self.assertNotIn('normalizeRuntimeCapture', server)
++        self.assertNotIn('/api/v1/capture/normalize', server)
+ 
+     def test_control_center_is_a_compact_contextual_strip(self):
+         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+@@ -555,7 +553,7 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn('async function requestGameStream(audio = false)', server)
+         self.assertIn('requestCompositedGameStream(audio)', server)
+         self.assertIn('createMediaStreamDestination()', server)
+-        self.assertIn('normalizeRuntimeCapture', server)
++        self.assertNotIn('normalizeRuntimeCapture', server)
+         self.assertNotIn('requestSessionSelfCapture(audio)', server)
+         self.assertNotIn('navigator.mediaDevices.getDisplayMedia', server)
+         self.assertNotIn("preferCurrentTab: true", server)
+@@ -694,36 +692,34 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn("to service_role", migration.lower())
+         self.assertNotIn("to authenticated", migration.lower().split("grant execute", 1)[-1])
+ 
+-    def test_v50_capture_uses_direct_frames_and_server_mp4_normalization(self):
++    def test_v56_capture_has_no_server_side_video_conversion(self):
+         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+         capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
+         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+-        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+ 
+         for marker in [
+             "/api/v1/capture/normalize",
+             "normalize_capture_file",
+-            '"-c:v", "libx264"',
+-            '"-c:a", "aac"',
+-            '"-movflags", "+faststart"',
+             "normalizeRuntimeCapture",
+-            "requestCompositedGameStream",
+-            "captureVersion: 5",
+-            "video/mp4",
++            "libx264",
++            "imageio_ffmpeg",
++            "captureVersion: 6",
+         ]:
+-            self.assertIn(marker, server)
++            self.assertNotIn(marker, server)
++        self.assertIn("captureVersion: 7", server)
++        self.assertIn("captureState: 'ready'", server)
++        self.assertIn("verifyPersistedCapture(saved.id, rawBlob, 'ready')", server)
++        self.assertIn("normalized: false", server)
+         self.assertNotIn("getDisplayMedia", server)
+-        self.assertNotIn("Choose This Tab", server)
+-        self.assertNotIn("self-tab", server)
+         self.assertNotIn("getDisplayMedia", capture)
+         self.assertNotIn("MediaRecorder", capture)
+-        self.assertIn("PARA no longer records the browser tab", capture)
+-        self.assertIn("MP4", media)
++        self.assertIn("saves the recording directly to Media Gallery", capture)
++        self.assertNotIn("Processing MP4", media)
++        self.assertNotIn("MP4 failed", media)
+         self.assertIn("Capture from inside a game", control)
+-        self.assertIn("imageio-ffmpeg==0.6.0", requirements)
+-        self.assertIn("pip install -r requirements.txt", render)
++        self.assertNotIn("imageio-ffmpeg", requirements)
+ 
+     def test_v51_direct_renderer_stream_and_control_center_text_wrapping(self):
+         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+@@ -776,7 +772,7 @@ class RepositoryTests(unittest.TestCase):
+         self.assertNotIn(' : "PARA Game"', media)
+         self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
+ 
+-    def test_v54_global_rate_limit_resilience_and_capture_queue(self):
++    def test_v54_global_rate_limit_resilience_survives_v56(self):
+         api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+@@ -792,57 +788,40 @@ class RepositoryTests(unittest.TestCase):
+             self.assertIn(marker, api)
+         self.assertIn("storeProduct(id)", media)
+         self.assertNotIn("Promise.allSettled(missingStoreIds.map", media)
+-
+-        for marker in [
+-            "enqueue_capture_normalization",
+-            "capture_normalization_status",
+-            "consume_capture_normalization_result",
+-            "/api/v1/capture/normalize/status",
+-            "/api/v1/capture/normalize/result",
+-            "Queued ${kind}",
+-        ]:
+-            self.assertIn(marker, server)
++        self.assertNotIn("/api/v1/capture/normalize", server)
+         self.assertNotIn("capture_encoder_busy", server)
+-        self.assertNotIn("_capture_transcode_slots", server)
+-        self.assertNotIn("self._send_json(429", server[server.find('if request.path == "/api/v1/capture/normalize"'):server.find('if request.path == "/api/v1/integrations/google/youtube/upload"')])
+ 
+ 
+-    def test_v55_capture_success_requires_media_gallery_readback(self):
++    def test_v56_capture_success_requires_direct_media_gallery_readback(self):
+         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
++        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
+         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+ 
+         for marker in [
+-            "captureVersion: 6",
++            "captureVersion: 7",
+             "verifyPersistedCapture",
+-            "captureState: 'processing'",
+-            "original recording kept in Media Gallery",
++            "captureState: 'ready'",
+             "Gameplay capture saved to Media Gallery",
+-            "BroadcastChannel(CAPTURE_SYNC_CHANNEL)",
+-            "/api/v1/capture/normalize/ack",
+-            "acknowledge_capture_normalization_result",
+-            "MP4 ready · saving to Media Gallery",
+         ]:
+             self.assertIn(marker, server)
+-        self.assertIn("captureStateLabel", media)
++        for removed in [
++            "captureState: 'processing'",
++            "/api/v1/capture/normalize",
++            "acknowledgeCaptureJob",
++            "MP4 ready",
++            "processing MP4",
++        ]:
++            self.assertNotIn(removed, server)
+         self.assertIn("para-capture-library-v1", media)
+-        self.assertIn("The original recording is already stored locally", media)
+-
+-        final_save = server.find("await verifyPersistedCapture(saved.id, blob, 'ready')")
++        self.assertNotIn("MP4 failed", media)
++        self.assertNotIn("Processing MP4", media)
++        self.assertNotIn("Chrome", player)
++        self.assertNotIn("Chromium", player)
++        self.assertNotIn("Chrome", server)
++        self.assertNotIn("Chromium", server)
++
++        final_save = server.find("await verifyPersistedCapture(saved.id, rawBlob, 'ready')")
+         success_toast = server.find("toast('Gameplay capture saved to Media Gallery')")
+         self.assertGreater(final_save, -1)
+         self.assertGreater(success_toast, final_save)
+ 
+-
+-
+-if __name__ == "__main__":
+-    unittest.main()
+-
+-def test_core_resilience_services_present():
+-    from pathlib import Path
+-    root = Path(__file__).resolve().parents[1]
+-    save = (root / "apps/para-home/src/services/save-data.js").read_text()
+-    runtime = (root / "apps/para-home/src/services/experience-runtime.js").read_text()
+-    system = (root / "apps/para-home/src/screens/system.js").read_text()
+-    assert "VERSION_LIMIT" in save and "restoreSaveVersion" in save
+-    assert "pauseDownload" in runtime and "resumeDownload" in runtime and "cancelDownload" in runtime
+-    assert "PARA does not invent demo saves" in system

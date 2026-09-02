@@ -32,24 +32,16 @@ function durationLabel(ms = 0) {
 }
 
 function captureState(item = {}) {
-  const state = String(item.captureState || "ready").toLowerCase();
-  return ["queued", "processing", "saving", "failed", "ready"].includes(state) ? state : "ready";
+  // V56 removed the server-side conversion pipeline. Any stored clip blob is
+  // the capture itself, including recordings left behind by older processing states.
+  if (item?.type === "clip" && item?.blob) return "ready";
+  return "ready";
 }
 
-function captureStateLabel(item = {}) {
-  const state = captureState(item);
-  if (state === "queued") return Number(item.queueAhead || 0) > 0 ? `Queued · ${Number(item.queueAhead)} ahead` : "Queued";
-  if (state === "processing") return "Processing MP4";
-  if (state === "saving") return "Saving to Media Gallery";
-  if (state === "failed") return "MP4 failed · original kept";
-  return "Ready";
-}
 
 function details(item) {
   if (item.type === "clip") {
-    const format = item.mimeType?.includes("mp4") ? "MP4" : item.mimeType?.includes("webm") ? "WebM" : "Video";
-    const state = captureState(item);
-    return `${durationLabel(item.durationMs)} · ${format}${state === "ready" ? "" : ` · ${captureStateLabel(item)}`}`;
+    return `${durationLabel(item.durationMs)} · Video`;
   }
   return `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}${item.width ? " · " : ""}Screenshot`;
 }
@@ -59,9 +51,7 @@ function heroMarkup(item) {
   const url = mediaUrl(item);
   const state = captureState(item);
   const isReady = state === "ready";
-  const statusMarkup = item.type === "clip" && !isReady
-    ? `<div class="capture-processing-banner capture-processing-banner--${state}"><strong>${escapeHtml(captureStateLabel(item))}</strong><span>${state === "failed" ? escapeHtml(item.failureMessage || "PARA kept the original WebM recording so the video is not lost.") : "The original recording is already stored locally. PARA will only mark this video ready after the MP4 is verified and read back from Media Gallery."}</span></div>`
-    : "";
+  const statusMarkup = "";
   const mediaStage = item.type === "clip"
     ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
@@ -69,7 +59,7 @@ function heroMarkup(item) {
     ${mediaStage}
     <div class="capture-hero__info">
       ${statusMarkup}
-      <div><span>${item.type === "clip" ? (isReady ? "GAMEPLAY VIDEO" : "LOCAL RECORDING") : "SCREENSHOT"}</span><h2>${item.type === "clip" ? (state === "failed" ? "Original gameplay recording" : state === "ready" ? "Gameplay capture" : "Gameplay capture processing") : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
+      <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
       <div class="capture-hero__actions" data-focus-zone="capture-actions">
         <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
         ${item.type === "clip" && isReady ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
@@ -87,7 +77,7 @@ function railMarkup(items) {
     const url = mediaUrl(item);
     const media = item.type === "clip" ? `<video src="${url}" preload="metadata" muted playsinline></video>` : `<img src="${url}" alt="">`;
     const state = captureState(item);
-    return `<button type="button" class="capture-thumb capture-thumb--${state} ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${state === "ready" ? durationLabel(item.durationMs) : escapeHtml(captureStateLabel(item))}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${state === "ready" ? fmt.format(item.createdAt) : escapeHtml(captureStateLabel(item))}</small></span></button>`;
+    return `<button type="button" class="capture-thumb capture-thumb--${state} ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${durationLabel(item.durationMs)}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${fmt.format(item.createdAt)}</small></span></button>`;
   }).join("")}</div></section>`;
 }
 

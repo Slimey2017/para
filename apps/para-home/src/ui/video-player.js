@@ -22,19 +22,19 @@ function mediaErrorMessage(video, error = null) {
   const code = Number(video?.error?.code || 0);
   if (code === 1 || error?.name === "AbortError") return "Playback was interrupted. Press Play again.";
   if (code === 2) return "PARA could not read this capture from local storage.";
-  if (code === 3) return "Chrome could not decode this capture.";
-  if (code === 4 || error?.name === "NotSupportedError") return "Chrome rejected this capture's video stream.";
-  if (error?.name === "NotAllowedError") return "Chrome blocked playback. Press Play again.";
+  if (code === 3) return "PARA could not decode this capture.";
+  if (code === 4 || error?.name === "NotSupportedError") return "This capture format could not be played.";
+  if (error?.name === "NotAllowedError") return "Playback was blocked. Press Play again.";
   return error?.message ? `Playback failed: ${error.message}` : "PARA could not play this capture.";
 }
 
 export function paraVideoPlayerMarkup({ src, mimeType = "", durationMs = 0, className = "", autoplay = false } = {}) {
   const expectedSeconds = Math.max(0, Number(durationMs || 0) / 1000);
   return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}" data-video-mime="${escapeAttr(mimeType)}">
-    <video src="${escapeAttr(src)}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>Your browser could not play this PARA recording.</video>
+    <video src="${escapeAttr(src)}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>PARA could not play this recording.</video>
     <button type="button" class="para-video-player__bigplay" data-video-action="toggle" aria-label="Play video">▶</button>
     <div class="para-video-player__status" data-video-status hidden><span></span><strong data-video-status-text>Loading video…</strong></div>
-    <div class="para-video-player__chrome">
+    <div class="para-video-player__controls-shell">
       <input class="para-video-player__seek" type="range" min="0" max="1000" step="1" value="0" data-video-seek aria-label="Video position">
       <div class="para-video-player__controls">
         <button type="button" data-video-action="toggle" aria-label="Play or pause"><span data-video-play-icon>▶</span></button>
@@ -222,8 +222,8 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
 
     // Do not reject an IndexedDB capture solely from canPlayType(). Older PARA
     // recordings can carry an over-specific MediaRecorder codec string even
-    // when Chromium can decode the underlying capture bytes. capture-service gives
-    // the browser the final playback MIME (MP4 for V50, WebM for legacy clips)
+    // when the media engine can decode the underlying capture bytes. capture-service gives
+    // the player a conservative playback MIME for existing captures
     // say by actually loading the source.
     player.dataset.mimeHint = mimeType && video.canPlayType?.(mimeType) === "" ? "unknown" : "supported";
     setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");

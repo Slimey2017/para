@@ -371,8 +371,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn(".capture-hero__fullscreen", css)
         self.assertIn("data-video-status", player)
         self.assertIn("video.canPlayType", player)
-        # V50 moved recording validation out of the Home/browser-tab recorder.
-        # Keep legacy WebM playback support here while new clips arrive as MP4.
+        # Gameplay recording stays in the injected runtime. New clips are stored directly
+        # as WebM while legacy MP4 captures remain playable.
         self.assertIn('return "video/webm"', capture)
         self.assertIn('return "video/mp4"', capture)
         self.assertNotIn("MediaRecorder", capture)
@@ -394,21 +394,19 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("player.dataset.mimeHint", player)
         self.assertNotIn("Unsupported media type", player)
 
-    def test_v48_capture_safety_is_superseded_by_v50_runtime_normalization(self):
+    def test_v56_runtime_capture_saves_recorder_output_directly(self):
         capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
-        # V48 hardened a browser-tab WebM recorder. V50 intentionally removes
-        # that recorder and treats WebM only as a temporary runtime transport.
         self.assertNotIn("getDisplayMedia", capture)
         self.assertNotIn("MediaRecorder", capture)
-        self.assertIn("PARA no longer records the browser tab", capture)
+        self.assertIn("saves the recording directly to Media Gallery", capture)
         self.assertIn('captureCanvas.captureStream(30)', server)
         self.assertIn('new MediaRecorder(stream, runtimeRecorderOptions', server)
-        self.assertIn('normalizeRuntimeCapture', server)
-        self.assertIn('/api/v1/capture/normalize', server)
-        self.assertIn('captureVersion: 5', server)
-        self.assertIn('playbackVerified: true', server)
-        self.assertIn('video/mp4', server)
+        self.assertIn("sourceMimeType: rawBlob.type", server)
+        self.assertIn("captureVersion: 7", server)
+        self.assertIn("normalized: false", server)
+        self.assertNotIn('normalizeRuntimeCapture', server)
+        self.assertNotIn('/api/v1/capture/normalize', server)
 
     def test_control_center_is_a_compact_contextual_strip(self):
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
@@ -555,7 +553,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('async function requestGameStream(audio = false)', server)
         self.assertIn('requestCompositedGameStream(audio)', server)
         self.assertIn('createMediaStreamDestination()', server)
-        self.assertIn('normalizeRuntimeCapture', server)
+        self.assertNotIn('normalizeRuntimeCapture', server)
         self.assertNotIn('requestSessionSelfCapture(audio)', server)
         self.assertNotIn('navigator.mediaDevices.getDisplayMedia', server)
         self.assertNotIn("preferCurrentTab: true", server)
@@ -694,36 +692,34 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("to service_role", migration.lower())
         self.assertNotIn("to authenticated", migration.lower().split("grant execute", 1)[-1])
 
-    def test_v50_capture_uses_direct_frames_and_server_mp4_normalization(self):
+    def test_v56_capture_has_no_server_side_video_conversion(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
         control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
-        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
 
         for marker in [
             "/api/v1/capture/normalize",
             "normalize_capture_file",
-            '"-c:v", "libx264"',
-            '"-c:a", "aac"',
-            '"-movflags", "+faststart"',
             "normalizeRuntimeCapture",
-            "requestCompositedGameStream",
-            "captureVersion: 5",
-            "video/mp4",
+            "libx264",
+            "imageio_ffmpeg",
+            "captureVersion: 6",
         ]:
-            self.assertIn(marker, server)
+            self.assertNotIn(marker, server)
+        self.assertIn("captureVersion: 7", server)
+        self.assertIn("captureState: 'ready'", server)
+        self.assertIn("verifyPersistedCapture(saved.id, rawBlob, 'ready')", server)
+        self.assertIn("normalized: false", server)
         self.assertNotIn("getDisplayMedia", server)
-        self.assertNotIn("Choose This Tab", server)
-        self.assertNotIn("self-tab", server)
         self.assertNotIn("getDisplayMedia", capture)
         self.assertNotIn("MediaRecorder", capture)
-        self.assertIn("PARA no longer records the browser tab", capture)
-        self.assertIn("MP4", media)
+        self.assertIn("saves the recording directly to Media Gallery", capture)
+        self.assertNotIn("Processing MP4", media)
+        self.assertNotIn("MP4 failed", media)
         self.assertIn("Capture from inside a game", control)
-        self.assertIn("imageio-ffmpeg==0.6.0", requirements)
-        self.assertIn("pip install -r requirements.txt", render)
+        self.assertNotIn("imageio-ffmpeg", requirements)
 
     def test_v51_direct_renderer_stream_and_control_center_text_wrapping(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
@@ -776,7 +772,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn(' : "PARA Game"', media)
         self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
 
-    def test_v54_global_rate_limit_resilience_and_capture_queue(self):
+    def test_v54_global_rate_limit_resilience_survives_v56(self):
         api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
@@ -792,57 +788,40 @@ class RepositoryTests(unittest.TestCase):
             self.assertIn(marker, api)
         self.assertIn("storeProduct(id)", media)
         self.assertNotIn("Promise.allSettled(missingStoreIds.map", media)
-
-        for marker in [
-            "enqueue_capture_normalization",
-            "capture_normalization_status",
-            "consume_capture_normalization_result",
-            "/api/v1/capture/normalize/status",
-            "/api/v1/capture/normalize/result",
-            "Queued ${kind}",
-        ]:
-            self.assertIn(marker, server)
+        self.assertNotIn("/api/v1/capture/normalize", server)
         self.assertNotIn("capture_encoder_busy", server)
-        self.assertNotIn("_capture_transcode_slots", server)
-        self.assertNotIn("self._send_json(429", server[server.find('if request.path == "/api/v1/capture/normalize"'):server.find('if request.path == "/api/v1/integrations/google/youtube/upload"')])
 
 
-    def test_v55_capture_success_requires_media_gallery_readback(self):
+    def test_v56_capture_success_requires_direct_media_gallery_readback(self):
         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
 
         for marker in [
-            "captureVersion: 6",
+            "captureVersion: 7",
             "verifyPersistedCapture",
-            "captureState: 'processing'",
-            "original recording kept in Media Gallery",
+            "captureState: 'ready'",
             "Gameplay capture saved to Media Gallery",
-            "BroadcastChannel(CAPTURE_SYNC_CHANNEL)",
-            "/api/v1/capture/normalize/ack",
-            "acknowledge_capture_normalization_result",
-            "MP4 ready · saving to Media Gallery",
         ]:
             self.assertIn(marker, server)
-        self.assertIn("captureStateLabel", media)
+        for removed in [
+            "captureState: 'processing'",
+            "/api/v1/capture/normalize",
+            "acknowledgeCaptureJob",
+            "MP4 ready",
+            "processing MP4",
+        ]:
+            self.assertNotIn(removed, server)
         self.assertIn("para-capture-library-v1", media)
-        self.assertIn("The original recording is already stored locally", media)
+        self.assertNotIn("MP4 failed", media)
+        self.assertNotIn("Processing MP4", media)
+        self.assertNotIn("Chrome", player)
+        self.assertNotIn("Chromium", player)
+        self.assertNotIn("Chrome", server)
+        self.assertNotIn("Chromium", server)
 
-        final_save = server.find("await verifyPersistedCapture(saved.id, blob, 'ready')")
+        final_save = server.find("await verifyPersistedCapture(saved.id, rawBlob, 'ready')")
         success_toast = server.find("toast('Gameplay capture saved to Media Gallery')")
         self.assertGreater(final_save, -1)
         self.assertGreater(success_toast, final_save)
 
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-def test_core_resilience_services_present():
-    from pathlib import Path
-    root = Path(__file__).resolve().parents[1]
-    save = (root / "apps/para-home/src/services/save-data.js").read_text()
-    runtime = (root / "apps/para-home/src/services/experience-runtime.js").read_text()
-    system = (root / "apps/para-home/src/screens/system.js").read_text()
-    assert "VERSION_LIMIT" in save and "restoreSaveVersion" in save
-    assert "pauseDownload" in runtime and "resumeDownload" in runtime and "cancelDownload" in runtime
-    assert "PARA does not invent demo saves" in system

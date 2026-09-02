@@ -1,1 +1,1 @@
-imageio-ffmpeg==0.6.0
+# PARA currently has no Python package dependencies.

@@ -13,9 +13,6 @@ import json
 import mimetypes
 import os
 import secrets
-import shutil
-import subprocess
-import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -91,11 +88,6 @@ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_UPLOAD_SESSION_COOKIE = "para_youtube_upload_session"
 YOUTUBE_UPLOAD_SESSION_TTL_SECONDS = 45 * 60
 YOUTUBE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
-CAPTURE_NORMALIZE_MAX_BYTES = 256 * 1024 * 1024
-CAPTURE_NORMALIZE_TIMEOUT_SECONDS = 180
-CAPTURE_NORMALIZE_CONTENT_TYPES = {"video/webm", "video/x-matroska", "application/octet-stream"}
-CAPTURE_NORMALIZE_QUEUE_MAX = 8
-CAPTURE_NORMALIZE_JOB_TTL_SECONDS = 30 * 60
 GOOGLE_OAUTH_STATE_COOKIE = "para_google_oauth_state"
 GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60
 GOOGLE_OAUTH_SCOPES = (
@@ -109,11 +101,6 @@ _youtube_upload_lock = threading.Lock()
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
-_capture_jobs: dict[str, dict] = {}
-_capture_pending_jobs: list[str] = []
-_capture_jobs_lock = threading.Lock()
-_capture_jobs_ready = threading.Condition(_capture_jobs_lock)
-_capture_worker_thread: threading.Thread | None = None
 
 
 def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
@@ -1358,263 +1345,6 @@ def _storage_fetch(bucket: str, path: str) -> tuple[int, bytes, str]:
 
 
 
-def _ffmpeg_executable() -> str:
-    """Resolve the server-side encoder used to normalize browser captures."""
-    configured = _env_config("PARA_FFMPEG_PATH", "")
-    if configured and Path(configured).is_file():
-        return configured
-    system_ffmpeg = shutil.which("ffmpeg")
-    if system_ffmpeg:
-        return system_ffmpeg
-    try:
-        import imageio_ffmpeg  # type: ignore
-
-        bundled = str(imageio_ffmpeg.get_ffmpeg_exe() or "")
-        if bundled and Path(bundled).is_file():
-            return bundled
-    except Exception:
-        pass
-    return ""
-
-
-def normalize_capture_file(input_path: Path, output_path: Path, *, timeout: int = CAPTURE_NORMALIZE_TIMEOUT_SECONDS) -> tuple[int, dict]:
-    """Transcode a temporary browser WebM into a boring H.264/AAC MP4."""
-    ffmpeg = _ffmpeg_executable()
-    if not ffmpeg:
-        return 503, {
-            "error": "capture_encoder_unavailable",
-            "message": "PARA capture processing is unavailable on this server.",
-        }
-    command = [
-        ffmpeg,
-        "-hide_banner",
-        "-loglevel", "error",
-        "-y",
-        "-fflags", "+genpts+discardcorrupt",
-        "-err_detect", "ignore_err",
-        "-i", str(input_path),
-        "-map", "0:v:0",
-        "-map", "0:a:0?",
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "22",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "160k",
-        "-ar", "48000",
-        "-movflags", "+faststart",
-        str(output_path),
-    ]
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired:
-        return 504, {
-            "error": "capture_processing_timeout",
-            "message": "PARA capture processing took too long. Try a shorter clip.",
-        }
-    except OSError:
-        return 503, {
-            "error": "capture_encoder_unavailable",
-            "message": "PARA could not start the capture encoder.",
-        }
-    if completed.returncode != 0 or not output_path.is_file() or output_path.stat().st_size < 1024:
-        detail = re.sub(r"\s+", " ", str(completed.stderr or "").strip())[-500:]
-        return 422, {
-            "error": "capture_processing_failed",
-            "message": "PARA could not normalize this gameplay recording.",
-            "detail": detail,
-        }
-    return 200, {
-        "normalized": True,
-        "mime_type": "video/mp4",
-        "video_codec": "h264",
-        "audio_codec": "aac",
-        "size": output_path.stat().st_size,
-    }
-
-
-
-def _capture_cleanup_locked(now: float | None = None) -> None:
-    """Drop finished capture jobs after their short result-retention window."""
-    current = time.time() if now is None else now
-    stale: list[str] = []
-    for job_id, job in _capture_jobs.items():
-        if job.get("state") not in {"completed", "failed"}:
-            continue
-        finished = float(job.get("finished_at") or job.get("created_at") or current)
-        if current - finished >= CAPTURE_NORMALIZE_JOB_TTL_SECONDS:
-            stale.append(job_id)
-    for job_id in stale:
-        job = _capture_jobs.pop(job_id, None) or {}
-        try:
-            shutil.rmtree(str(job.get("temp_dir") or ""), ignore_errors=True)
-        except Exception:
-            pass
-
-
-def _capture_ahead_locked(job_id: str) -> int:
-    job = _capture_jobs.get(job_id) or {}
-    if job.get("state") == "processing":
-        return 0
-    processing = 1 if any(candidate.get("state") == "processing" for candidate in _capture_jobs.values()) else 0
-    try:
-        pending_index = _capture_pending_jobs.index(job_id)
-    except ValueError:
-        pending_index = 0
-    return max(0, processing + pending_index)
-
-
-def _capture_queue_worker() -> None:
-    while True:
-        with _capture_jobs_ready:
-            while not _capture_pending_jobs:
-                _capture_jobs_ready.wait()
-            job_id = _capture_pending_jobs.pop(0)
-            job = _capture_jobs.get(job_id)
-            if not job:
-                continue
-            job["state"] = "processing"
-            job["started_at"] = time.time()
-            input_path = Path(str(job["input_path"]))
-            output_path = Path(str(job["output_path"]))
-
-        try:
-            status, payload = normalize_capture_file(input_path, output_path)
-        except Exception as error:  # keep the worker alive if one encoder job crashes
-            status, payload = 500, {
-                "error": "capture_processing_failed",
-                "message": "PARA capture processing failed unexpectedly.",
-                "detail": str(error)[-300:],
-            }
-
-        with _capture_jobs_ready:
-            current = _capture_jobs.get(job_id)
-            if not current:
-                continue
-            current["status_code"] = int(status)
-            current["result"] = payload
-            current["finished_at"] = time.time()
-            current["state"] = "completed" if status == 200 else "failed"
-            _capture_cleanup_locked()
-            _capture_jobs_ready.notify_all()
-
-
-def _ensure_capture_worker_locked() -> None:
-    global _capture_worker_thread
-    if _capture_worker_thread and _capture_worker_thread.is_alive():
-        return
-    _capture_worker_thread = threading.Thread(
-        target=_capture_queue_worker,
-        name="para-capture-normalizer",
-        daemon=True,
-    )
-    _capture_worker_thread.start()
-
-
-def enqueue_capture_normalization(input_path: Path, output_path: Path, temp_dir: Path, owner: str) -> tuple[int, dict]:
-    """Queue one uploaded capture instead of rejecting it when the encoder is busy."""
-    with _capture_jobs_ready:
-        _capture_cleanup_locked()
-        if len(_capture_pending_jobs) >= CAPTURE_NORMALIZE_QUEUE_MAX:
-            return 503, {
-                "error": "capture_queue_full",
-                "message": "PARA's capture queue is full. Your recording was not discarded; try saving again in a moment.",
-            }
-        _ensure_capture_worker_locked()
-        job_id = secrets.token_urlsafe(18)
-        now = time.time()
-        _capture_jobs[job_id] = {
-            "id": job_id,
-            "owner": owner,
-            "state": "queued",
-            "created_at": now,
-            "input_path": str(input_path),
-            "output_path": str(output_path),
-            "temp_dir": str(temp_dir),
-            "status_code": 202,
-            "result": {},
-        }
-        _capture_pending_jobs.append(job_id)
-        ahead = _capture_ahead_locked(job_id)
-        _capture_jobs_ready.notify()
-        return 202, {
-            "job_id": job_id,
-            "state": "queued" if ahead else "processing",
-            "ahead": ahead,
-            "message": f"Queued capture · {ahead} ahead" if ahead else "Processing capture · creating MP4",
-        }
-
-
-def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
-    with _capture_jobs_ready:
-        _capture_cleanup_locked()
-        job = _capture_jobs.get(job_id)
-        if not job or str(job.get("owner") or "") != owner:
-            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
-        state = str(job.get("state") or "queued")
-        ahead = _capture_ahead_locked(job_id) if state == "queued" else 0
-        payload = {
-            "job_id": job_id,
-            "state": state,
-            "ahead": ahead,
-            "message": (
-                f"Queued capture · {ahead} ahead"
-                if state == "queued"
-                else "Processing capture · creating MP4"
-                if state == "processing"
-                else "MP4 ready · saving to Media Gallery"
-                if state == "completed"
-                else str((job.get("result") or {}).get("message") or "Capture processing failed.")
-            ),
-        }
-        if state == "failed":
-            payload.update(job.get("result") or {})
-            payload["state"] = "failed"
-        return 200, payload
-
-
-def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int, bytes | dict]:
-    """Return a finished MP4 without deleting it until the browser confirms its local save."""
-    with _capture_jobs_ready:
-        _capture_cleanup_locked()
-        job = _capture_jobs.get(job_id)
-        if not job or str(job.get("owner") or "") != owner:
-            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
-        state = str(job.get("state") or "queued")
-        if state in {"queued", "processing"}:
-            return 409, {
-                "error": "capture_not_ready",
-                "state": state,
-                "ahead": _capture_ahead_locked(job_id) if state == "queued" else 0,
-                "message": "PARA is still processing this capture.",
-            }
-        if state == "failed":
-            return int(job.get("status_code") or 422), dict(job.get("result") or {})
-        output_path = Path(str(job.get("output_path") or ""))
-
-    try:
-        body = output_path.read_bytes()
-    except OSError:
-        return 500, {"error": "capture_result_missing", "message": "PARA finished the job but could not read the MP4 result."}
-    return 200, body
-
-
-def acknowledge_capture_normalization_result(job_id: str, owner: str) -> tuple[int, dict]:
-    """Delete a completed encoder result only after Media Gallery confirms persistence."""
-    with _capture_jobs_ready:
-        _capture_cleanup_locked()
-        job = _capture_jobs.get(job_id)
-        if not job or str(job.get("owner") or "") != owner:
-            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
-        state = str(job.get("state") or "queued")
-        if state in {"queued", "processing"}:
-            return 409, {"error": "capture_not_ready", "state": state, "message": "PARA is still processing this capture."}
-        temp_dir = str(job.get("temp_dir") or "")
-        _capture_jobs.pop(job_id, None)
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    return 200, {"acknowledged": True, "job_id": job_id}
-
 
 def _store_build_storage_prefix(item: dict) -> str:
     """Return the physical Storage prefix for a published developer build.
@@ -2789,43 +2519,25 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return persisted;
   }
 
-  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready', normalizeJobId = '', failureMessage = '' }) {
+  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready' }) {
+    const recorderMimeType = sourceMimeType || blob?.type || 'video/webm';
     const item = {
       id: id || crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
-      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 6,
-      captureState, normalizeJobId, failureMessage,
+      type, blob, mimeType: blob.type || recorderMimeType, width, height, durationMs, captureMode,
+      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 7,
+      captureState,
       ...(type === 'clip' ? {
-        playbackVerified: captureState === 'ready',
-        recorderMimeType: sourceMimeType || 'video/webm',
-        sourceMimeType: sourceMimeType || 'video/webm',
-        normalized: captureState === 'ready' && blob.type === 'video/mp4',
-        videoCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'h264' : '',
-        audioCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'aac' : '',
+        playbackVerified: false,
+        storageVerified: captureState === 'ready',
+        recorderMimeType,
+        sourceMimeType: recorderMimeType,
+        normalized: false,
+        videoCodec: recorderMimeType.includes('vp9') ? 'vp9' : recorderMimeType.includes('vp8') ? 'vp8' : '',
+        audioCodec: recorderMimeType.includes('opus') ? 'opus' : '',
       } : {})
     };
     await writeCaptureRecord(item, captureState === 'ready' ? 'saved' : captureState);
     return verifyPersistedCapture(item.id, blob, captureState);
-  }
-
-  async function patchCaptureState(id, patch = {}, reason = 'updated') {
-    const existing = await readCaptureRecord(id);
-    if (!existing) return null;
-    const next = { ...existing, ...patch, updatedAt: Date.now() };
-    await writeCaptureRecord(next, reason);
-    return readCaptureRecord(id);
-  }
-
-  async function acknowledgeCaptureJob(jobId) {
-    if (!jobId) return false;
-    try {
-      const response = await fetch(`/api/v1/capture/normalize/ack?id=${encodeURIComponent(jobId)}`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' },
-      });
-      return response.ok;
-    } catch (_) { return false; }
   }
 
   function stopStream(stream) {
@@ -3080,7 +2792,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   const RUNTIME_CAPTURE_SLICE_MS = 1000;
-  const RUNTIME_CAPTURE_DECODE_TIMEOUT_MS = 7000;
 
   function runtimeRecorderMimeCandidates(hasAudio = false) {
     if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable in this browser.');
@@ -3095,18 +2806,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return mimeType ? { mimeType, videoBitsPerSecond } : { videoBitsPerSecond };
   }
 
-  function runtimeRecorderLabel(mimeType = '') {
-    return mimeType || 'browser temporary WebM';
-  }
-
-  function runtimeMediaDecodeMessage(video) {
-    const code = Number(video?.error?.code || 0);
-    if (code === 1) return 'Chromium interrupted capture playback.';
-    if (code === 2) return 'Chromium could not read this capture media data.';
-    if (code === 3) return "Chromium rejected the normalized capture's video stream.";
-    if (code === 4) return "Chromium does not support the normalized capture's encoded video stream.";
-    return 'Chromium could not decode the normalized gameplay video.';
-  }
 
   function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = RUNTIME_CAPTURE_SLICE_MS, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
     const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, videoBitsPerSecond));
@@ -3151,193 +2850,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return blob;
   }
 
-  async function verifyNormalizedCapture(blob) {
-    if (!blob?.size || blob.size < 1024) throw new Error('PARA capture processing returned an empty video.');
-    const url = URL.createObjectURL(blob);
-    const video = document.createElement('video');
-    let frameTimer = 0;
-    try {
-      video.preload = 'auto';
-      video.muted = true;
-      video.playsInline = true;
-      await new Promise((resolve, reject) => {
-        let timer = 0;
-        const cleanup = () => {
-          clearTimeout(timer);
-          video.removeEventListener('loadeddata', onLoaded);
-          video.removeEventListener('error', onError);
-        };
-        const onLoaded = () => {
-          cleanup();
-          if (!video.videoWidth || !video.videoHeight) {
-            reject(new Error('The normalized capture contains no visible video frames.'));
-            return;
-          }
-          resolve();
-        };
-        const onError = () => {
-          const message = runtimeMediaDecodeMessage(video);
-          cleanup();
-          reject(new Error(message));
-        };
-        video.addEventListener('loadeddata', onLoaded);
-        video.addEventListener('error', onError);
-        timer = setTimeout(() => {
-          cleanup();
-          reject(new Error('The normalized MP4 could not be decoded.'));
-        }, RUNTIME_CAPTURE_DECODE_TIMEOUT_MS);
-        video.src = url;
-        video.load();
-      });
-      const startTime = Number(video.currentTime || 0);
-      let decodedFrame = video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
-      let framePromise = Promise.resolve();
-      if (typeof video.requestVideoFrameCallback === 'function') {
-        framePromise = new Promise((resolve) => {
-          frameTimer = setTimeout(resolve, 1200);
-          video.requestVideoFrameCallback(() => {
-            decodedFrame = true;
-            clearTimeout(frameTimer);
-            resolve();
-          });
-        });
-      }
-      try { await video.play(); }
-      catch (_) { throw new Error(runtimeMediaDecodeMessage(video)); }
-      const timelinePromise = new Promise((resolve, reject) => {
-        const started = performance.now();
-        const check = () => {
-          if (video.error) { reject(new Error(runtimeMediaDecodeMessage(video))); return; }
-          if (Number(video.currentTime || 0) > startTime + .04) { resolve(); return; }
-          if (video.ended) { reject(new Error('The normalized capture ended before playback could advance.')); return; }
-          if (performance.now() - started > 3500) { reject(new Error('The normalized capture decoded, but playback did not advance.')); return; }
-          setTimeout(check, 50);
-        };
-        check();
-      });
-      await Promise.all([framePromise, timelinePromise]);
-      const decodedFrames = Number(video.getVideoPlaybackQuality?.().totalVideoFrames || 0);
-      if (!decodedFrame && decodedFrames <= 0) throw new Error('Chromium did not decode a frame from the normalized MP4.');
-      video.pause();
-      return { width: video.videoWidth, height: video.videoHeight, duration: Number(video.duration || 0) };
-    } finally {
-      clearTimeout(frameTimer);
-      video.pause?.();
-      video.removeAttribute?.('src');
-      video.load?.();
-      URL.revokeObjectURL(url);
-    }
-  }
-
-  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture', onState = null) {
-    const kind = captureKind === 'replay' ? 'replay' : 'capture';
-    let response = null;
-    let initialPayload = null;
-    for (let submitAttempt = 0; submitAttempt < 60; submitAttempt += 1) {
-      response = await fetch('/api/v1/capture/normalize', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': rawBlob.type || 'video/webm',
-          'X-PARA-Capture-Mode': captureMode || 'game-frames',
-        },
-        body: rawBlob,
-      });
-      if (response.status !== 503) break;
-      try { initialPayload = await response.json(); } catch (_) { initialPayload = null; }
-      if (initialPayload?.error !== 'capture_queue_full') break;
-      toast(`Capture queue is full · waiting to save ${kind}`);
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
-      response = null;
-      initialPayload = null;
-    }
-    if (!response) throw new Error('PARA capture processing stayed busy for too long.');
-
-    let output = null;
-    if (response.status === 202) {
-      let queued = initialPayload;
-      if (!queued) {
-        try { queued = await response.json(); } catch (_) {}
-      }
-      const jobId = String(queued?.job_id || '');
-      if (!jobId) throw new Error('PARA accepted the capture but did not return a processing job.');
-      try { onState?.({ state: Number(queued?.ahead || 0) > 0 ? 'queued' : 'processing', jobId, ahead: Math.max(0, Number(queued?.ahead || 0)) }); } catch (_) {}
-
-      const deadline = Date.now() + (10 * 60 * 1000);
-      let lastMessage = '';
-      const showStatus = (message) => {
-        const text = String(message || '');
-        if (!text || text === lastMessage) return;
-        lastMessage = text;
-        toast(text);
-      };
-      if (Number(queued?.ahead || 0) > 0) showStatus(`Queued ${kind} · ${Number(queued.ahead)} ahead`);
-      else showStatus(`Processing ${kind} · creating MP4`);
-
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 750));
-        const statusResponse = await fetch(`/api/v1/capture/normalize/status?id=${encodeURIComponent(jobId)}`, {
-          credentials: 'same-origin',
-          headers: { 'Accept': 'application/json' },
-        });
-        let statusPayload = null;
-        try { statusPayload = await statusResponse.json(); } catch (_) {}
-        if (!statusResponse.ok) {
-          throw new Error(statusPayload?.message || `Capture queue status failed (${statusResponse.status}).`);
-        }
-        const state = String(statusPayload?.state || '');
-        if (state === 'queued') {
-          const ahead = Math.max(0, Number(statusPayload?.ahead || 0));
-          try { onState?.({ state: 'queued', jobId, ahead }); } catch (_) {}
-          showStatus(ahead > 0 ? `Queued ${kind} · ${ahead} ahead` : `Queued ${kind}`);
-          continue;
-        }
-        if (state === 'processing') {
-          try { onState?.({ state: 'processing', jobId, ahead: 0 }); } catch (_) {}
-          showStatus(`Processing ${kind} · creating MP4`);
-          continue;
-        }
-        if (state === 'failed') {
-          const detail = statusPayload?.detail ? ` ${statusPayload.detail}` : '';
-          throw new Error(`${statusPayload?.message || 'PARA could not process this gameplay recording.'}${detail}`.trim());
-        }
-        if (state === 'completed') {
-          try { onState?.({ state: 'saving', jobId, ahead: 0 }); } catch (_) {}
-          showStatus(`MP4 ready · saving ${kind} to Media Gallery`);
-          break;
-        }
-      }
-      if (Date.now() >= deadline) throw new Error('PARA capture processing took too long in the queue.');
-
-      const resultResponse = await fetch(`/api/v1/capture/normalize/result?id=${encodeURIComponent(jobId)}`, {
-        credentials: 'same-origin',
-        headers: { 'Accept': 'video/mp4' },
-      });
-      if (!resultResponse.ok) {
-        let payload = null;
-        try { payload = await resultResponse.json(); } catch (_) {}
-        const detail = payload?.detail ? ` ${payload.detail}` : '';
-        throw new Error(`${payload?.message || `Capture processing failed (${resultResponse.status}).`}${detail}`.trim());
-      }
-      output = await resultResponse.blob();
-    } else {
-      // Backward compatibility for a V50/V51 server during a rolling deploy.
-      if (!response.ok) {
-        let payload = initialPayload;
-        if (!payload) {
-          try { payload = await response.json(); } catch (_) {}
-        }
-        const detail = payload?.detail ? ` ${payload.detail}` : '';
-        throw new Error(`${payload?.message || `Capture processing failed (${response.status}).`}${detail}`.trim());
-      }
-      output = await response.blob();
-    }
-
-    const mp4 = output?.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
-    await verifyNormalizedCapture(mp4);
-    try { onState?.({ state: 'verified' }); } catch (_) {}
-    return mp4;
-  }
 
   function selectRuntimeRecorderMime(stream) {
     const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
@@ -3666,14 +3178,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const active = manualRecording;
     if (!active || active.stopping) return;
     active.stopping = true;
-    let staged = null;
-    let captureJobId = '';
-    let captureStateUpdates = Promise.resolve();
     try {
       const rawBlob = await finalizeRuntimeRecorderSession(active.session);
       if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('The recording was empty.');
       const durationMs = Date.now() - active.startedAt;
-      staged = await saveCapture({
+      const saved = await saveCapture({
         type: 'clip',
         blob: rawBlob,
         width: active.width || 0,
@@ -3681,47 +3190,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         durationMs,
         captureMode: active.captureMode || '',
         sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
-        captureState: 'processing'
+        captureState: 'ready'
       });
-      toast('Recording secured locally · processing MP4');
-      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture', (status) => {
-        captureJobId = String(status?.jobId || captureJobId || '');
-        const state = String(status?.state || 'processing');
-        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
-          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
-          normalizeJobId: captureJobId,
-          queueAhead: Math.max(0, Number(status?.ahead || 0)),
-          failureMessage: ''
-        }, state)).catch(() => null);
-      });
-      await captureStateUpdates;
-      const saved = await saveCapture({
-        id: staged.id,
-        createdAt: staged.createdAt,
-        type: 'clip',
-        blob,
-        width: active.width || 0,
-        height: active.height || 0,
-        durationMs,
-        captureMode: active.captureMode || '',
-        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
-        captureState: 'ready',
-        normalizeJobId: captureJobId
-      });
-      await verifyPersistedCapture(saved.id, blob, 'ready');
-      void acknowledgeCaptureJob(captureJobId);
+      await verifyPersistedCapture(saved.id, rawBlob, 'ready');
       toast('Gameplay capture saved to Media Gallery');
     } catch (error) {
-      if (staged?.id) {
-        try {
-          await patchCaptureState(staged.id, {
-            captureState: 'failed',
-            normalizeJobId: captureJobId,
-            failureMessage: String(error?.message || 'MP4 processing failed.')
-          }, 'failed');
-        } catch (_) {}
-      }
-      toast(staged ? 'MP4 processing failed · original recording kept in Media Gallery' : (error?.message || 'Recording could not be saved'));
+      toast(error?.message || 'Recording could not be saved');
     } finally {
       manualRecording = null;
       stopStream(active.stream);
@@ -3765,10 +3239,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   async function saveReplay(durationMs) {
-    if (!replay) { toast('Start PARA Replay first'); return; }
-    let staged = null;
-    let captureJobId = '';
-    let captureStateUpdates = Promise.resolve();
+    if (!replay) throw new Error('PARA Replay is not running.');
     try {
       replay.recorder.requestData();
       await new Promise((resolve) => setTimeout(resolve, 220));
@@ -3777,7 +3248,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
       if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('Replay has not buffered enough gameplay yet.');
       const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
-      staged = await saveCapture({
+      const saved = await saveCapture({
         type: 'clip',
         blob: rawBlob,
         width: replay.width || 0,
@@ -3785,47 +3256,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         durationMs: actualDuration,
         captureMode: replay.captureMode || '',
         sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
-        captureState: 'processing'
+        captureState: 'ready'
       });
-      toast('Replay secured locally · processing MP4');
-      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay', (status) => {
-        captureJobId = String(status?.jobId || captureJobId || '');
-        const state = String(status?.state || 'processing');
-        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
-          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
-          normalizeJobId: captureJobId,
-          queueAhead: Math.max(0, Number(status?.ahead || 0)),
-          failureMessage: ''
-        }, state)).catch(() => null);
-      });
-      await captureStateUpdates;
-      const saved = await saveCapture({
-        id: staged.id,
-        createdAt: staged.createdAt,
-        type: 'clip',
-        blob,
-        width: replay.width || 0,
-        height: replay.height || 0,
-        durationMs: actualDuration,
-        captureMode: replay.captureMode || '',
-        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
-        captureState: 'ready',
-        normalizeJobId: captureJobId
-      });
-      await verifyPersistedCapture(saved.id, blob, 'ready');
-      void acknowledgeCaptureJob(captureJobId);
+      await verifyPersistedCapture(saved.id, rawBlob, 'ready');
       toast('Recent gameplay saved to Media Gallery');
     } catch (error) {
-      if (staged?.id) {
-        try {
-          await patchCaptureState(staged.id, {
-            captureState: 'failed',
-            normalizeJobId: captureJobId,
-            failureMessage: String(error?.message || 'MP4 processing failed.')
-          }, 'failed');
-        } catch (_) {}
-      }
-      toast(staged ? 'Replay MP4 failed · original recording kept in Media Gallery' : (error?.message || 'Replay could not be saved'));
+      toast(error?.message || 'Replay could not be saved');
     }
   }
 
@@ -4196,27 +3632,6 @@ class ParaHandler(SimpleHTTPRequestHandler):
             return 401, {"signed_in": False, "user": None}, "", refreshed_headers
         return 200, session, access, refreshed_headers
 
-    def _capture_access_owner(self) -> tuple[int, str, list[tuple[str, str]]]:
-        """Return a stable owner id for capture queue jobs.
-
-        Hosted PARA requires a signed-in account. Loopback/local PARA keeps the
-        capture pipeline available without cloud auth.
-        """
-        server_host = str(self.server.server_address[0] if self.server and self.server.server_address else "")
-        try:
-            local_server = ipaddress.ip_address(server_host).is_loopback
-        except ValueError:
-            local_server = False
-        if local_server:
-            return 200, "local", []
-        status, session, _, refreshed_headers = self._authenticated_access()
-        if status != 200:
-            return 401, "", refreshed_headers
-        owner = str(session.get("user", {}).get("id") or "")
-        if not owner:
-            return 401, "", refreshed_headers
-        return 200, owner, refreshed_headers
-
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         try:
             body = path.read_bytes()
@@ -4249,28 +3664,6 @@ class ParaHandler(SimpleHTTPRequestHandler):
         request = urlparse(self.path)
         if request.path in {"/privacy", "/privacy/"}:
             self._send_file(HOME_ROOT / "privacy" / "index.html", "text/html; charset=utf-8")
-            return
-        if request.path in {"/api/v1/capture/normalize/status", "/api/v1/capture/normalize/result"}:
-            access_status, owner, refreshed_headers = self._capture_access_owner()
-            if access_status != 200:
-                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
-                return
-            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
-            if request.path.endswith("/status"):
-                job_status, payload = capture_normalization_status(job_id, owner)
-                self._send_json(job_status, payload, refreshed_headers)
-                return
-            result_status, result = consume_capture_normalization_result(job_id, owner)
-            if result_status != 200 or not isinstance(result, (bytes, bytearray)):
-                self._send_json(result_status, result if isinstance(result, dict) else {"error": "capture_result_missing"}, refreshed_headers)
-                return
-            headers = [
-                *refreshed_headers,
-                ("X-PARA-Capture-Normalized", "1"),
-                ("X-PARA-Video-Codec", "h264"),
-                ("X-PARA-Audio-Codec", "aac"),
-            ]
-            self._send_bytes(200, bytes(result), "video/mp4", headers)
             return
         if request.path == "/api/v1/achievements/progress":
             status, _, access, refreshed_headers = self._authenticated_access()
@@ -4471,73 +3864,6 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         request = urlparse(self.path)
-        if request.path == "/api/v1/capture/normalize/ack":
-            access_status, owner, refreshed_headers = self._capture_access_owner()
-            if access_status != 200:
-                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
-                return
-            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
-            ack_status, payload = acknowledge_capture_normalization_result(job_id, owner)
-            self._send_json(ack_status, payload, refreshed_headers)
-            return
-        if request.path == "/api/v1/capture/normalize":
-            access_status, owner, refreshed_headers = self._capture_access_owner()
-            if access_status != 200:
-                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
-                return
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError:
-                length = 0
-            if length < 1024 or length > CAPTURE_NORMALIZE_MAX_BYTES:
-                self._send_json(413, {
-                    "error": "capture_size_invalid",
-                    "message": "Choose a non-empty gameplay capture smaller than 256 MB.",
-                }, refreshed_headers)
-                return
-            content_type = str(self.headers.get("Content-Type") or "video/webm").split(";", 1)[0].strip().lower()
-            if content_type not in CAPTURE_NORMALIZE_CONTENT_TYPES:
-                self._send_json(415, {
-                    "error": "capture_format_invalid",
-                    "message": "PARA capture processing currently accepts temporary WebM recordings only.",
-                }, refreshed_headers)
-                return
-
-            temporary = Path(tempfile.mkdtemp(prefix="para-capture-job-"))
-            input_path = temporary / "capture.webm"
-            output_path = temporary / "capture.mp4"
-            remaining = length
-            try:
-                with input_path.open("wb") as destination:
-                    while remaining > 0:
-                        chunk = self.rfile.read(min(1024 * 1024, remaining))
-                        if not chunk:
-                            break
-                        destination.write(chunk)
-                        remaining -= len(chunk)
-                if remaining != 0 or input_path.stat().st_size != length:
-                    shutil.rmtree(temporary, ignore_errors=True)
-                    self._send_json(400, {
-                        "error": "capture_upload_incomplete",
-                        "message": "The capture upload ended before PARA received the complete recording.",
-                    }, refreshed_headers)
-                    return
-            except OSError:
-                shutil.rmtree(temporary, ignore_errors=True)
-                self._send_json(500, {
-                    "error": "capture_upload_failed",
-                    "message": "PARA could not stage this capture for processing.",
-                }, refreshed_headers)
-                return
-
-            queue_status, payload = enqueue_capture_normalization(input_path, output_path, temporary, owner)
-            if queue_status != 202:
-                shutil.rmtree(temporary, ignore_errors=True)
-                self._send_json(queue_status, payload, refreshed_headers)
-                return
-            self._send_json(202, payload, [*refreshed_headers, ("Retry-After", "1")])
-            return
-
         if request.path == "/api/v1/integrations/google/youtube/upload":
             status, _, para_access, refreshed_headers = self._authenticated_access()
             clear_upload_cookie = self._youtube_upload_cookie_headers(clear=True)

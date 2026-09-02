@@ -4,14 +4,13 @@ import sys
 import json
 from pathlib import Path
 import os
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result, acknowledge_capture_normalization_result  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -496,112 +495,16 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(payload["error"], "weak_password")
 
 
-    def test_capture_normalizer_outputs_h264_mp4(self):
+    def test_capture_transcoder_is_not_part_of_the_api(self):
         import server
-        ffmpeg = server._ffmpeg_executable()
-        if not ffmpeg:
-            self.skipTest("ffmpeg unavailable")
-        with tempfile.TemporaryDirectory() as temporary:
-            source = Path(temporary) / "source.webm"
-            output = Path(temporary) / "output.mp4"
-            generated = subprocess.run([
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30",
-                "-t", "1", "-c:v", "libvpx", "-pix_fmt", "yuv420p", str(source),
-            ], capture_output=True, text=True, check=False)
-            if generated.returncode != 0:
-                self.skipTest(f"ffmpeg WebM fixture unavailable: {generated.stderr[-200:]}")
-            status, payload = normalize_capture_file(source, output, timeout=30)
-            self.assertEqual(status, 200, payload)
-            self.assertTrue(payload["normalized"])
-            self.assertEqual(payload["mime_type"], "video/mp4")
-            self.assertEqual(payload["video_codec"], "h264")
-            self.assertTrue(output.is_file())
-            body = output.read_bytes()
-            self.assertIn(b"ftyp", body[:64])
-            self.assertIn(b"moov", body)
-            self.assertLess(body.find(b"moov"), body.find(b"mdat"))
-
-    def test_capture_queue_serializes_jobs_instead_of_returning_busy_429(self):
-        import server
-        import threading
-        import time
-
-        with server._capture_jobs_ready:
-            for job in server._capture_jobs.values():
-                server.shutil.rmtree(str(job.get("temp_dir") or ""), ignore_errors=True)
-            server._capture_jobs.clear()
-            server._capture_pending_jobs.clear()
-
-        first_started = threading.Event()
-        release_first = threading.Event()
-        order = []
-
-        def fake_normalize(input_path, output_path, *, timeout=server.CAPTURE_NORMALIZE_TIMEOUT_SECONDS):
-            order.append(input_path.name)
-            if len(order) == 1:
-                first_started.set()
-                release_first.wait(2)
-            output_path.write_bytes(b"0" * 2048)
-            return 200, {
-                "normalized": True,
-                "mime_type": "video/mp4",
-                "video_codec": "h264",
-                "audio_codec": "aac",
-                "size": 2048,
-            }
-
-        temporary_dirs = []
-        try:
-            with patch("server.normalize_capture_file", side_effect=fake_normalize):
-                payloads = []
-                for index in range(2):
-                    temporary = Path(tempfile.mkdtemp(prefix=f"para-queue-test-{index}-"))
-                    temporary_dirs.append(temporary)
-                    source = temporary / "capture.webm"
-                    output = temporary / "capture.mp4"
-                    source.write_bytes(b"webm" * 512)
-                    status, payload = enqueue_capture_normalization(source, output, temporary, "test-owner")
-                    self.assertEqual(status, 202)
-                    self.assertNotEqual(status, 429)
-                    payloads.append(payload)
-
-                self.assertTrue(first_started.wait(1))
-                second_status, second = capture_normalization_status(payloads[1]["job_id"], "test-owner")
-                self.assertEqual(second_status, 200)
-                self.assertEqual(second["state"], "queued")
-                self.assertGreaterEqual(second["ahead"], 1)
-
-                release_first.set()
-                deadline = time.time() + 3
-                while time.time() < deadline:
-                    states = [capture_normalization_status(payload["job_id"], "test-owner")[1].get("state") for payload in payloads]
-                    if states == ["completed", "completed"]:
-                        break
-                    time.sleep(0.02)
-                self.assertEqual(states, ["completed", "completed"])
-
-                for payload in payloads:
-                    job_id = payload["job_id"]
-                    result_status, body = consume_capture_normalization_result(job_id, "test-owner")
-                    self.assertEqual(result_status, 200)
-                    self.assertIsInstance(body, bytes)
-                    self.assertEqual(len(body), 2048)
-                    # V55 keeps the finished MP4 available until the browser confirms
-                    # that IndexedDB readback succeeded, so a transient client failure
-                    # can fetch the same result again instead of losing it.
-                    retry_status, retry_body = consume_capture_normalization_result(job_id, "test-owner")
-                    self.assertEqual(retry_status, 200)
-                    self.assertEqual(retry_body, body)
-                    ack_status, ack = acknowledge_capture_normalization_result(job_id, "test-owner")
-                    self.assertEqual(ack_status, 200)
-                    self.assertTrue(ack["acknowledged"])
-                    missing_status, _ = capture_normalization_status(job_id, "test-owner")
-                    self.assertEqual(missing_status, 404)
-        finally:
-            release_first.set()
-            for temporary in temporary_dirs:
-                server.shutil.rmtree(temporary, ignore_errors=True)
+        for name in [
+            "normalize_capture_file",
+            "enqueue_capture_normalization",
+            "capture_normalization_status",
+            "consume_capture_normalization_result",
+            "acknowledge_capture_normalization_result",
+        ]:
+            self.assertFalse(hasattr(server, name), name)
 
     def test_unknown_route_returns_not_found(self):
         status, payload = resolve("/api/v1/does-not-exist")

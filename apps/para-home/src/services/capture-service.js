@@ -57,7 +57,7 @@ export async function deleteCapture(id) {
 }
 
 function runtimeOnlyError(action = "capture gameplay") {
-  return new Error(`Open a game to ${action}. PARA no longer records the browser tab; gameplay capture runs inside the game and is normalized to MP4.`);
+  return new Error(`Open a game to ${action}. PARA records gameplay inside the game and saves the recording directly to Media Gallery.`);
 }
 
 function emitCaptureState() {
@@ -67,8 +67,8 @@ function emitCaptureState() {
   }));
 }
 
-// V50 deliberately removes browser-tab capture from PARA Home. Game screenshots
-// are captured from the game renderer by the injected runtime, without a tab picker.
+// PARA Home does not record the surrounding page. Game screenshots and video
+// are captured from the game renderer by the injected runtime.
 export async function captureScreenshot() {
   throw runtimeOnlyError("take a gameplay screenshot");
 }

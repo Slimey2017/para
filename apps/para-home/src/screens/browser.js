@@ -80,7 +80,7 @@ export function browserScreen() {
   return page({
     title: "Browser", description: "", eyebrow: "", className: "browser-page browser-app-page",
     body: `<section class="para-browser para-browser--app" data-para-browser>
-      <header class="browser-app-chrome">
+      <header class="browser-app-bar">
         <div class="browser-app-tabstrip" aria-label="Browser tabs">
           <div class="browser-app-brand"><span class="browser-app-mark">P</span><strong>Para Browser</strong></div>
           <div class="browser-tabs" data-browser-tabs></div>
