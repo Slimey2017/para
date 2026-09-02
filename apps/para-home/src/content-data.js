@@ -41,14 +41,8 @@ export const content = {
   notifications: [
     { title: "Welcome to PARA", meta: "Your Home is ready", icon: "✦" },
     { title: "Hollow Circuit is downloading", meta: "18 minutes remaining", icon: "↓" },
-    { title: "Aleciyah is online", meta: "Playing Garden Spirits", icon: "A" },
   ],
-  friends: [
-    { title: "Mika", meta: "Creating in Blender", icon: "M", end: "Online" },
-    { title: "Romeo", meta: "Last seen yesterday", icon: "R", end: "Offline" },
-    { title: "Aleciyah", meta: "Playing Garden Spirits", icon: "A", end: "Joinable" },
-    { title: "Sam", meta: "At PARA Home", icon: "S", end: "Online" },
-  ],
+  friends: [],
   networks: [
     { title: "PulseWave 5G", meta: "Connected · Secure", signal: "Strong" },
     { title: "Workshop", meta: "Secure", signal: "Good" },

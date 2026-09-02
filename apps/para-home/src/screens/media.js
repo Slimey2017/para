@@ -167,10 +167,27 @@ function achievementCardMarkup(item, index) {
   </article>`;
 }
 
+function savedStoreIdentity(storeId) {
+  if (!storeId) return {};
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`para.store.artwork.${storeId}`) || "{}");
+    return {
+      title: String(value?.title || "").trim(),
+      art: Array.isArray(value?.urls) ? String(value.urls[0] || "") : "",
+    };
+  } catch { return {}; }
+}
+
 function achievementGroups(achievements, catalog = []) {
   const catalogByProject = new Map(catalog.filter((item) => item?.project_id).map((item) => [String(item.project_id), item]));
+  const catalogByStore = new Map(catalog.filter((item) => item?.id).map((item) => [String(item.id), item]));
   const recent = getProfileRuntime().recent || [];
   const runtimeByProject = new Map(recent.filter((item) => item?.projectId).map((item) => [String(item.projectId), item]));
+  const runtimeByStore = new Map();
+  for (const item of recent) {
+    const storeId = String(item?.storeId || (String(item?.id || "").startsWith("store:") ? String(item.id).slice(6) : "") || "");
+    if (storeId) runtimeByStore.set(storeId, item);
+  }
   const groups = new Map();
   for (const item of achievements) {
     const projectId = String(item.projectId || "legacy");
@@ -178,15 +195,18 @@ function achievementGroups(achievements, catalog = []) {
     groups.get(projectId).push(item);
   }
   return [...groups.entries()].map(([projectId, items]) => {
-    const catalogItem = catalogByProject.get(projectId);
-    const runtimeItem = runtimeByProject.get(projectId);
+    const storeId = String(items.find((item) => item?.storeId)?.storeId || "");
+    const catalogItem = catalogByProject.get(projectId) || (storeId ? catalogByStore.get(storeId) : null);
+    const runtimeItem = runtimeByProject.get(projectId) || (storeId ? runtimeByStore.get(storeId) : null);
+    const remembered = savedStoreIdentity(storeId);
     const assets = catalogItem?.asset_references || {};
     const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
     const artPath = assets.cover || assets.icon || assets.hero || shots[0] || "";
+    const art = artPath ? achievementAssetUrl(artPath) : String(runtimeItem?.artwork || remembered.art || "");
     const unlocked = items.filter((item) => item.unlockedAt).length;
     const score = items.filter((item) => item.unlockedAt).reduce((total, item) => total + Number(item.points || 0), 0);
-    const title = catalogItem?.title || runtimeItem?.title || (projectId === "legacy" ? "Other PARA Games" : "PARA Game");
-    return { projectId, items, title, art: achievementAssetUrl(artPath), unlocked, score };
+    const title = String(catalogItem?.title || runtimeItem?.title || remembered.title || (projectId === "legacy" ? "Other Games" : "Unknown Game"));
+    return { projectId, storeId, items, title, art, unlocked, score };
   }).sort((a, b) => (b.unlocked / Math.max(1, b.items.length)) - (a.unlocked / Math.max(1, a.items.length)) || a.title.localeCompare(b.title));
 }
 
@@ -228,7 +248,19 @@ export async function activateAchievements({ focus } = {}) {
   try {
     const payload = await paraApi.storeCatalog();
     catalog = Array.isArray(payload?.items) ? payload.items : [];
-  } catch { /* local achievement folders still render */ }
+  } catch { /* runtime/store identity fallbacks still render */ }
+
+  // Older/local achievement records may have a store id even when their project
+  // id cannot be matched against the catalog snapshot. Resolve those entries by
+  // store id so a real catalog title never degrades into a generic game label.
+  const knownStoreIds = new Set(catalog.map((item) => String(item?.id || "")).filter(Boolean));
+  const missingStoreIds = [...new Set(sortedAchievements().map((item) => String(item?.storeId || "")).filter((id) => id && !knownStoreIds.has(id)))];
+  if (missingStoreIds.length) {
+    const resolved = await Promise.allSettled(missingStoreIds.map((id) => paraApi.storeProduct(id)));
+    for (const result of resolved) {
+      if (result.status === "fulfilled" && result.value?.id) catalog.push(result.value);
+    }
+  }
   if (!alive) return () => {};
 
   const render = () => {

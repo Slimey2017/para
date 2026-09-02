@@ -755,6 +755,28 @@ class RepositoryTests(unittest.TestCase):
     def test_v52_friends_system_apps_store_artwork_switcher_and_files(self):
         self.assertTrue((ROOT / "apps/para-home/src/screens/friends.js").exists())
 
+    def test_v53_friends_uses_no_fake_people_and_achievement_folders_resolve_real_games(self):
+        friends = (ROOT / "apps/para-home/src/screens/friends.js").read_text(encoding="utf-8")
+        content = (ROOT / "apps/para-home/src/content-data.js").read_text(encoding="utf-8")
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        self.assertNotIn("Mika", friends)
+        self.assertNotIn("Romeo", friends)
+        self.assertNotIn("Aleciyah", friends)
+        self.assertNotIn("Conversation 2", friends)
+        self.assertNotIn("Local Chat", friends)
+        self.assertNotIn("para.messages.v1", friends)
+        self.assertNotIn("localStorage", friends)
+        self.assertIn("Only real PARA accounts will appear here", friends)
+        self.assertIn("friends: []", content)
+        self.assertNotIn("Aleciyah is online", content)
+        self.assertIn("catalogByStore", media)
+        self.assertIn("runtimeByStore", media)
+        self.assertIn("paraApi.storeProduct(id)", media)
+        self.assertIn('"Unknown Game"', media)
+        self.assertNotIn(' : "PARA Game"', media)
+        self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -1,11 +1,21 @@
-import { content } from "../content-data.js";
-import { page, tile, listRow } from "../ui/components.js";
+import { page } from "../ui/components.js";
 
 export function socialScreen() {
-  const friends = content.friends.map((friend, index) => listRow({ ...friend, action: "friend-open", autofocus: index === 0 })).join("");
-  return page({ title: "Community", description: "Play, share, and spend time together.", eyebrow: "Friends & parties", className: "social-page", body: `<section class="party-hero"><div class="party-avatars"><i>M</i><i>A</i><i>S</i><i>＋</i></div><div><span class="eyebrow">Your party</span><h2>Start something together</h2><p>Invite friends, choose a game, or begin a call.</p></div><div class="party-actions"><button class="action-button" data-action="party-start" data-autofocus="true">Start Party</button><button class="action-button action-button--ghost" data-route="calls">Calls</button></div></section><div class="social-layout"><section class="panel social-friends"><div class="panel__head"><h2>Friends</h2><button class="action-button action-button--ghost" data-action="find-friends">Find Friends</button></div><div class="list">${friends}</div></section><aside class="social-side"><h2>Jump in</h2>${tile({ title: "Garden Spirits", meta: "Aleciyah is playing", action: "join-friend", icon: "✦", className: "tile--slim" })}${tile({ title: "Friends", meta: "Chats and presence", route: "friends", icon: "…", className: "tile--slim" })}${tile({ title: "Invitations", meta: "Nothing waiting", action: "invitations-open", icon: "↗", className: "tile--slim" })}</aside></div>` });
+  return page({
+    title: "Community",
+    description: "PARA community services without demo people.",
+    eyebrow: "Friends & parties",
+    className: "social-page",
+    body: `<div class="library-empty"><span>✦</span><h2>Community is moving into Friends</h2><p>Real friends, chats, and parties belong in the Friends system app. Local profiles and sample people are not used here.</p><button class="action-button" data-route="friends" data-autofocus="true">Open Friends</button></div>`,
+  });
 }
 
 export function callsScreen() {
-  return page({ title: "Calls", description: "Talk face to face or keep it voice-only.", eyebrow: "Communication", className: "calls-page", body: `<section class="calls-hero"><div class="calls-orb" aria-hidden="true"><i></i><i></i><i></i></div><div><h2>Start a call</h2><p>Choose friends, then decide how you want to connect.</p><div class="action-row"><button class="action-button" data-action="call-start" data-autofocus="true">New Call</button><button class="action-button action-button--ghost" data-action="call-options">Call Settings</button></div></div></section><div class="section-title"><h2>Recent</h2></div><div class="recent-calls"><button data-action="call-start"><span class="avatar avatar--small">M</span><strong>Mika</strong><small>Yesterday · 42 min</small><b>⌕</b></button><button data-action="call-start"><span class="avatar avatar--small avatar--blue">A</span><strong>Aleciyah</strong><small>Tuesday · 1 hr 12 min</small><b>⌕</b></button></div>` });
+  return page({
+    title: "Calls",
+    description: "Voice and video calls will use real PARA friends.",
+    eyebrow: "Communication",
+    className: "calls-page",
+    body: `<div class="library-empty"><span>◌</span><h2>No call service connected</h2><p>Recent calls are not fabricated. Calls will appear here when the online Friends service supports them.</p><button class="action-button" data-route="friends" data-autofocus="true">Open Friends</button></div>`,
+  });
 }

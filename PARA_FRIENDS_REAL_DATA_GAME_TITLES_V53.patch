@@ -1,0 +1,735 @@
+diff --git a/PARA_FRIENDS_REAL_DATA_GAME_TITLES_V53.md b/PARA_FRIENDS_REAL_DATA_GAME_TITLES_V53.md
+new file mode 100644
+index 0000000..a4a985b
+--- /dev/null
++++ b/PARA_FRIENDS_REAL_DATA_GAME_TITLES_V53.md
+@@ -0,0 +1,36 @@
++# PARA Friends Real Data + Game Titles V53
++
++V53 removes the fake/local people layer from Friends and fixes achievement folders that could fall back to the generic `PARA Game` label.
++
++## Friends
++
++- Removed demo friends, fake recent chats, `Conversation 2`, local chat creation, and browser-profile chat storage from the Friends app.
++- Local PARA profiles are no longer treated as friends or chat identities.
++- Friends is now a cleaner console-style system app with Friends, Chats, and Parties sections.
++- Until the real online Friends service is connected, each section shows an honest empty state instead of fabricated people or conversations.
++- Removed the fake friend-presence notification from consumer sample content.
++- Cleaned the old unused social/calls screen so it cannot reintroduce fake people.
++
++## Achievement game folders
++
++Achievement folders now resolve their identity through multiple real sources:
++
++1. ParaStore `project_id`.
++2. ParaStore/store entry id carried by the achievement record.
++3. The recent/running game runtime entry.
++4. The store artwork/title identity saved during launch.
++5. A direct store-product lookup when a store id is known but missing from the catalog snapshot.
++
++The generic `PARA Game` achievement-folder fallback is gone. A genuinely unresolved title is labeled `Unknown Game` instead.
++
++This fixes the case where trophies belonging to a real published game appeared under a generic PARA Game folder even though the runtime still knew which store title produced them.
++
++## Legacy fake-data cleanup
++
++The old unused `apps/para-home/src/mock-data.js` and `services/mock-api` tree were removed. They were already expected to be absent by the repository regression suite and were not referenced by the live consumer application.
++
++## Verification
++
++- Changed frontend JavaScript syntax checks passed.
++- Python API compile check passed.
++- API + repository suite: **91 passed**.
+diff --git a/apps/para-home/src/content-data.js b/apps/para-home/src/content-data.js
+index c1d905d..d8caae1 100644
+--- a/apps/para-home/src/content-data.js
++++ b/apps/para-home/src/content-data.js
+@@ -41,14 +41,8 @@ export const content = {
+   notifications: [
+     { title: "Welcome to PARA", meta: "Your Home is ready", icon: "✦" },
+     { title: "Hollow Circuit is downloading", meta: "18 minutes remaining", icon: "↓" },
+-    { title: "Aleciyah is online", meta: "Playing Garden Spirits", icon: "A" },
+-  ],
+-  friends: [
+-    { title: "Mika", meta: "Creating in Blender", icon: "M", end: "Online" },
+-    { title: "Romeo", meta: "Last seen yesterday", icon: "R", end: "Offline" },
+-    { title: "Aleciyah", meta: "Playing Garden Spirits", icon: "A", end: "Joinable" },
+-    { title: "Sam", meta: "At PARA Home", icon: "S", end: "Online" },
+   ],
++  friends: [],
+   networks: [
+     { title: "PulseWave 5G", meta: "Connected · Secure", signal: "Strong" },
+     { title: "Workshop", meta: "Secure", signal: "Good" },
+diff --git a/apps/para-home/src/mock-data.js b/apps/para-home/src/mock-data.js
+deleted file mode 100644
+index c1d905d..0000000
+--- a/apps/para-home/src/mock-data.js
++++ /dev/null
+@@ -1,57 +0,0 @@
+-// Consumer sample content. Live PARA services can replace this module without
+-// changing screen components.
+-export const content = {
+-  profiles: [
+-    { name: "Player One", initials: "P1", color: "violet" },
+-    { name: "Guest", initials: "G", color: "blue" },
+-  ],
+-  games: [
+-    { title: "Neon Drift", genre: "Arcade racing", status: "Ready to play", color: "#8c5cff", art: "neon", price: "$39.99" },
+-    { title: "Hollow Circuit", genre: "Action adventure", status: "Installed", color: "#3f7cff", art: "circuit", price: "$49.99" },
+-    { title: "Wildlight", genre: "Open-world adventure", status: "Installed", color: "#31caa0", art: "wild", price: "$29.99" },
+-    { title: "Velocity Ash", genre: "Competitive racing", status: "In library", color: "#fa784d", art: "ash", price: "$59.99" },
+-    { title: "Orbit Fold", genre: "Puzzle exploration", status: "In library", color: "#e8b94c", art: "orbit", price: "$19.99" },
+-    { title: "Echo Divide", genre: "Tactical co-op", status: "Installed", color: "#db4cab", art: "echo", price: "$34.99" },
+-  ],
+-  apps: [
+-    { title: "PARA Browser", meta: "Browse the web", icon: "◎", action: "unavailable" },
+-    { title: "Media", meta: "Movies, music, and photos", icon: "▷", action: "unavailable" },
+-    { title: "Bear Home", meta: "Files and storage", icon: "⌂", route: "bear-home" },
+-    { title: "Creator Mode", meta: "Your PC workspace", icon: "✦", route: "creator" },
+-    { title: "VR-US", meta: "Enter spatial experiences", icon: "◉", route: "vrus" },
+-    { title: "Steam", meta: "Your PC game library", icon: "◌", action: "unavailable" },
+-  ],
+-  products: [
+-    { title: "Eclipse Run", kicker: "Featured adventure", price: "$59.99", category: "Featured", art: "eclipse", colors: ["#2a0d5f", "#b56cff"] },
+-    { title: "Skyline Zero", kicker: "New release", price: "$49.99", category: "New Releases", art: "skyline", colors: ["#08223f", "#3db6ff"] },
+-    { title: "Garden Spirits", kicker: "Cozy exploration", price: "$24.99", category: "Popular", art: "garden", colors: ["#11392f", "#66dda2"] },
+-    { title: "Prism Arena", kicker: "Free to play", price: "Free", category: "Free to Play", art: "prism", colors: ["#48103e", "#ff5fbd"] },
+-    { title: "Canvas Flow", kicker: "Creative app", price: "$14.99", category: "Apps", art: "canvas", colors: ["#36230b", "#ffbe53"] },
+-    { title: "Rift Builder", kicker: "Community world", price: "$8.99", category: "UGC", art: "rift", colors: ["#2d144d", "#b783ff"] },
+-    { title: "Signal Bloom", kicker: "Creator Pick", price: "$29.99", category: "Creator Picks", art: "bloom", colors: ["#0c3239", "#5ee9f2"] },
+-    { title: "Last Frequency", kicker: "40% off", price: "$17.99", oldPrice: "$29.99", category: "Deals", art: "frequency", colors: ["#3b1018", "#ff6b70"] },
+-    { title: "Moon Harbor", kicker: "Story adventure", price: "$39.99", category: "Popular", art: "harbor", colors: ["#0c1b3e", "#7f86ff"] },
+-    { title: "Voxel Kitchen", kicker: "Build together", price: "$12.99", category: "UGC", art: "voxel", colors: ["#24310e", "#b1d94f"] },
+-  ],
+-  downloads: [
+-    { title: "Hollow Circuit", progress: 64, meta: "3.8 GB of 5.9 GB · 18 min remaining" },
+-    { title: "PARA system update", progress: 100, meta: "Ready to install" },
+-    { title: "Neon Drift soundtrack", progress: 28, meta: "1.1 GB of 3.9 GB · Queued" },
+-  ],
+-  notifications: [
+-    { title: "Welcome to PARA", meta: "Your Home is ready", icon: "✦" },
+-    { title: "Hollow Circuit is downloading", meta: "18 minutes remaining", icon: "↓" },
+-    { title: "Aleciyah is online", meta: "Playing Garden Spirits", icon: "A" },
+-  ],
+-  friends: [
+-    { title: "Mika", meta: "Creating in Blender", icon: "M", end: "Online" },
+-    { title: "Romeo", meta: "Last seen yesterday", icon: "R", end: "Offline" },
+-    { title: "Aleciyah", meta: "Playing Garden Spirits", icon: "A", end: "Joinable" },
+-    { title: "Sam", meta: "At PARA Home", icon: "S", end: "Online" },
+-  ],
+-  networks: [
+-    { title: "PulseWave 5G", meta: "Connected · Secure", signal: "Strong" },
+-    { title: "Workshop", meta: "Secure", signal: "Good" },
+-    { title: "Guest Mesh", meta: "Secure", signal: "Fair" },
+-  ],
+-};
+diff --git a/apps/para-home/src/screens/friends.js b/apps/para-home/src/screens/friends.js
+index 6ac2678..e4912c0 100644
+--- a/apps/para-home/src/screens/friends.js
++++ b/apps/para-home/src/screens/friends.js
+@@ -1,191 +1,63 @@
+-import { content } from "../content-data.js";
+-import { getState } from "../state.js";
+-import { escapeHtml } from "../services/para-api.js";
+ import { page } from "../ui/components.js";
+ 
+-const FRIENDS_CHAT_KEY = "para.messages.v1";
+-const ACTIVE_THREAD_KEY = "para.friends.activeThread";
++const FRIEND_TABS = Object.freeze([
++  ["friends", "Friends"],
++  ["chats", "Chats"],
++  ["parties", "Parties"],
++]);
+ 
+-function chatStore() {
+-  const profile = getState().activeProfile || "P1";
+-  let all = {};
+-  try { all = JSON.parse(localStorage.getItem(FRIENDS_CHAT_KEY) || "{}"); } catch { all = {}; }
+-  if (!Array.isArray(all[profile]) || !all[profile].length) {
+-    all[profile] = [{
+-      id: "para-friends",
+-      title: "PARA Friends",
+-      initial: "P",
+-      status: "System",
+-      messages: [{
+-        id: `m-${Date.now()}`,
+-        sender: "PARA",
+-        text: "Friends is ready. Local conversations work in this web edition; online PARA chat and connected network chat will plug into this app later.",
+-        at: Date.now(),
+-      }],
+-    }];
+-    try { localStorage.setItem(FRIENDS_CHAT_KEY, JSON.stringify(all)); } catch { /* local preview can still render */ }
+-  }
+-  return { profile, all, threads: all[profile] };
+-}
++let activeFriendTab = "friends";
+ 
+-function saveChatStore(profile, all, threads) {
+-  all[profile] = threads;
+-  try { localStorage.setItem(FRIENDS_CHAT_KEY, JSON.stringify(all)); } catch { /* keep current DOM state */ }
+-  window.dispatchEvent(new CustomEvent("para-friends-change"));
++function tabsMarkup() {
++  return `<nav class="friends-tabs" aria-label="Friends sections" role="tablist">${FRIEND_TABS.map(([id, label], index) => `<button type="button" role="tab" aria-selected="${id === activeFriendTab}" class="${id === activeFriendTab ? "is-active" : ""}" data-friends-tab="${id}" ${index === 0 ? "data-autofocus='true'" : ""}>${label}</button>`).join("")}</nav>`;
+ }
+ 
+-function threadForFriend(name) {
+-  const { profile, all, threads } = chatStore();
+-  const existing = threads.find((thread) => thread.friendName === name || thread.title === name);
+-  if (existing) return existing.id;
+-  const id = `friend-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+-  const friend = content.friends.find((item) => item.title === name);
+-  const next = [...threads, {
+-    id,
+-    title: name,
+-    friendName: name,
+-    initial: (name || "?").slice(0, 1).toUpperCase(),
+-    status: friend?.end || "Offline",
+-    messages: [],
+-  }];
+-  saveChatStore(profile, all, next);
+-  return id;
+-}
+-
+-function friendMarkup(friend, index) {
+-  const status = String(friend.end || "Offline");
+-  const state = status.toLowerCase().includes("online") || status.toLowerCase().includes("join") ? "online" : "offline";
+-  return `<button type="button" class="friends-person" data-friend-name="${escapeHtml(friend.title)}" ${index === 0 ? "data-autofocus='true'" : ""}>
+-    <span class="friends-person__avatar">${escapeHtml(friend.icon || friend.title?.[0] || "?")}<i data-presence="${state}"></i></span>
+-    <span class="friends-person__copy"><strong>${escapeHtml(friend.title)}</strong><small>${escapeHtml(friend.meta || status)}</small></span>
+-    <span class="friends-person__status">${escapeHtml(status)}</span>
+-  </button>`;
+-}
+-
+-function threadMarkup(thread, activeId, index) {
+-  const last = thread.messages?.[thread.messages.length - 1];
+-  const time = last?.at ? new Date(last.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+-  return `<button type="button" class="friends-thread ${thread.id === activeId ? "is-active" : ""}" data-friends-thread="${escapeHtml(thread.id)}" ${index === 0 ? "data-thread-autofocus='true'" : ""}>
+-    <span>${escapeHtml(thread.initial || thread.title?.[0] || "?")}</span>
+-    <i><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${escapeHtml(last?.text || "No messages yet")}</small></i>
+-    <time>${escapeHtml(time)}</time>
+-  </button>`;
++function emptyStateMarkup(tab = "friends") {
++  if (tab === "chats") {
++    return `<section class="friends-empty"><span class="friends-empty__icon">◌</span><h2>No conversations</h2><p>PARA chat is not connected to the online Friends service yet. Local browser profiles and demo conversations are not shown as people.</p></section>`;
++  }
++  if (tab === "parties") {
++    return `<section class="friends-empty"><span class="friends-empty__icon">◎</span><h2>No active parties</h2><p>Parties will appear here when PARA's online party service is connected. Steam, PlayStation, Discord, Xbox, and Nintendo bridges can plug into this app later.</p></section>`;
++  }
++  return `<section class="friends-empty"><span class="friends-empty__icon">✦</span><h2>No PARA friends yet</h2><p>Only real PARA accounts will appear here. Demo people and local console profiles are never treated as friends.</p><small>Friend requests and online presence will appear when the PARA Friends service is connected.</small></section>`;
+ }
+ 
+-function conversationMarkup(thread) {
+-  if (!thread) return `<section class="friends-chat"><div class="friends-chat-empty"><span>◌</span><h2>Pick a friend</h2><p>Select someone or a recent conversation.</p></div></section>`;
+-  const bubbles = (thread.messages || []).map((message) => `<div class="friends-message ${message.sender === "You" ? "is-self" : ""}"><span>${escapeHtml(message.sender || thread.title || "PARA")}</span><p>${escapeHtml(message.text || "")}</p></div>`).join("");
+-  const sub = thread.status === "System" ? "PARA system conversation" : `${escapeHtml(thread.status || "PARA friend")} · Local web preview`;
+-  return `<section class="friends-chat" data-friends-chat>
+-    <header><span class="friends-chat__avatar">${escapeHtml(thread.initial || thread.title?.[0] || "?")}</span><div><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${sub}</small></div></header>
+-    <div class="friends-chat__body" data-friends-chat-body>${bubbles || `<div class="friends-chat-empty friends-chat-empty--small"><span>✦</span><h2>Start the conversation</h2><p>Messages sent here are saved to this PARA profile on this browser.</p></div>`}</div>
+-    <form class="friends-composer" data-friends-message-form><input aria-label="Message" autocomplete="off" placeholder="Message ${escapeHtml(thread.title || "friend")}" data-friends-message-input><button type="submit">Send</button></form>
++function friendsBodyMarkup() {
++  return `<section class="friends-console" data-friends-app>
++    <header class="friends-console__bar"><div><span>PARA FRIENDS</span><strong>Friends</strong></div>${tabsMarkup()}</header>
++    <div class="friends-console__content" data-friends-content>${emptyStateMarkup(activeFriendTab)}</div>
+   </section>`;
+ }
+ 
+-function providerMarkup() {
+-  const providers = [
+-    ["PARA", "Local preview", "ready"],
+-    ["Steam", "Chat bridge planned", "planned"],
+-    ["PlayStation", "Chat bridge planned", "planned"],
+-    ["Discord", "Chat bridge planned", "planned"],
+-    ["Xbox", "Chat bridge planned", "planned"],
+-    ["Nintendo", "Parties planned", "planned"],
+-  ];
+-  return `<section class="friends-networks" aria-label="Connected chat networks"><div><span>NETWORKS</span><strong>One Friends app, multiple networks.</strong></div><div>${providers.map(([name, detail, state]) => `<span class="friends-network friends-network--${state}"><b>${escapeHtml(name)}</b><small>${escapeHtml(detail)}</small></span>`).join("")}</div></section>`;
+-}
+-
+ export function friendsScreen() {
+-  const { threads } = chatStore();
+-  const activeId = sessionStorage.getItem(ACTIVE_THREAD_KEY) || threads[0]?.id || "";
+-  const active = threads.find((thread) => thread.id === activeId) || threads[0];
+   return page({
+     title: "Friends",
+-    description: "Friends, conversations, presence, and future connected gaming chat in one place.",
++    description: "Real PARA friends, conversations, and parties in one system app.",
+     eyebrow: "System app",
+-    className: "friends-page",
+-    body: `${providerMarkup()}<div class="friends-app" data-friends-app>
+-      <aside class="friends-people"><header><span>PARA FRIENDS</span><h2>Friends</h2><small>${content.friends.length} people</small></header><div data-friends-people>${content.friends.map(friendMarkup).join("")}</div></aside>
+-      <aside class="friends-conversations"><header><span>RECENT</span><h2>Chats</h2><button type="button" data-friends-new aria-label="New local conversation">＋</button></header><div data-friends-thread-list>${threads.map((thread, index) => threadMarkup(thread, active?.id || "", index)).join("")}</div></aside>
+-      ${conversationMarkup(active)}
+-    </div>`,
++    className: "friends-page friends-page--v53",
++    body: friendsBodyMarkup(),
+   });
+ }
+ 
+ export function activateFriends({ focus } = {}) {
+   const shell = document.querySelector("[data-friends-app]");
+   if (!shell) return () => {};
+-
+-  const render = (requestedId = "") => {
+-    const { threads } = chatStore();
+-    const activeId = requestedId || sessionStorage.getItem(ACTIVE_THREAD_KEY) || threads[0]?.id || "";
+-    const active = threads.find((thread) => thread.id === activeId) || threads[0];
+-    if (active) sessionStorage.setItem(ACTIVE_THREAD_KEY, active.id);
+-    const list = shell.querySelector("[data-friends-thread-list]");
+-    if (list) list.innerHTML = threads.map((thread, index) => threadMarkup(thread, active?.id || "", index)).join("");
+-    const current = shell.querySelector("[data-friends-chat], .friends-chat");
+-    const holder = document.createElement("div");
+-    holder.innerHTML = conversationMarkup(active);
+-    const replacement = holder.firstElementChild;
+-    if (current && replacement) current.replaceWith(replacement);
+-    requestAnimationFrame(() => {
+-      const body = shell.querySelector("[data-friends-chat-body]");
+-      if (body) body.scrollTop = body.scrollHeight;
++  const render = (tab) => {
++    activeFriendTab = FRIEND_TABS.some(([id]) => id === tab) ? tab : "friends";
++    shell.querySelectorAll("[data-friends-tab]").forEach((button) => {
++      const selected = button.dataset.friendsTab === activeFriendTab;
++      button.classList.toggle("is-active", selected);
++      button.setAttribute("aria-selected", String(selected));
+     });
++    const content = shell.querySelector("[data-friends-content]");
++    if (content) content.innerHTML = emptyStateMarkup(activeFriendTab);
+   };
+-
+   const onClick = (event) => {
+-    const friend = event.target.closest("[data-friend-name]");
+-    if (friend) {
+-      const id = threadForFriend(friend.dataset.friendName || "Friend");
+-      sessionStorage.setItem(ACTIVE_THREAD_KEY, id);
+-      render(id);
+-      shell.querySelector("[data-friends-message-input]")?.focus();
+-      return;
+-    }
+-    const thread = event.target.closest("[data-friends-thread]");
+-    if (thread) {
+-      sessionStorage.setItem(ACTIVE_THREAD_KEY, thread.dataset.friendsThread || "");
+-      render(thread.dataset.friendsThread || "");
+-      return;
+-    }
+-    if (event.target.closest("[data-friends-new]")) {
+-      const { profile, all, threads } = chatStore();
+-      const id = `local-${Date.now()}`;
+-      const next = [...threads, { id, title: `Local Chat ${threads.length + 1}`, initial: "+", status: "Local", messages: [] }];
+-      saveChatStore(profile, all, next);
+-      sessionStorage.setItem(ACTIVE_THREAD_KEY, id);
+-      render(id);
+-      shell.querySelector("[data-friends-message-input]")?.focus();
+-    }
+-  };
+-
+-  const onSubmit = (event) => {
+-    if (!event.target.matches("[data-friends-message-form]")) return;
+-    event.preventDefault();
+-    const input = event.target.querySelector("[data-friends-message-input]");
+-    const text = String(input?.value || "").trim();
+-    if (!text) return;
+-    const { profile, all, threads } = chatStore();
+-    const activeId = sessionStorage.getItem(ACTIVE_THREAD_KEY) || threads[0]?.id || "";
+-    const next = threads.map((thread) => thread.id === activeId ? {
+-      ...thread,
+-      messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }],
+-    } : thread);
+-    saveChatStore(profile, all, next);
+-    if (input) input.value = "";
+-    render(activeId);
++    const tab = event.target.closest("[data-friends-tab]");
++    if (!tab) return;
++    render(tab.dataset.friendsTab || "friends");
+   };
+-
+   shell.addEventListener("click", onClick);
+-  shell.addEventListener("submit", onSubmit);
+-  requestAnimationFrame(() => {
+-    const body = shell.querySelector("[data-friends-chat-body]");
+-    if (body) body.scrollTop = body.scrollHeight;
+-  });
+-  if (focus && !focus.current) focus.focusFirst();
+-  return () => {
+-    shell.removeEventListener("click", onClick);
+-    shell.removeEventListener("submit", onSubmit);
+-  };
++  requestAnimationFrame(() => focus?.focusFirst?.());
++  return () => shell.removeEventListener("click", onClick);
+ }
+diff --git a/apps/para-home/src/screens/media.js b/apps/para-home/src/screens/media.js
+index d58ffc4..7d08b24 100644
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -167,10 +167,27 @@ function achievementCardMarkup(item, index) {
+   </article>`;
+ }
+ 
++function savedStoreIdentity(storeId) {
++  if (!storeId) return {};
++  try {
++    const value = JSON.parse(sessionStorage.getItem(`para.store.artwork.${storeId}`) || "{}");
++    return {
++      title: String(value?.title || "").trim(),
++      art: Array.isArray(value?.urls) ? String(value.urls[0] || "") : "",
++    };
++  } catch { return {}; }
++}
++
+ function achievementGroups(achievements, catalog = []) {
+   const catalogByProject = new Map(catalog.filter((item) => item?.project_id).map((item) => [String(item.project_id), item]));
++  const catalogByStore = new Map(catalog.filter((item) => item?.id).map((item) => [String(item.id), item]));
+   const recent = getProfileRuntime().recent || [];
+   const runtimeByProject = new Map(recent.filter((item) => item?.projectId).map((item) => [String(item.projectId), item]));
++  const runtimeByStore = new Map();
++  for (const item of recent) {
++    const storeId = String(item?.storeId || (String(item?.id || "").startsWith("store:") ? String(item.id).slice(6) : "") || "");
++    if (storeId) runtimeByStore.set(storeId, item);
++  }
+   const groups = new Map();
+   for (const item of achievements) {
+     const projectId = String(item.projectId || "legacy");
+@@ -178,15 +195,18 @@ function achievementGroups(achievements, catalog = []) {
+     groups.get(projectId).push(item);
+   }
+   return [...groups.entries()].map(([projectId, items]) => {
+-    const catalogItem = catalogByProject.get(projectId);
+-    const runtimeItem = runtimeByProject.get(projectId);
++    const storeId = String(items.find((item) => item?.storeId)?.storeId || "");
++    const catalogItem = catalogByProject.get(projectId) || (storeId ? catalogByStore.get(storeId) : null);
++    const runtimeItem = runtimeByProject.get(projectId) || (storeId ? runtimeByStore.get(storeId) : null);
++    const remembered = savedStoreIdentity(storeId);
+     const assets = catalogItem?.asset_references || {};
+     const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+     const artPath = assets.cover || assets.icon || assets.hero || shots[0] || "";
++    const art = artPath ? achievementAssetUrl(artPath) : String(runtimeItem?.artwork || remembered.art || "");
+     const unlocked = items.filter((item) => item.unlockedAt).length;
+     const score = items.filter((item) => item.unlockedAt).reduce((total, item) => total + Number(item.points || 0), 0);
+-    const title = catalogItem?.title || runtimeItem?.title || (projectId === "legacy" ? "Other PARA Games" : "PARA Game");
+-    return { projectId, items, title, art: achievementAssetUrl(artPath), unlocked, score };
++    const title = String(catalogItem?.title || runtimeItem?.title || remembered.title || (projectId === "legacy" ? "Other Games" : "Unknown Game"));
++    return { projectId, storeId, items, title, art, unlocked, score };
+   }).sort((a, b) => (b.unlocked / Math.max(1, b.items.length)) - (a.unlocked / Math.max(1, a.items.length)) || a.title.localeCompare(b.title));
+ }
+ 
+@@ -228,7 +248,19 @@ export async function activateAchievements({ focus } = {}) {
+   try {
+     const payload = await paraApi.storeCatalog();
+     catalog = Array.isArray(payload?.items) ? payload.items : [];
+-  } catch { /* local achievement folders still render */ }
++  } catch { /* runtime/store identity fallbacks still render */ }
++
++  // Older/local achievement records may have a store id even when their project
++  // id cannot be matched against the catalog snapshot. Resolve those entries by
++  // store id so a real catalog title never degrades into a generic game label.
++  const knownStoreIds = new Set(catalog.map((item) => String(item?.id || "")).filter(Boolean));
++  const missingStoreIds = [...new Set(sortedAchievements().map((item) => String(item?.storeId || "")).filter((id) => id && !knownStoreIds.has(id)))];
++  if (missingStoreIds.length) {
++    const resolved = await Promise.allSettled(missingStoreIds.map((id) => paraApi.storeProduct(id)));
++    for (const result of resolved) {
++      if (result.status === "fulfilled" && result.value?.id) catalog.push(result.value);
++    }
++  }
+   if (!alive) return () => {};
+ 
+   const render = () => {
+diff --git a/apps/para-home/src/screens/social.js b/apps/para-home/src/screens/social.js
+index 79e8c22..81ed35a 100644
+--- a/apps/para-home/src/screens/social.js
++++ b/apps/para-home/src/screens/social.js
+@@ -1,11 +1,21 @@
+-import { content } from "../content-data.js";
+-import { page, tile, listRow } from "../ui/components.js";
++import { page } from "../ui/components.js";
+ 
+ export function socialScreen() {
+-  const friends = content.friends.map((friend, index) => listRow({ ...friend, action: "friend-open", autofocus: index === 0 })).join("");
+-  return page({ title: "Community", description: "Play, share, and spend time together.", eyebrow: "Friends & parties", className: "social-page", body: `<section class="party-hero"><div class="party-avatars"><i>M</i><i>A</i><i>S</i><i>＋</i></div><div><span class="eyebrow">Your party</span><h2>Start something together</h2><p>Invite friends, choose a game, or begin a call.</p></div><div class="party-actions"><button class="action-button" data-action="party-start" data-autofocus="true">Start Party</button><button class="action-button action-button--ghost" data-route="calls">Calls</button></div></section><div class="social-layout"><section class="panel social-friends"><div class="panel__head"><h2>Friends</h2><button class="action-button action-button--ghost" data-action="find-friends">Find Friends</button></div><div class="list">${friends}</div></section><aside class="social-side"><h2>Jump in</h2>${tile({ title: "Garden Spirits", meta: "Aleciyah is playing", action: "join-friend", icon: "✦", className: "tile--slim" })}${tile({ title: "Friends", meta: "Chats and presence", route: "friends", icon: "…", className: "tile--slim" })}${tile({ title: "Invitations", meta: "Nothing waiting", action: "invitations-open", icon: "↗", className: "tile--slim" })}</aside></div>` });
++  return page({
++    title: "Community",
++    description: "PARA community services without demo people.",
++    eyebrow: "Friends & parties",
++    className: "social-page",
++    body: `<div class="library-empty"><span>✦</span><h2>Community is moving into Friends</h2><p>Real friends, chats, and parties belong in the Friends system app. Local profiles and sample people are not used here.</p><button class="action-button" data-route="friends" data-autofocus="true">Open Friends</button></div>`,
++  });
+ }
+ 
+ export function callsScreen() {
+-  return page({ title: "Calls", description: "Talk face to face or keep it voice-only.", eyebrow: "Communication", className: "calls-page", body: `<section class="calls-hero"><div class="calls-orb" aria-hidden="true"><i></i><i></i><i></i></div><div><h2>Start a call</h2><p>Choose friends, then decide how you want to connect.</p><div class="action-row"><button class="action-button" data-action="call-start" data-autofocus="true">New Call</button><button class="action-button action-button--ghost" data-action="call-options">Call Settings</button></div></div></section><div class="section-title"><h2>Recent</h2></div><div class="recent-calls"><button data-action="call-start"><span class="avatar avatar--small">M</span><strong>Mika</strong><small>Yesterday · 42 min</small><b>⌕</b></button><button data-action="call-start"><span class="avatar avatar--small avatar--blue">A</span><strong>Aleciyah</strong><small>Tuesday · 1 hr 12 min</small><b>⌕</b></button></div>` });
++  return page({
++    title: "Calls",
++    description: "Voice and video calls will use real PARA friends.",
++    eyebrow: "Communication",
++    className: "calls-page",
++    body: `<div class="library-empty"><span>◌</span><h2>No call service connected</h2><p>Recent calls are not fabricated. Calls will appear here when the online Friends service supports them.</p><button class="action-button" data-route="friends" data-autofocus="true">Open Friends</button></div>`,
++  });
+ }
+diff --git a/apps/para-home/styles.css b/apps/para-home/styles.css
+index 47197df..8b12b9c 100644
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -2161,3 +2161,16 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ 
+ /* V52 store artwork must use publisher assets or PARA branding, never title-letter placeholders. */
+ .demo-art--store-image:before,.demo-art--store-image:after,.demo-art--store-fallback:before,.demo-art--store-fallback:after{display:none}.demo-art--store-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.demo-art--store-image b{position:absolute;inset:0;background:linear-gradient(0deg,rgba(5,3,10,.34),transparent 52%)}.demo-art--store-fallback{background:radial-gradient(circle at 50% 45%,rgba(128,65,226,.24),rgba(5,4,9,.96))}.demo-art--store-fallback img{width:66px;height:66px;object-fit:contain;opacity:.68}.store-feature__mark--logo{display:grid;place-items:center}.store-feature__mark--logo img{width:78px;height:78px;object-fit:contain;opacity:.72}.store-cart-item__fallback{display:grid!important;place-items:center;width:100%;height:100%;background:radial-gradient(circle at 50% 45%,rgba(128,65,226,.22),rgba(6,4,10,.95))}.store-cart-item__fallback img{width:50px!important;height:50px!important;object-fit:contain!important;opacity:.68}.home-store-shelf-card__fallback img{width:44px;height:44px;object-fit:contain;opacity:.68}
++
++/* V53: Friends is a console system app, not a three-column local-chat demo. */
++.friends-page--v53 .content-scroll{padding-bottom:110px}
++.friends-console{width:min(1040px,100%);min-height:500px;margin:22px auto 0;overflow:hidden;border:1px solid rgba(203,167,255,.14);border-radius:24px;background:linear-gradient(145deg,rgba(12,8,20,.9),rgba(7,5,12,.82));box-shadow:0 28px 90px rgba(0,0,0,.28)}
++.friends-console__bar{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px 22px;border-bottom:1px solid rgba(255,255,255,.075)}
++.friends-console__bar>div{min-width:0}.friends-console__bar>div span{display:block;color:#c48bff;font-size:.58rem;font-weight:900;letter-spacing:.14em}.friends-console__bar>div strong{display:block;margin-top:4px;font-size:1.25rem}
++.friends-tabs{display:flex;gap:7px;padding:4px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.025)}
++.friends-tabs button{min-width:92px;min-height:40px;padding:0 16px;border:0;border-radius:10px;background:transparent;color:rgba(242,235,248,.56);font:800 .72rem/1 system-ui,sans-serif;white-space:nowrap}
++.friends-tabs button.is-active,.friends-tabs button:focus-visible{outline:none;background:rgba(132,67,221,.22);color:#fff;box-shadow:inset 0 0 0 1px rgba(203,151,255,.28)}
++.friends-console__content{min-height:410px;display:grid;place-items:center;padding:42px}
++.friends-empty{width:min(560px,100%);text-align:center}.friends-empty__icon{width:76px;height:76px;margin:0 auto 20px;display:grid;place-items:center;border:1px solid rgba(195,139,255,.2);border-radius:22px;background:radial-gradient(circle at 50% 35%,rgba(143,72,230,.25),rgba(21,11,35,.78));color:#ce96ff;font-size:2rem;box-shadow:0 18px 50px rgba(82,31,145,.18)}
++.friends-empty h2{margin:0;color:#fff;font-size:1.55rem}.friends-empty p{max-width:520px;margin:10px auto 0;color:rgba(239,231,246,.58);font-size:.86rem;line-height:1.55}.friends-empty small{display:block;margin-top:14px;color:rgba(213,195,228,.4);font-size:.7rem;line-height:1.45}
++@media(max-width:720px){.friends-console__bar{align-items:flex-start;flex-direction:column}.friends-tabs{width:100%;overflow-x:auto}.friends-tabs button{flex:1}.friends-console__content{padding:34px 20px}}
+diff --git a/services/mock-api/modules/__init__.py b/services/mock-api/modules/__init__.py
+deleted file mode 100644
+index 66a99d8..0000000
+--- a/services/mock-api/modules/__init__.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-"""Mock PARA API modules. They return declared development data, never fake production state."""
+-
+diff --git a/services/mock-api/modules/endpoints.py b/services/mock-api/modules/endpoints.py
+deleted file mode 100644
+index 0350963..0000000
+--- a/services/mock-api/modules/endpoints.py
++++ /dev/null
+@@ -1,96 +0,0 @@
+-from __future__ import annotations
+-
+-from datetime import datetime, timezone
+-from pathlib import Path
+-import json
+-import os
+-import platform
+-
+-REPO_ROOT = Path(__file__).resolve().parents[3]
+-
+-
+-def runtime_mode() -> str:
+-    requested = os.environ.get("PARA_RUNTIME_MODE", "development-mock")
+-    return requested if requested in {"development-mock", "public-demo"} else "development-mock"
+-
+-
+-def _services() -> list[dict]:
+-    with (REPO_ROOT / "config" / "services.json").open(encoding="utf-8") as source:
+-        return json.load(source)["services"]
+-
+-
+-def health() -> dict:
+-    return {
+-        "name": "para-mock-api",
+-        "status": "ok",
+-        "mode": runtime_mode(),
+-        "version": (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip(),
+-        "time": datetime.now(timezone.utc).isoformat(),
+-    }
+-
+-
+-def system_status() -> dict:
+-    return {
+-        "mode": runtime_mode(),
+-        "linux": {"system": platform.system(), "release": platform.release(), "machine": platform.machine()},
+-        "safe_mode": True,
+-        "privileged_actions_enabled": False,
+-        "temperature_c": None,
+-        "storage": {"source": "mock", "total_gb": 1000, "used_gb": 140},
+-    }
+-
+-
+-def services() -> dict:
+-    rows = _services()
+-    return {"source": "config/services.json", "count": len(rows), "services": rows}
+-
+-
+-def hardware() -> dict:
+-    return {
+-        "source": "read-only-development-probe",
+-        "hostname": platform.node(),
+-        "cpu_count": os.cpu_count(),
+-        "pulsewave": {"status": "browser-prototype", "native_pairing": False},
+-        "optical": {"status": "not-probed-by-mock-api"},
+-        "vrus": {"status": "stub", "connected": False},
+-    }
+-
+-
+-def bear_home() -> dict:
+-    names = ["Videos", "Photos", "Music", "Documents", "Downloads", "Games / UGC", "Discs", "External Drives", "Cloud", "Trash"]
+-    return {"source": "mock", "write_operations": False, "collections": [{"name": name, "items": 0} for name in names]}
+-
+-
+-def accounts() -> dict:
+-    return {"source": "mock", "authenticated": False, "profiles": [{"id": "local-dev", "display_name": "Player One", "security": "none-development-only"}]}
+-
+-
+-def store() -> dict:
+-    return {"source": "mock", "commerce_enabled": False, "catalog": ["Drift Signal", "Hollow Circuit", "Wildlight"]}
+-
+-
+-def component(name: str) -> dict:
+-    match = next((item for item in _services() if item["id"] == name), None)
+-    if match is None:
+-        return {"id": name, "status": "unknown", "source": runtime_mode()}
+-    return {**match, "source": runtime_mode(), "operational": match["status"] in {"working-prototype", "mock", "browser-prototype", "read-only-probe"}}
+-
+-
+-ROUTES = {
+-    "/api/v1/health": health,
+-    "/api/v1/status": system_status,
+-    "/api/v1/services": services,
+-    "/api/v1/hardware": hardware,
+-    "/api/v1/bear-home": bear_home,
+-    "/api/v1/accounts": accounts,
+-    "/api/v1/store": store,
+-}
+-
+-
+-def resolve(path: str) -> tuple[int, dict]:
+-    if path in ROUTES:
+-        return 200, ROUTES[path]()
+-    prefix = "/api/v1/components/"
+-    if path.startswith(prefix):
+-        return 200, component(path.removeprefix(prefix))
+-    return 404, {"error": "not_found", "path": path, "mode": runtime_mode()}
+diff --git a/services/mock-api/server.py b/services/mock-api/server.py
+deleted file mode 100644
+index 130d0ec..0000000
+--- a/services/mock-api/server.py
++++ /dev/null
+@@ -1,101 +0,0 @@
+-#!/usr/bin/env python3
+-"""Local-only PARA development server and mock API.
+-
+-It serves the PARA Home files and explicit mock JSON. It never runs privileged
+-commands, changes Linux configuration, or writes outside browser-local state.
+-"""
+-
+-from __future__ import annotations
+-
+-import argparse
+-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+-import ipaddress
+-import json
+-from pathlib import Path
+-import sys
+-from urllib.parse import urlparse
+-
+-REPO_ROOT = Path(__file__).resolve().parents[2]
+-FRONTEND_ROOT = REPO_ROOT / "apps" / "para-home"
+-sys.path.insert(0, str(Path(__file__).resolve().parent))
+-from modules.endpoints import resolve  # noqa: E402
+-
+-
+-class ParaHandler(SimpleHTTPRequestHandler):
+-    server_version = "PARADev/0.1"
+-
+-    def __init__(self, *args, **kwargs):
+-        super().__init__(*args, directory=str(FRONTEND_ROOT), **kwargs)
+-
+-    def log_message(self, format_string: str, *args) -> None:
+-        sys.stdout.write(f"[para-dev] {self.address_string()} {format_string % args}\n")
+-
+-    def end_headers(self) -> None:
+-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+-        self.send_header("Referrer-Policy", "no-referrer")
+-        self.send_header("X-Content-Type-Options", "nosniff")
+-        self.send_header("X-Frame-Options", "DENY")
+-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+-        super().end_headers()
+-
+-    def list_directory(self, path):
+-        self.send_error(404, "Directory listing is disabled")
+-        return None
+-
+-    def _send_json(self, status: int, payload: dict) -> None:
+-        body = json.dumps(payload, indent=2).encode("utf-8")
+-        self.send_response(status)
+-        self.send_header("Content-Type", "application/json; charset=utf-8")
+-        self.send_header("Cache-Control", "no-store")
+-        self.send_header("Content-Length", str(len(body)))
+-        self.end_headers()
+-        self.wfile.write(body)
+-
+-    def do_GET(self) -> None:  # noqa: N802
+-        path = urlparse(self.path).path
+-        if path.startswith("/api/"):
+-            status, payload = resolve(path.rstrip("/"))
+-            self._send_json(status, payload)
+-            return
+-        super().do_GET()
+-
+-
+-def parse_args() -> argparse.Namespace:
+-    parser = argparse.ArgumentParser(description="Serve PARA Home in safe development mode")
+-    parser.add_argument("--host", default="127.0.0.1", help="Loopback bind address only")
+-    parser.add_argument("--port", type=int, default=4173)
+-    parser.add_argument("--allow-nonlocal", action="store_true", help="Explicitly permit a public bind for hosted demo deployment")
+-    return parser.parse_args()
+-
+-
+-def validate_bind(host: str, allow_nonlocal: bool = False) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+-    try:
+-        address = ipaddress.ip_address(host)
+-    except ValueError as error:
+-        raise ValueError(f"PARA server requires a numeric address: {error}") from error
+-    if not address.is_loopback and not allow_nonlocal:
+-        raise ValueError("Refusing a non-loopback bind without --allow-nonlocal")
+-    return address
+-
+-
+-def main() -> int:
+-    args = parse_args()
+-    try:
+-        validate_bind(args.host, args.allow_nonlocal)
+-    except ValueError as error:
+-        raise SystemExit(str(error)) from error
+-    server = ThreadingHTTPServer((args.host, args.port), ParaHandler)
+-    mode = "public demo" if args.allow_nonlocal else "local development"
+-    print(f"PARA Home {mode} mode: http://{args.host}:{args.port}")
+-    print("Mock API active. No privileged Linux integration is enabled.")
+-    try:
+-        server.serve_forever()
+-    except KeyboardInterrupt:
+-        pass
+-    finally:
+-        server.server_close()
+-    return 0
+-
+-
+-if __name__ == "__main__":
+-    raise SystemExit(main())
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index 07f4611..11ad2a7 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -755,6 +755,28 @@ class RepositoryTests(unittest.TestCase):
+     def test_v52_friends_system_apps_store_artwork_switcher_and_files(self):
+         self.assertTrue((ROOT / "apps/para-home/src/screens/friends.js").exists())
+ 
++    def test_v53_friends_uses_no_fake_people_and_achievement_folders_resolve_real_games(self):
++        friends = (ROOT / "apps/para-home/src/screens/friends.js").read_text(encoding="utf-8")
++        content = (ROOT / "apps/para-home/src/content-data.js").read_text(encoding="utf-8")
++        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
++        self.assertNotIn("Mika", friends)
++        self.assertNotIn("Romeo", friends)
++        self.assertNotIn("Aleciyah", friends)
++        self.assertNotIn("Conversation 2", friends)
++        self.assertNotIn("Local Chat", friends)
++        self.assertNotIn("para.messages.v1", friends)
++        self.assertNotIn("localStorage", friends)
++        self.assertIn("Only real PARA accounts will appear here", friends)
++        self.assertIn("friends: []", content)
++        self.assertNotIn("Aleciyah is online", content)
++        self.assertIn("catalogByStore", media)
++        self.assertIn("runtimeByStore", media)
++        self.assertIn("paraApi.storeProduct(id)", media)
++        self.assertIn('"Unknown Game"', media)
++        self.assertNotIn(' : "PARA Game"', media)
++        self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
++
++
+ if __name__ == "__main__":
+     unittest.main()
+ 

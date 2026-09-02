@@ -1,0 +1,5 @@
+V53 deletes these unused legacy fake-data paths:
+apps/para-home/src/mock-data.js
+services/mock-api/
+
+Applying PARA_FRIENDS_REAL_DATA_GAME_TITLES_V53.patch performs these deletions automatically.
