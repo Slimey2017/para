@@ -42,12 +42,33 @@ export function capturePlaybackMime(item = {}) {
   return String(item?.mimeType || item?.blob?.type || "").trim();
 }
 
-export function capturePlaybackBlob(item = {}) {
-  const blob = item?.blob;
+function normalizePlaybackBlob(blob, mimeType = "") {
   if (!(blob instanceof Blob)) return blob;
-  const playbackMime = capturePlaybackMime(item);
+  const playbackMime = String(mimeType || blob.type || "").trim();
   if (!playbackMime || blob.type === playbackMime) return blob;
   return new Blob([blob], { type: playbackMime });
+}
+
+export function capturePlaybackBlob(item = {}) {
+  return normalizePlaybackBlob(item?.blob, capturePlaybackMime(item));
+}
+
+export function capturePlaybackSegments(item = {}) {
+  const stored = Array.isArray(item?.replaySegments) ? item.replaySegments : [];
+  const segments = stored
+    .filter((segment) => segment?.blob instanceof Blob && segment.blob.size)
+    .map((segment) => ({
+      blob: normalizePlaybackBlob(segment.blob, segment.mimeType || capturePlaybackMime(item)),
+      durationMs: Math.max(0, Number(segment.durationMs || 0)),
+      mimeType: String(segment.mimeType || segment.blob.type || capturePlaybackMime(item)),
+    }));
+  if (segments.length) return segments;
+  const blob = capturePlaybackBlob(item);
+  return blob instanceof Blob ? [{ blob, durationMs: Math.max(0, Number(item?.durationMs || 0)), mimeType: capturePlaybackMime(item) }] : [];
+}
+
+export function isSegmentedCapture(item = {}) {
+  return capturePlaybackSegments(item).length > 1;
 }
 
 export async function deleteCapture(id) {
@@ -127,13 +148,42 @@ export async function getCapture(id) {
 export async function shareCapture(id, target = "system") {
   const item = await getCapture(id);
   if (!item) throw new Error("Capture not found.");
-  const extension = item.type === "clip" ? ((item.mimeType || item.blob.type || "").includes("mp4") ? "mp4" : "webm") : "webp";
-  const file = new File([item.blob], `PARA-${item.id}.${extension}`, { type: item.mimeType || item.blob.type });
+  const segments = item.type === "clip" ? capturePlaybackSegments(item) : [];
+  if (segments.length > 1) {
+    const files = segments.map((segment, index) => {
+      const mime = segment.mimeType || segment.blob.type || "video/webm";
+      const extension = mime.includes("mp4") ? "mp4" : "webm";
+      return new File([segment.blob], `PARA-${item.id}-part-${String(index + 1).padStart(2, "0")}.${extension}`, { type: mime });
+    });
+    if (target === "system" && navigator.share && navigator.canShare?.({ files })) {
+      await navigator.share({ title: "Shared from PARA", text: "Captured on PARA", files });
+      return `Shared ${files.length} replay parts`;
+    }
+    files.forEach((file, index) => {
+      const url = URL.createObjectURL(file);
+      setTimeout(() => {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file.name;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+      }, index * 140);
+    });
+    if (target === "phone") return `Replay exported as ${files.length} playable video parts for phone transfer`;
+    if (target === "files") return `Replay exported as ${files.length} playable video parts`;
+    return `Replay exported as ${files.length} playable video parts`;
+  }
+
+  const blob = item.type === "clip" ? (segments[0]?.blob || capturePlaybackBlob(item)) : item.blob;
+  if (!(blob instanceof Blob)) throw new Error("Capture data is unavailable.");
+  const mime = item.type === "clip" ? (segments[0]?.mimeType || item.mimeType || blob.type || "video/webm") : (item.mimeType || blob.type || "image/webp");
+  const extension = item.type === "clip" ? (mime.includes("mp4") ? "mp4" : "webm") : "webp";
+  const file = new File([blob], `PARA-${item.id}.${extension}`, { type: mime });
   if (target === "system" && navigator.share && navigator.canShare?.({ files: [file] })) {
     await navigator.share({ title: "Shared from PARA", text: "Captured on PARA", files: [file] });
     return "Shared";
   }
-  const url = URL.createObjectURL(item.blob);
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = file.name;
@@ -143,3 +193,4 @@ export async function shareCapture(id, target = "system") {
   if (target === "files") return "Capture exported to your Downloads folder";
   return "Capture exported";
 }
+

@@ -1,5 +1,5 @@
 import { page } from "../ui/components.js";
-import { capturePlaybackBlob, capturePlaybackMime, deleteCapture, listCaptures } from "../services/capture-service.js";
+import { capturePlaybackBlob, capturePlaybackMime, capturePlaybackSegments, isSegmentedCapture, deleteCapture, listCaptures } from "../services/capture-service.js";
 import { getProfileRuntime } from "../state.js";
 import { escapeHtml } from "../services/para-api.js";
 import { activateParaVideoPlayers, paraVideoPlayerMarkup } from "../ui/video-player.js";
@@ -15,13 +15,30 @@ let captureSyncChannel = null;
 let captureStorageListener = null;
 
 function releaseUrls() {
-  for (const url of liveUrls.values()) URL.revokeObjectURL(url);
+  for (const entry of liveUrls.values()) {
+    const urls = Array.isArray(entry) ? entry : entry?.urls || [entry];
+    for (const url of urls) if (url) URL.revokeObjectURL(url);
+  }
   liveUrls.clear();
 }
 
-function mediaUrl(item) {
-  if (!liveUrls.has(item.id)) liveUrls.set(item.id, URL.createObjectURL(capturePlaybackBlob(item)));
+function mediaSources(item) {
+  if (!liveUrls.has(item.id)) {
+    if (item.type === "clip") {
+      const segments = capturePlaybackSegments(item);
+      liveUrls.set(item.id, {
+        urls: segments.map((segment) => URL.createObjectURL(segment.blob)),
+        durationsMs: segments.map((segment) => Math.max(0, Number(segment.durationMs || 0))),
+      });
+    } else {
+      liveUrls.set(item.id, { urls: [URL.createObjectURL(capturePlaybackBlob(item))], durationsMs: [] });
+    }
+  }
   return liveUrls.get(item.id);
+}
+
+function mediaUrl(item) {
+  return mediaSources(item)?.urls?.[0] || "";
 }
 
 function durationLabel(ms = 0) {
@@ -41,7 +58,8 @@ function captureState(item = {}) {
 
 function details(item) {
   if (item.type === "clip") {
-    return `${durationLabel(item.durationMs)} · Video`;
+    const parts = capturePlaybackSegments(item).length;
+    return `${durationLabel(item.durationMs)} · ${parts > 1 ? `Replay · ${parts} parts` : "Video"}`;
   }
   return `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}${item.width ? " · " : ""}Screenshot`;
 }
@@ -49,11 +67,13 @@ function details(item) {
 function heroMarkup(item) {
   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
   const url = mediaUrl(item);
+  const sources = item.type === "clip" ? mediaSources(item) : { urls: [url], durationsMs: [] };
+  const segmented = item.type === "clip" && isSegmentedCapture(item);
   const state = captureState(item);
   const isReady = state === "ready";
   const statusMarkup = "";
   const mediaStage = item.type === "clip"
-    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
+    ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--hero", segmentUrls: sources.urls, segmentDurationsMs: sources.durationsMs })}</div>`
     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
   return `<article class="capture-hero capture-hero--${state}" data-selected-capture="${item.id}">
     ${mediaStage}
@@ -62,8 +82,8 @@ function heroMarkup(item) {
       <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
       <div class="capture-hero__actions" data-focus-zone="capture-actions">
         <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
-        ${item.type === "clip" && isReady ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
-        ${isReady ? `<button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}"><b>↗</b><span>Share</span></button>` : ""}
+        ${item.type === "clip" && isReady && !segmented ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
+        ${isReady ? `<button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" data-capture-segmented="${segmented ? "true" : "false"}"><b>↗</b><span>Share</span></button>` : ""}
         <button type="button" class="capture-action" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}"><b>⇩</b><span>Save</span></button>
         <button type="button" class="capture-action capture-action--danger" data-action="delete-capture" data-capture-id="${item.id}"><b>×</b><span>Delete</span></button>
       </div>

@@ -2504,40 +2504,74 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return item;
   }
 
-  async function verifyPersistedCapture(id, expectedBlob, expectedState = 'ready') {
+  async function verifyPersistedCapture(id, expectedBlob, expectedState = 'ready', expectedSegments = []) {
     const persisted = await readCaptureRecord(id);
     const persistedBlob = persisted?.blob;
     if (!persisted || !(persistedBlob instanceof Blob) || !persistedBlob.size) {
       throw new Error('PARA could not confirm that the video exists in Media Gallery.');
     }
     if (expectedBlob?.size && persistedBlob.size !== expectedBlob.size) {
-      throw new Error('PARA saved an incomplete video. The original recording was kept for recovery.');
+      throw new Error('PARA saved an incomplete video.');
     }
     if (String(persisted.captureState || 'ready') !== String(expectedState || 'ready')) {
       throw new Error('PARA could not confirm the final Media Gallery state for this video.');
     }
+    if (persisted.type === 'clip' && persisted.playbackVerified !== true) {
+      throw new Error('PARA refused to mark an unverified gameplay recording as playable.');
+    }
+    if (Array.isArray(expectedSegments) && expectedSegments.length) {
+      const persistedSegments = Array.isArray(persisted.replaySegments) ? persisted.replaySegments : [];
+      if (persistedSegments.length !== expectedSegments.length) {
+        throw new Error('PARA could not confirm every replay segment in Media Gallery.');
+      }
+      for (let index = 0; index < expectedSegments.length; index += 1) {
+        const expected = expectedSegments[index]?.blob;
+        const actual = persistedSegments[index]?.blob;
+        if (!(actual instanceof Blob) || !actual.size || (expected?.size && actual.size !== expected.size)) {
+          throw new Error('PARA saved an incomplete replay segment.');
+        }
+      }
+    }
     return persisted;
   }
 
-  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready' }) {
-    const recorderMimeType = sourceMimeType || blob?.type || 'video/webm';
+  async function saveCapture({
+    id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0,
+    captureMode = '', sourceMimeType = '', captureState = 'ready', playbackVerified = false,
+    replaySegments = [],
+  }) {
+    const safeSegments = type === 'clip' && Array.isArray(replaySegments)
+      ? replaySegments.filter((segment) => segment?.blob instanceof Blob && segment.blob.size)
+      : [];
+    const primaryBlob = blob instanceof Blob ? blob : safeSegments[0]?.blob;
+    if (!(primaryBlob instanceof Blob) || !primaryBlob.size) throw new Error('PARA has no capture bytes to save.');
+    const recorderMimeType = sourceMimeType || primaryBlob.type || safeSegments[0]?.mimeType || 'video/webm';
     const item = {
       id: id || crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      type, blob, mimeType: blob.type || recorderMimeType, width, height, durationMs, captureMode,
-      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 7,
+      type, blob: primaryBlob, mimeType: primaryBlob.type || recorderMimeType, width, height, durationMs, captureMode,
+      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 8,
       captureState,
       ...(type === 'clip' ? {
-        playbackVerified: false,
+        playbackVerified: Boolean(playbackVerified),
         storageVerified: captureState === 'ready',
         recorderMimeType,
         sourceMimeType: recorderMimeType,
         normalized: false,
         videoCodec: recorderMimeType.includes('vp9') ? 'vp9' : recorderMimeType.includes('vp8') ? 'vp8' : '',
         audioCodec: recorderMimeType.includes('opus') ? 'opus' : '',
+        replaySegments: safeSegments.map((segment, index) => ({
+          blob: segment.blob,
+          durationMs: Math.max(0, Number(segment.durationMs || 0)),
+          mimeType: String(segment.mimeType || segment.blob.type || recorderMimeType),
+          startedAt: Number(segment.startedAt || 0),
+          endedAt: Number(segment.endedAt || 0),
+          index,
+        })),
+        replaySegmented: safeSegments.length > 1,
       } : {})
     };
     await writeCaptureRecord(item, captureState === 'ready' ? 'saved' : captureState);
-    return verifyPersistedCapture(item.id, blob, captureState);
+    return verifyPersistedCapture(item.id, primaryBlob, captureState, item.replaySegments || []);
   }
 
   function stopStream(stream) {
@@ -2791,25 +2825,34 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
-  const RUNTIME_CAPTURE_SLICE_MS = 1000;
+  const RUNTIME_CAPTURE_PROBE_MS = 800;
+  const REPLAY_SEGMENT_MS = 15_000;
+  const REPLAY_MAX_BUFFER_MS = 30 * 60 * 1000;
 
   function runtimeRecorderMimeCandidates(hasAudio = false) {
-    if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable in this browser.');
-    const types = hasAudio
-      ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
-      : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
-    const supported = types.filter((type) => MediaRecorder.isTypeSupported?.(type));
-    return supported.length ? supported : [''];
+    if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable.');
+    const ordered = hasAudio
+      ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm', '']
+      : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm', ''];
+    const supports = typeof MediaRecorder.isTypeSupported === 'function';
+    const candidates = ordered.filter((type) => !type || !supports || MediaRecorder.isTypeSupported(type));
+    return [...new Set(candidates.length ? candidates : [''])];
   }
 
   function runtimeRecorderOptions(mimeType = '', videoBitsPerSecond = 8_000_000) {
     return mimeType ? { mimeType, videoBitsPerSecond } : { videoBitsPerSecond };
   }
 
-
-  function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = RUNTIME_CAPTURE_SLICE_MS, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
+  function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = 0, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
     const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, videoBitsPerSecond));
-    const session = { recorder, mimeType: recorder.mimeType || mimeType || 'video/webm', chunks: [], error: null };
+    const session = {
+      recorder,
+      mimeType: recorder.mimeType || mimeType || 'video/webm',
+      chunks: [],
+      error: null,
+      startedAt: Date.now(),
+      timesliceMs: Math.max(0, Number(timesliceMs || 0)),
+    };
     recorder.addEventListener('dataavailable', (event) => {
       if (!event.data?.size) return;
       if (storeChunks) session.chunks.push(event.data);
@@ -2818,7 +2861,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     recorder.addEventListener('error', () => {
       session.error = recorder.error || new Error('Gameplay recording failed.');
     });
-    recorder.start(timesliceMs);
+    if (session.timesliceMs > 0) recorder.start(session.timesliceMs);
+    else recorder.start();
     return session;
   }
 
@@ -2828,20 +2872,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (recorder.state !== 'inactive') {
       await new Promise((resolve, reject) => {
         const onStop = () => { cleanup(); resolve(); };
-        const onError = () => { const error = session.error || recorder.error || new Error('Gameplay encoder failed.'); cleanup(); reject(error); };
+        const onError = () => {
+          const error = session.error || recorder.error || new Error('Gameplay recording failed.');
+          cleanup();
+          reject(error);
+        };
         const cleanup = () => {
           recorder.removeEventListener('stop', onStop);
           recorder.removeEventListener('error', onError);
         };
         recorder.addEventListener('stop', onStop);
         recorder.addEventListener('error', onError);
-        try {
-          recorder.requestData();
-          recorder.stop();
-        } catch (error) {
-          cleanup();
-          reject(error);
-        }
+        try { recorder.stop(); }
+        catch (error) { cleanup(); reject(error); }
       });
     }
     if (session.error) throw session.error;
@@ -2850,16 +2893,104 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return blob;
   }
 
+  async function verifyPlayableVideoBlob(blob, { timeoutMs = 6000, expectedDurationMs = 0, minDurationRatio = 0 } = {}) {
+    if (!(blob instanceof Blob) || blob.size < 1024) throw new Error('The gameplay recording was empty.');
+    const url = URL.createObjectURL(blob);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.volume = 0;
+    video.preload = 'auto';
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.style.cssText = 'position:fixed;left:-8px;top:-8px;width:2px;height:2px;opacity:.001;pointer-events:none;';
+    document.documentElement.appendChild(video);
+    const cleanup = () => {
+      try { video.pause(); } catch (_) {}
+      try { video.removeAttribute('src'); video.load(); } catch (_) {}
+      try { video.remove(); } catch (_) {}
+      URL.revokeObjectURL(url);
+    };
+    try {
+      await new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (error = null) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          video.removeEventListener('loadeddata', onReady);
+          video.removeEventListener('canplay', onReady);
+          video.removeEventListener('error', onError);
+          error ? reject(error) : resolve();
+        };
+        const onReady = () => {
+          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 1 && video.videoHeight > 1) finish();
+        };
+        const onError = () => finish(new Error('PARA could not decode this gameplay recording.'));
+        const timer = setTimeout(() => finish(new Error('PARA could not verify playback for this gameplay recording.')), timeoutMs);
+        video.addEventListener('loadeddata', onReady);
+        video.addEventListener('canplay', onReady);
+        video.addEventListener('error', onError);
+        video.src = url;
+        video.load();
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) onReady();
+      });
 
-  function selectRuntimeRecorderMime(stream) {
-    const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
-    return runtimeRecorderMimeCandidates(hasAudio)[0] || '';
+      const durationMs = Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : 0;
+      if (expectedDurationMs > 0 && durationMs > 0 && minDurationRatio > 0 && durationMs < expectedDurationMs * minDurationRatio) {
+        throw new Error('PARA detected an incomplete gameplay recording.');
+      }
+
+      const startTime = Number(video.currentTime || 0);
+      try { await video.play(); }
+      catch (_) { throw new Error('PARA could not start playback for this gameplay recording.'); }
+
+      await new Promise((resolve, reject) => {
+        const started = performance.now();
+        const check = () => {
+          const advanced = Number(video.currentTime || 0) - startTime;
+          if (advanced >= .04 || (video.ended && Number(video.currentTime || 0) > 0)) { resolve(); return; }
+          if (performance.now() - started > Math.min(timeoutMs, 2600)) {
+            reject(new Error('PARA recorded video bytes, but playback never advanced.'));
+            return;
+          }
+          setTimeout(check, 40);
+        };
+        check();
+      });
+
+      return {
+        width: Number(video.videoWidth || 0),
+        height: Number(video.videoHeight || 0),
+        durationMs,
+        mimeType: String(blob.type || 'video/webm'),
+      };
+    } finally {
+      cleanup();
+    }
+  }
+
+  async function probeRuntimeRecorderMime(stream, mimeType) {
+    const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: 0, videoBitsPerSecond: 4_000_000 });
+    await new Promise((resolve) => setTimeout(resolve, RUNTIME_CAPTURE_PROBE_MS));
+    const blob = await finalizeRuntimeRecorderSession(session);
+    await verifyPlayableVideoBlob(blob, { timeoutMs: 4500, expectedDurationMs: RUNTIME_CAPTURE_PROBE_MS, minDurationRatio: .2 });
+    return String(session.recorder.mimeType || blob.type || mimeType || 'video/webm');
   }
 
   async function requestVerifiedGameRecording(audio = false) {
     const stream = await requestGameStream(audio);
-    const mimeType = selectRuntimeRecorderMime(stream);
-    return { stream, mimeType, fallback: false };
+    const hasAudio = stream.getAudioTracks().some((track) => track.readyState !== 'ended');
+    let lastError = null;
+    for (const candidate of runtimeRecorderMimeCandidates(hasAudio)) {
+      try {
+        const mimeType = await probeRuntimeRecorderMime(stream, candidate);
+        return { stream, mimeType, fallback: false };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    stopStream(stream);
+    throw new Error(lastError?.message || 'PARA could not find a gameplay recording format that passes playback verification.');
   }
 
   const host = document.createElement('div');
@@ -3158,7 +3289,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     try {
       const prepared = await requestVerifiedGameRecording(true);
       const { stream, mimeType } = prepared;
-      const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: RUNTIME_CAPTURE_SLICE_MS, videoBitsPerSecond: 8_000_000 });
+      // V57 records manual gameplay as one finalized MediaRecorder session.
+      // No timeslice chunks are needed because the whole blob is saved at stop.
+      const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: 0, videoBitsPerSecond: 8_000_000 });
       const startedAt = Date.now();
       session.recorder.addEventListener('error', () => toast('PARA recording encountered an encoder error'));
       manualRecording = {
@@ -3168,7 +3301,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         captureMode: stream.__paraCaptureMode || ''
       };
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording(true), { once: true });
-      toast('Recording started · direct game frames');
+      toast('Recording started · playback-verified format');
     } catch (error) {
       toast(error?.message || 'Recording could not start');
     }
@@ -3182,15 +3315,20 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const rawBlob = await finalizeRuntimeRecorderSession(active.session);
       if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('The recording was empty.');
       const durationMs = Date.now() - active.startedAt;
+      const playback = await verifyPlayableVideoBlob(rawBlob, {
+        expectedDurationMs: durationMs,
+        minDurationRatio: .35,
+      });
       const saved = await saveCapture({
         type: 'clip',
         blob: rawBlob,
-        width: active.width || 0,
-        height: active.height || 0,
+        width: playback.width || active.width || 0,
+        height: playback.height || active.height || 0,
         durationMs,
         captureMode: active.captureMode || '',
         sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
-        captureState: 'ready'
+        captureState: 'ready',
+        playbackVerified: true,
       });
       await verifyPersistedCapture(saved.id, rawBlob, 'ready');
       toast('Gameplay capture saved to Media Gallery');
@@ -3202,6 +3340,86 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
+  function pruneReplaySegments(state) {
+    if (!state) return;
+    const cutoff = Date.now() - REPLAY_MAX_BUFFER_MS;
+    while (state.segments.length > 1 && Number(state.segments[0]?.endedAt || 0) < cutoff) {
+      state.segments.shift();
+    }
+  }
+
+  function beginReplaySegment(state) {
+    if (!state || replay !== state || state.stopping || state.currentSegment) return;
+    const session = startRuntimeRecorderSession(state.stream, state.mimeType, {
+      timesliceMs: 0,
+      videoBitsPerSecond: 7_000_000,
+    });
+    state.currentSegment = { session, startedAt: Date.now() };
+    clearTimeout(state.segmentTimer);
+    state.segmentTimer = setTimeout(() => {
+      void rotateReplaySegment(state, { restart: true }).catch((error) => {
+        state.lastError = error;
+        toast(error?.message || 'PARA Replay stopped because a segment failed playback verification.');
+        stopReplayState(state);
+      });
+    }, REPLAY_SEGMENT_MS);
+  }
+
+  async function rotateReplaySegment(state, { restart = true } = {}) {
+    if (!state || state.stopping) return null;
+    if (state.rotationPromise) await state.rotationPromise;
+    if (!state.currentSegment) {
+      if (restart) beginReplaySegment(state);
+      return null;
+    }
+    const active = state.currentSegment;
+    state.currentSegment = null;
+    clearTimeout(state.segmentTimer);
+    state.segmentTimer = 0;
+    const job = (async () => {
+      const blob = await finalizeRuntimeRecorderSession(active.session);
+      const endedAt = Date.now();
+      const durationMs = Math.max(1, endedAt - active.startedAt);
+      const playback = await verifyPlayableVideoBlob(blob, {
+        expectedDurationMs: durationMs,
+        minDurationRatio: .25,
+      });
+      const segment = {
+        blob,
+        durationMs,
+        mimeType: blob.type || state.mimeType || 'video/webm',
+        startedAt: active.startedAt,
+        endedAt,
+        width: playback.width || state.width || 0,
+        height: playback.height || state.height || 0,
+        playbackVerified: true,
+      };
+      state.segments.push(segment);
+      pruneReplaySegments(state);
+      return segment;
+    })();
+    state.rotationPromise = job;
+    try {
+      return await job;
+    } finally {
+      if (state.rotationPromise === job) state.rotationPromise = null;
+      if (restart && replay === state && !state.stopping) beginReplaySegment(state);
+    }
+  }
+
+  function stopReplayState(state) {
+    if (!state || state.stopping) return;
+    state.stopping = true;
+    clearTimeout(state.segmentTimer);
+    state.segmentTimer = 0;
+    try {
+      if (state.currentSegment?.session?.recorder?.state !== 'inactive') state.currentSegment.session.recorder.stop();
+    } catch (_) {}
+    state.currentSegment = null;
+    if (replay === state) replay = null;
+    stopStream(state.stream);
+  }
+
   async function startReplay() {
     closeShell();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -3210,56 +3428,63 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const prepared = await requestVerifiedGameRecording(true);
       const { stream, mimeType } = prepared;
       const hasAudio = stream.getAudioTracks().length > 0;
-      const chunks = [];
-      const session = startRuntimeRecorderSession(stream, mimeType, {
-        timesliceMs: RUNTIME_CAPTURE_SLICE_MS,
-        storeChunks: false,
-        videoBitsPerSecond: 7_000_000,
-        onChunk: (blob) => {
-          chunks.push({ blob, at: Date.now() });
-          const cutoff = Date.now() - 30 * 60 * 1000;
-          while (chunks.length > 2 && chunks[1].at < cutoff) chunks.splice(1, 1);
-        }
-      });
-      replay = {
-        stream, recorder: session.recorder, session, chunks, mimeType, startedAt: Date.now(),
+      const state = {
+        stream, mimeType, startedAt: Date.now(), segments: [], currentSegment: null,
+        segmentTimer: 0, rotationPromise: null, stopping: false, lastError: null,
         width: stream.__paraCaptureWidth || 0,
         height: stream.__paraCaptureHeight || 0,
         captureMode: stream.__paraCaptureMode || ''
       };
+      replay = state;
+      beginReplaySegment(state);
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
-        if (replay?.recorder.state !== 'inactive') replay.recorder.stop();
-        replay = null;
-        toast('PARA Replay stopped');
+        if (replay === state) {
+          stopReplayState(state);
+          toast('PARA Replay stopped');
+        }
       }, { once: true });
-      toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · direct game frames`);
+      toast(`${hasAudio ? 'PARA Replay is running' : 'PARA Replay is running · video only'} · self-contained replay segments`);
     } catch (error) {
       toast(error?.message || 'Replay could not start');
     }
   }
 
   async function saveReplay(durationMs) {
-    if (!replay) throw new Error('PARA Replay is not running.');
+    const state = replay;
+    if (!state || state.stopping) throw new Error('PARA Replay is not running.');
     try {
-      replay.recorder.requestData();
-      await new Promise((resolve) => setTimeout(resolve, 220));
-      const cutoff = Date.now() - durationMs;
-      const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
-      const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
-      if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('Replay has not buffered enough gameplay yet.');
-      const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
+      if (state.lastError) throw state.lastError;
+      if (state.rotationPromise) await state.rotationPromise;
+
+      // Cut the current recorder only when it has enough content to form a useful,
+      // self-contained segment. A brand-new segment is left running rather than
+      // producing a tiny broken-looking clip after an automatic rotation.
+      const currentAge = state.currentSegment ? Date.now() - state.currentSegment.startedAt : 0;
+      if (currentAge >= 1200) await rotateReplaySegment(state, { restart: true });
+      if (state.rotationPromise) await state.rotationPromise;
+
+      const cutoff = Date.now() - Math.max(1, Number(durationMs || 0));
+      const selected = state.segments.filter((segment) => Number(segment.endedAt || 0) >= cutoff);
+      if (!selected.length) throw new Error('Replay has not buffered enough verified gameplay yet.');
+
+      const actualDuration = selected.reduce((total, segment) => total + Math.max(0, Number(segment.durationMs || 0)), 0);
+      const primary = selected[0].blob;
       const saved = await saveCapture({
         type: 'clip',
-        blob: rawBlob,
-        width: replay.width || 0,
-        height: replay.height || 0,
+        blob: primary,
+        width: selected[0]?.width || state.width || 0,
+        height: selected[0]?.height || state.height || 0,
         durationMs: actualDuration,
-        captureMode: replay.captureMode || '',
-        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
-        captureState: 'ready'
+        captureMode: state.captureMode || '',
+        sourceMimeType: primary.type || state.mimeType || 'video/webm',
+        captureState: 'ready',
+        playbackVerified: true,
+        replaySegments: selected,
       });
-      await verifyPersistedCapture(saved.id, rawBlob, 'ready');
-      toast('Recent gameplay saved to Media Gallery');
+      await verifyPersistedCapture(saved.id, primary, 'ready', selected);
+      toast(selected.length > 1
+        ? `Recent gameplay saved · ${selected.length} verified replay segments`
+        : 'Recent gameplay saved to Media Gallery');
     } catch (error) {
       toast(error?.message || 'Replay could not be saved');
     }

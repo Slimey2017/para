@@ -403,7 +403,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('captureCanvas.captureStream(30)', server)
         self.assertIn('new MediaRecorder(stream, runtimeRecorderOptions', server)
         self.assertIn("sourceMimeType: rawBlob.type", server)
-        self.assertIn("captureVersion: 7", server)
+        self.assertIn("captureVersion: 8", server)
         self.assertIn("normalized: false", server)
         self.assertNotIn('normalizeRuntimeCapture', server)
         self.assertNotIn('/api/v1/capture/normalize', server)
@@ -708,7 +708,7 @@ class RepositoryTests(unittest.TestCase):
             "captureVersion: 6",
         ]:
             self.assertNotIn(marker, server)
-        self.assertIn("captureVersion: 7", server)
+        self.assertIn("captureVersion: 8", server)
         self.assertIn("captureState: 'ready'", server)
         self.assertIn("verifyPersistedCapture(saved.id, rawBlob, 'ready')", server)
         self.assertIn("normalized: false", server)
@@ -792,13 +792,38 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("capture_encoder_busy", server)
 
 
+
+    def test_v57_capture_requires_real_playback_and_replay_uses_self_contained_segments(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        capture = (ROOT / "apps/para-home/src/services/capture-service.js").read_text(encoding="utf-8")
+
+        for marker in [
+            "RUNTIME_CAPTURE_PROBE_MS",
+            "verifyPlayableVideoBlob",
+            "recorded video bytes, but playback never advanced",
+            "timesliceMs: 0",
+            "REPLAY_SEGMENT_MS",
+            "replaySegments",
+            "playbackVerified: true",
+        ]:
+            self.assertIn(marker, server)
+        self.assertLess(server.find("video/webm;codecs=vp8"), server.find("video/webm;codecs=vp9"))
+        self.assertNotIn("selected = replay.chunks.filter", server)
+        self.assertIn("data-video-segments", player)
+        self.assertIn("switchSegment", player)
+        self.assertIn("segmentUrls: sources.urls", media)
+        self.assertIn("capturePlaybackSegments", capture)
+        self.assertIn("isSegmentedCapture", capture)
+
     def test_v56_capture_success_requires_direct_media_gallery_readback(self):
         media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
         player = (ROOT / "apps/para-home/src/ui/video-player.js").read_text(encoding="utf-8")
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
 
         for marker in [
-            "captureVersion: 7",
+            "captureVersion: 8",
             "verifyPersistedCapture",
             "captureState: 'ready'",
             "Gameplay capture saved to Media Gallery",

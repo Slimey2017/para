@@ -17,7 +17,7 @@ import {
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
-import { capturePlaybackBlob, capturePlaybackMime, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
+import { capturePlaybackBlob, capturePlaybackMime, capturePlaybackSegments, isSegmentedCapture, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
   settingsScreen, displayScreen, accessibilityScreen, networkScreen, activateNetwork,
@@ -136,7 +136,7 @@ let preferenceTimer = null;
 let idleSleepTimer = null;
 let idleDimTimer = null;
 let overlayCloseTimer = null;
-let captureViewerUrl = "";
+let captureViewerUrls = [];
 let youtubeThumbnailPickerUrl = "";
 let activeInputDevice = "keyboard";
 let gameTransitionInFlight = false;
@@ -546,7 +546,8 @@ async function openControlCenter() {
 
 function closeControlCenter(restore = true) {
   if (overlay.hidden) return;
-  if (captureViewerUrl) { URL.revokeObjectURL(captureViewerUrl); captureViewerUrl = ""; }
+  for (const url of captureViewerUrls) URL.revokeObjectURL(url);
+  captureViewerUrls = [];
   if (youtubeThumbnailPickerUrl) { URL.revokeObjectURL(youtubeThumbnailPickerUrl); youtubeThumbnailPickerUrl = ""; }
   overlay.classList.add("is-closing");
   const returnTarget = restore ? overlayReturnFocus : null;
@@ -682,6 +683,7 @@ async function openYouTubeUploadDialog(captureId) {
   const item = await getCapture(captureId);
   if (!item) { toast("Capture not found"); return false; }
   if (item.type !== "clip") { toast("YouTube needs a video", "Choose a gameplay video instead of a screenshot."); return false; }
+  if (isSegmentedCapture(item)) { toast("Export replay first", "This replay is stored as multiple verified video parts so playback stays reliable."); return false; }
   clearTimeout(overlayCloseTimer);
   overlayReturnFocus = focus.current;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt || Date.now());
@@ -791,9 +793,9 @@ async function resumePendingYouTubeUpload() {
   try { draft = JSON.parse(sessionStorage.getItem(YOUTUBE_UPLOAD_DRAFT_KEY) || "null"); } catch { draft = null; }
   if (!draft?.captureId) { toast("YouTube upload expired", "Choose the capture again and restart the upload."); return false; }
   const item = await getCapture(draft.captureId);
-  if (!item || item.type !== "clip") {
+  if (!item || item.type !== "clip" || isSegmentedCapture(item)) {
     sessionStorage.removeItem(YOUTUBE_UPLOAD_DRAFT_KEY);
-    toast("Capture unavailable", "PARA could not find the gameplay video selected before Google sign-in.");
+    toast("Capture unavailable", "PARA could not resume this upload as one playable video file.");
     return false;
   }
   const mime = item.mimeType || item.blob?.type || "video/webm";
@@ -836,13 +838,14 @@ function openShareCenter(target) {
   const captureId = target?.dataset?.captureId;
   if (!captureId || (!overlay.hidden && !overlay.querySelector("[data-capture-viewer]"))) return false;
   const captureKind = target.dataset.captureKind === "clip" ? "Gameplay clip" : "Screenshot";
+  const segmented = target.dataset.captureSegmented === "true";
   clearTimeout(overlayCloseTimer);
   overlayReturnFocus = focus.current || target;
   overlay.innerHTML = `<div class="share-center-scrim" data-action="close-control-center"></div>
     <section class="share-center" role="dialog" aria-modal="true" aria-label="Share Center">
       <header class="share-center__header"><div><span>PARA SHARE CENTER</span><h2>Share ${captureKind}</h2><small>Choose where this capture goes.</small></div><button type="button" class="share-center__close" data-action="close-control-center" aria-label="Close Share Center">×</button></header>
       <div class="share-center__destinations" data-focus-zone="share-destinations">
-        <button type="button" class="share-destination share-destination--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${captureId}" data-autofocus="true" ${captureKind === "Gameplay clip" ? "" : 'disabled aria-disabled="true"'}><b>▶</b><span><strong>YouTube</strong><small>${captureKind === "Gameplay clip" ? "Upload video or Short" : "Video captures only"}</small></span><em>${captureKind === "Gameplay clip" ? "Upload" : "Video"}</em></button>
+        <button type="button" class="share-destination share-destination--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${captureId}" data-autofocus="true" ${captureKind === "Gameplay clip" && !segmented ? "" : 'disabled aria-disabled="true"'}><b>▶</b><span><strong>YouTube</strong><small>${segmented ? "Replay parts must be exported first" : captureKind === "Gameplay clip" ? "Upload video or Short" : "Video captures only"}</small></span><em>${captureKind === "Gameplay clip" && !segmented ? "Upload" : "Video"}</em></button>
         <button type="button" class="share-destination share-destination--facebook" data-action="share-capture" data-share-target="facebook" data-capture-id="${captureId}"><b>f</b><span><strong>Facebook</strong><small>Post to your connected account</small></span><em>Connect</em></button>
         <button type="button" class="share-destination share-destination--chat" data-action="share-capture" data-share-target="chat" data-capture-id="${captureId}"><b>◌</b><span><strong>PARA Chat</strong><small>Send to a friend or group</small></span><em>PARA</em></button>
         <button type="button" class="share-destination share-destination--phone" data-action="share-capture" data-share-target="phone" data-capture-id="${captureId}"><b>▯</b><span><strong>Send to Phone</strong><small>Export for nearby or companion transfer</small></span><em>Export</em></button>
@@ -866,12 +869,17 @@ async function openCaptureViewer(captureId) {
   const item = items[index];
   const previous = items[(index - 1 + items.length) % items.length];
   const next = items[(index + 1) % items.length];
-  if (captureViewerUrl) URL.revokeObjectURL(captureViewerUrl);
-  captureViewerUrl = URL.createObjectURL(capturePlaybackBlob(item));
+  for (const url of captureViewerUrls) URL.revokeObjectURL(url);
+  const playbackSegments = item.type === "clip" ? capturePlaybackSegments(item) : [];
+  captureViewerUrls = item.type === "clip"
+    ? playbackSegments.map((segment) => URL.createObjectURL(segment.blob))
+    : [URL.createObjectURL(capturePlaybackBlob(item))];
+  const captureViewerUrl = captureViewerUrls[0] || "";
+  const segmented = item.type === "clip" && playbackSegments.length > 1;
   clearTimeout(overlayCloseTimer);
   if (overlay.hidden) overlayReturnFocus = focus.current;
   const media = item.type === "clip"
-    ? paraVideoPlayerMarkup({ src: captureViewerUrl, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--viewer" })
+    ? paraVideoPlayerMarkup({ src: captureViewerUrl, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--viewer", segmentUrls: captureViewerUrls, segmentDurationsMs: playbackSegments.map((segment) => segment.durationMs) })
     : `<img src="${captureViewerUrl}" alt="PARA screenshot">`;
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(item.createdAt);
   const length = item.type === "clip" ? `${Math.max(1, Math.round((item.durationMs || 0) / 1000))} sec` : `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}`;
@@ -880,8 +888,8 @@ async function openCaptureViewer(captureId) {
     <div class="capture-viewer__stage">${media}</div>
     <footer class="capture-viewer__controls">
       ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${previous.id}">← Previous</button>` : ""}
-      ${item.type === "clip" ? `<button type="button" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}" data-autofocus="true">▶ Upload to YouTube</button>` : ""}
-      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" ${item.type === "clip" ? "" : 'data-autofocus="true"'}>↗ Share</button>
+      ${item.type === "clip" && !segmented ? `<button type="button" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}" data-autofocus="true">▶ Upload to YouTube</button>` : ""}
+      <button type="button" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}" data-capture-segmented="${segmented ? "true" : "false"}" ${item.type === "clip" && !segmented ? "" : 'data-autofocus="true"'}>↗ Share</button>
       <button type="button" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}">⇩ Save</button>
       <button type="button" data-action="capture-browser-fullscreen">⛶ Fullscreen</button>
       ${items.length > 1 ? `<button type="button" data-action="step-capture-viewer" data-capture-id="${next.id}">Next →</button>` : ""}

@@ -18,6 +18,15 @@ function escapeAttr(value = "") {
     .replaceAll(">", "&gt;");
 }
 
+function parseArray(value = "") {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function mediaErrorMessage(video, error = null) {
   const code = Number(video?.error?.code || 0);
   if (code === 1 || error?.name === "AbortError") return "Playback was interrupted. Press Play again.";
@@ -28,9 +37,22 @@ function mediaErrorMessage(video, error = null) {
   return error?.message ? `Playback failed: ${error.message}` : "PARA could not play this capture.";
 }
 
-export function paraVideoPlayerMarkup({ src, mimeType = "", durationMs = 0, className = "", autoplay = false } = {}) {
+export function paraVideoPlayerMarkup({
+  src,
+  mimeType = "",
+  durationMs = 0,
+  className = "",
+  autoplay = false,
+  segmentUrls = [],
+  segmentDurationsMs = [],
+} = {}) {
   const expectedSeconds = Math.max(0, Number(durationMs || 0) / 1000);
-  return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}" data-video-mime="${escapeAttr(mimeType)}">
+  const playlist = Array.isArray(segmentUrls) ? segmentUrls.filter(Boolean) : [];
+  const durations = Array.isArray(segmentDurationsMs) ? segmentDurationsMs.map((value) => Math.max(0, Number(value || 0))) : [];
+  const playlistAttrs = playlist.length > 1
+    ? ` data-video-segments="${escapeAttr(JSON.stringify(playlist))}" data-video-segment-durations="${escapeAttr(JSON.stringify(durations))}"`
+    : "";
+  return `<div class="para-video-player ${className}" data-para-video-player data-expected-duration="${expectedSeconds}" data-video-mime="${escapeAttr(mimeType)}"${playlistAttrs}>
     <video src="${escapeAttr(src)}" preload="auto" playsinline ${autoplay ? "autoplay" : ""}>PARA could not play this recording.</video>
     <button type="button" class="para-video-player__bigplay" data-video-action="toggle" aria-label="Play video">▶</button>
     <div class="para-video-player__status" data-video-status hidden><span></span><strong data-video-status-text>Loading video…</strong></div>
@@ -60,6 +82,14 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
 
     const expected = Math.max(0, Number(player.dataset.expectedDuration || 0));
     const mimeType = String(player.dataset.videoMime || "").trim();
+    const playlist = parseArray(player.dataset.videoSegments).map(String).filter(Boolean);
+    const segmentDurations = parseArray(player.dataset.videoSegmentDurations).map((value) => Math.max(0, Number(value || 0) / 1000));
+    const segments = playlist.length > 1 ? playlist : [video.getAttribute("src") || video.src].filter(Boolean);
+    const isPlaylist = segments.length > 1;
+    let segmentIndex = 0;
+    let pendingLocalTime = null;
+    let resumeAfterSwitch = false;
+
     const seek = player.querySelector("[data-video-seek]");
     const volume = player.querySelector("[data-video-volume]");
     const speed = player.querySelector("[data-video-speed]");
@@ -72,6 +102,25 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     const statusText = player.querySelector("[data-video-status-text]");
     let lastError = null;
 
+    const segmentDurationAt = (index) => {
+      const declared = Number(segmentDurations[index] || 0);
+      if (declared > 0) return declared;
+      if (isPlaylist && expected > 0) return expected / segments.length;
+      if (index === segmentIndex && Number.isFinite(video.duration) && video.duration > 0.05) return video.duration;
+      return 0;
+    };
+    const segmentOffset = (index) => {
+      let total = 0;
+      for (let i = 0; i < Math.max(0, index); i += 1) total += segmentDurationAt(i);
+      return total;
+    };
+    const playlistDuration = () => {
+      if (!isPlaylist) return 0;
+      const declared = segments.reduce((total, _, index) => total + segmentDurationAt(index), 0);
+      return expected > 0 ? expected : declared;
+    };
+    const globalCurrentTime = () => isPlaylist ? segmentOffset(segmentIndex) + Number(video.currentTime || 0) : Number(video.currentTime || 0);
+
     const setStatus = (message = "", kind = "loading") => {
       if (!status) return;
       status.hidden = !message;
@@ -81,11 +130,15 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
 
     const reportError = (error, message = "") => {
       lastError = error || new Error(message || mediaErrorMessage(video, error));
-      setStatus(message || mediaErrorMessage(video, error), "error");
+      const prefix = isPlaylist ? `Replay segment ${segmentIndex + 1} of ${segments.length}: ` : "";
+      setStatus(prefix + (message || mediaErrorMessage(video, error)), "error");
       onError?.(lastError);
     };
 
-    const realDuration = () => Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : expected;
+    const realDuration = () => {
+      if (isPlaylist) return playlistDuration();
+      return Number.isFinite(video.duration) && video.duration > 0.05 ? video.duration : expected;
+    };
     const seekableEnd = () => {
       try {
         const ranges = video.seekable;
@@ -94,24 +147,60 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
         return 0;
       }
     };
-    const canSeek = () => Number.isFinite(video.duration) || seekableEnd() > 0;
+    const canSeek = () => isPlaylist ? realDuration() > 0 : Number.isFinite(video.duration) || seekableEnd() > 0;
 
     const update = () => {
       const length = realDuration();
-      if (current) current.textContent = formatTime(video.currentTime || 0);
+      const position = globalCurrentTime();
+      if (current) current.textContent = formatTime(position);
       if (duration) duration.textContent = formatTime(length);
-      if (seek && length > 0 && !seek.matches(":active")) seek.value = String(Math.round(clamp((video.currentTime || 0) / length, 0, 1) * 1000));
+      if (seek && length > 0 && !seek.matches(":active")) seek.value = String(Math.round(clamp(position / length, 0, 1) * 1000));
       if (seek) seek.disabled = !canSeek();
-      for (const icon of playIcons) icon.textContent = video.paused ? "▶" : "❚❚";
+      const effectivelyPlaying = !video.paused || resumeAfterSwitch;
+      for (const icon of playIcons) icon.textContent = effectivelyPlaying ? "❚❚" : "▶";
       if (bigPlay) {
-        bigPlay.textContent = video.paused ? "▶" : "❚❚";
-        bigPlay.classList.toggle("is-playing", !video.paused);
+        bigPlay.textContent = effectivelyPlaying ? "❚❚" : "▶";
+        bigPlay.classList.toggle("is-playing", effectivelyPlaying);
       }
       for (const icon of volumeIcons) icon.textContent = video.muted || video.volume === 0 ? "🔇" : video.volume < 0.5 ? "🔉" : "🔊";
       if (volume && !volume.matches(":active")) volume.value = String(video.muted ? 0 : video.volume);
     };
 
-    const setCurrentTime = (seconds) => {
+    const switchSegment = (index, localTime = 0, { autoplay = false } = {}) => {
+      const nextIndex = clamp(Math.floor(index), 0, segments.length - 1);
+      segmentIndex = nextIndex;
+      pendingLocalTime = Math.max(0, Number(localTime || 0));
+      resumeAfterSwitch = Boolean(autoplay);
+      setStatus(isPlaylist ? `Loading replay segment ${segmentIndex + 1} of ${segments.length}…` : "Loading video…");
+      video.src = segments[segmentIndex];
+      video.load();
+      update();
+    };
+
+    const locateGlobalTime = (seconds) => {
+      const target = clamp(seconds, 0, realDuration() || Infinity);
+      if (!isPlaylist) return { index: 0, local: target };
+      let offset = 0;
+      for (let index = 0; index < segments.length; index += 1) {
+        const length = segmentDurationAt(index);
+        const end = offset + length;
+        if (index === segments.length - 1 || target < end) return { index, local: Math.max(0, target - offset) };
+        offset = end;
+      }
+      return { index: segments.length - 1, local: 0 };
+    };
+
+    const setCurrentTime = (seconds, { autoplay = !video.paused } = {}) => {
+      if (isPlaylist) {
+        const target = locateGlobalTime(seconds);
+        if (target.index !== segmentIndex) {
+          switchSegment(target.index, target.local, { autoplay });
+          return;
+        }
+        try { video.currentTime = target.local; } catch {}
+        update();
+        return;
+      }
       const length = realDuration();
       const max = seekableEnd() || length || Infinity;
       const target = clamp(seconds, 0, max);
@@ -120,7 +209,6 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
         else video.currentTime = target;
       } catch {
         // Some legacy MediaRecorder captures are playable before they become seekable.
-        // Playback should keep working even when timeline seeking is unavailable.
       }
     };
 
@@ -128,10 +216,15 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
       try {
         if (video.paused) {
           lastError = null;
+          if (isPlaylist && segmentIndex === segments.length - 1 && video.ended) {
+            switchSegment(0, 0, { autoplay: true });
+            return;
+          }
           if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) setStatus("Loading video…");
           await video.play();
           setStatus("");
         } else {
+          resumeAfterSwitch = false;
           video.pause();
         }
       } catch (error) {
@@ -145,7 +238,7 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
       if (!button || !player.contains(button)) return;
       const action = button.dataset.videoAction;
       if (action === "toggle") await toggle();
-      else if (action === "skip") setCurrentTime((video.currentTime || 0) + Number(button.dataset.videoSkip || 0));
+      else if (action === "skip") setCurrentTime(globalCurrentTime() + Number(button.dataset.videoSkip || 0));
       else if (action === "mute") video.muted = !video.muted;
       else if (action === "fullscreen") {
         try {
@@ -182,23 +275,36 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     const onKey = (event) => {
       if (event.target.matches?.("input,select,button")) return;
       if (event.code === "Space" || event.key === "k") { event.preventDefault(); void toggle(); }
-      else if (event.key === "ArrowLeft") { event.preventDefault(); setCurrentTime((video.currentTime || 0) - 5); }
-      else if (event.key === "ArrowRight") { event.preventDefault(); setCurrentTime((video.currentTime || 0) + 5); }
+      else if (event.key === "ArrowLeft") { event.preventDefault(); setCurrentTime(globalCurrentTime() - 5); }
+      else if (event.key === "ArrowRight") { event.preventDefault(); setCurrentTime(globalCurrentTime() + 5); }
       update();
     };
-    const onLoaded = () => {
-      // Do not seek to an absurd timestamp to "repair" legacy capture duration metadata.
-      // Older MediaRecorder files can report Infinity/unknown duration but are still
-      // perfectly playable. The old repair seek could strand the video at EOF.
+    const onLoaded = async () => {
+      if (pendingLocalTime !== null && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        try { video.currentTime = pendingLocalTime; } catch {}
+        pendingLocalTime = null;
+      }
+      if (resumeAfterSwitch && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        resumeAfterSwitch = false;
+        try { await video.play(); } catch (error) { reportError(error); }
+      }
       setStatus("");
       update();
     };
     const onWaiting = () => {
-      if (!lastError && !video.paused) setStatus("Buffering…");
+      if (!lastError && (!video.paused || resumeAfterSwitch)) setStatus("Buffering…");
     };
     const onPlaying = () => {
       lastError = null;
+      resumeAfterSwitch = false;
       setStatus("");
+      update();
+    };
+    const onEnded = () => {
+      if (isPlaylist && segmentIndex < segments.length - 1) {
+        switchSegment(segmentIndex + 1, 0, { autoplay: true });
+        return;
+      }
       update();
     };
     const onMediaError = () => reportError(video.error || new Error(mediaErrorMessage(video)));
@@ -208,7 +314,8 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     player.addEventListener("keydown", onKey);
     video.addEventListener("click", onVideoClick);
     video.addEventListener("dblclick", onDoubleClick);
-    for (const eventName of ["timeupdate", "play", "pause", "ended", "volumechange", "durationchange", "ratechange", "progress"]) video.addEventListener(eventName, update);
+    for (const eventName of ["timeupdate", "play", "pause", "volumechange", "durationchange", "ratechange", "progress"]) video.addEventListener(eventName, update);
+    video.addEventListener("ended", onEnded);
     video.addEventListener("loadedmetadata", onLoaded);
     video.addEventListener("loadeddata", onLoaded);
     video.addEventListener("canplay", onLoaded);
@@ -220,15 +327,13 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     volume?.addEventListener("input", onVolume);
     speed?.addEventListener("change", onSpeed);
 
-    // Do not reject an IndexedDB capture solely from canPlayType(). Older PARA
-    // recordings can carry an over-specific MediaRecorder codec string even
-    // when the media engine can decode the underlying capture bytes. capture-service gives
-    // the player a conservative playback MIME for existing captures
-    // say by actually loading the source.
+    // Loading the actual blob is the authority. A codec hint alone is not enough
+    // to prove a MediaRecorder result can decode, so the capture runtime performs
+    // a real playback probe before new videos are accepted into Media Gallery.
     player.dataset.mimeHint = mimeType && video.canPlayType?.(mimeType) === "" ? "unknown" : "supported";
     setStatus(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? "" : "Loading video…");
     video.load();
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) onLoaded();
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) void onLoaded();
     update();
 
     cleanups.push(() => {
@@ -239,6 +344,7 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
       seek?.removeEventListener("input", onSeek);
       volume?.removeEventListener("input", onVolume);
       speed?.removeEventListener("change", onSpeed);
+      video.removeEventListener("ended", onEnded);
       video.removeEventListener("loadedmetadata", onLoaded);
       video.removeEventListener("loadeddata", onLoaded);
       video.removeEventListener("canplay", onLoaded);
