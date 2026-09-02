@@ -1,0 +1,1344 @@
+diff --git a/PARA_FRIENDS_SYSTEM_APPS_UI_V52.md b/PARA_FRIENDS_SYSTEM_APPS_UI_V52.md
+new file mode 100644
+index 0000000..822e209
+--- /dev/null
++++ b/PARA_FRIENDS_SYSTEM_APPS_UI_V52.md
+@@ -0,0 +1,109 @@
++# PARA Friends + System Apps + UI Cleanup V52
++
++V52 turns the social, trophy, media, store-artwork, Switcher, and Files areas into a more console-like PARA experience while preserving the existing vanilla-JS shell, router, controller/focus system, V51 capture path, Python API, and Supabase integrations.
++
++## Friends replaces Messages
++
++- Adds a dedicated **Friends** system app and makes `#/friends` the canonical route.
++- Keeps the old `#/messages` route as a compatibility alias so existing links do not break.
++- Friends has a PARA friends list, presence/status, recent conversations, a conversation panel, and a working local message composer for the current PARA profile/browser.
++- Existing `para.messages.v1` local data is reused so this rename does not throw away current conversations.
++- The app visibly reserves future network bridges for Steam, PlayStation, Discord, Xbox, and Nintendo without pretending those network chats are already implemented.
++
++## System apps are first-class apps
++
++Adds a small system-app registry for:
++
++- Friends
++- Achievements
++- Media Gallery
++- Files
++- ParaStore
++- Settings
++
++The Apps library always exposes these PARA system apps, even when the hosted web edition cannot scan native applications. Achievements and Media Gallery are no longer shortcut buttons inside the Games screen.
++
++## Achievements are grouped by game
++
++- The Achievements app opens to game folders/cards instead of one scattered trophy list.
++- Each folder shows game art when ParaStore art is available, unlocked/total count, PARA points, and completion percentage.
++- Opening a folder shows only that game's trophies.
++- `All games` returns to the folder view.
++- Existing local/cloud achievement progress from V49 is preserved.
++
++## ParaStore artwork and slideshows
++
++- Store cards prefer real developer-uploaded hero, cover, screenshot, and icon assets.
++- Featured ParaStore art rotates as a slideshow when multiple assets exist.
++- Product hero art also rotates as a slideshow.
++- Installed ParaStore games use their real artwork in Games instead of a giant title letter.
++- Home ParaStore shelves and the cart use real artwork and fall back to the PARA logo instead of a title letter.
++- Store artwork is cached in `sessionStorage` for the launch transition.
++
++## Game loading slideshow
++
++- Shell launch transitions can show the selected game's ParaStore artwork as a slideshow.
++- If launch art was not previously cached, PARA makes a short best-effort product lookup before launch and then continues even if artwork cannot be fetched.
++- WEB game pages receive the published artwork list from the server and use it in their injected launch/suspend/resume/close transitions.
++- Runtime activity records keep project ID and artwork so Switcher and achievement grouping can display better game identity.
++
++## Switcher cleanup
++
++- Running/suspended experiences are compact cards instead of long horizontal buttons.
++- Resume and Close are separate controls.
++- The full Switcher has a labeled Close control for each experience.
++- The in-game Control Center Switcher also exposes a dedicated close button.
++- Closing the currently suspended store game continues to use the existing suspended-game command bridge so the runtime can actually close, not merely disappear from UI state.
++
++## Files no longer looks empty on the hosted web build
++
++The native/local Files API intentionally blocks filesystem browsing when host controls are disabled. On the hosted web edition that previously looked like an empty/broken Files app.
++
++V52 keeps native/local filesystem browsing unchanged, but when that API is unavailable the web edition now shows PARA-managed collections:
++
++- Media Gallery
++- Downloads
++- Saved Data
++- ParaStore content
++
++This does **not** expose the Render server filesystem to browser users.
++
++## Text/layout collision pass
++
++V52 adds shared layout hardening across console screens:
++
++- `min-width: 0` on important grid/flex copy regions;
++- long text wrapping instead of escaping containers;
++- action rows/buttons may wrap rather than overlap neighboring content;
++- responsive Friends, Switcher, trophy-folder, Files, and store layouts;
++- store/product/capture action rows can wrap on narrower windows.
++
++## Capture status
++
++V51 direct-renderer capture and long-error wrapping remain intact. V52 does not hide or fake a fix for any remaining game-specific blank renderer issue; capture/runtime compatibility remains a separate investigation when a renderer cannot expose usable frames.
++
++## Verification
++
++- `node --check` passes for every V52-changed frontend JavaScript module.
++- `python -m py_compile services/api/server.py` passes.
++- The server-injected WEB game runtime was extracted with V52 placeholders substituted and passes `node --check`.
++- `python -m unittest tests.test_api` -> **44 passed**.
++- Combined API + repository suite -> **90 passed, 1 known unrelated legacy failure**.
++- The remaining failure is the pre-existing assertion that `apps/para-home/src/mock-data.js` must already have been removed from the uploaded base repository.
++
++## Files changed by V52
++
++- `apps/para-home/src/app.js`
++- `apps/para-home/src/screen-manifest.js`
++- `apps/para-home/src/screens/experiences.js`
++- `apps/para-home/src/screens/files.js`
++- `apps/para-home/src/screens/friends.js` (new)
++- `apps/para-home/src/screens/home.js`
++- `apps/para-home/src/screens/libraries.js`
++- `apps/para-home/src/screens/media.js`
++- `apps/para-home/src/screens/social.js`
++- `apps/para-home/src/services/system-app-registry.js` (new)
++- `apps/para-home/src/ui/control-center.js`
++- `apps/para-home/styles.css`
++- `services/api/server.py`
++- `tests/test_repository.py`
+diff --git a/apps/para-home/src/app.js b/apps/para-home/src/app.js
+index 5d38054..7245757 100644
+--- a/apps/para-home/src/app.js
++++ b/apps/para-home/src/app.js
+@@ -16,7 +16,7 @@ import {
+   appsScreen, activateApps, filterApps, launchSystemApplication,
+ } from "./screens/libraries.js";
+ import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
+-import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
++import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
+ import { capturePlaybackBlob, capturePlaybackMime, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
+ import {
+   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
+@@ -26,10 +26,11 @@ import {
+ } from "./screens/system.js";
+ import {
+   gamesScreen, activateGames, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
+-  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateMessages, activateParaStore, activateStoreProduct, activateStoreCart,
++  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, activateParaStore, activateStoreProduct, activateStoreCart,
+   storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem, addStoreCartItem, removeStoreCartItem,
+   playCreatorTone, clearCreatorDrawing, currentStoreCartIds, toggleStoreWishlistItem,
+ } from "./screens/experiences.js";
++import { friendsScreen, activateFriends } from "./screens/friends.js";
+ import {
+   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
+   cancelBackgroundPreview, applyCustomBackground, applyBackgroundSelection,
+@@ -97,7 +98,8 @@ const renderers = {
+   "store-game": storeGameScreen,
+   creator: creatorScreen,
+   community: communityScreen,
+-  messages: messagesScreen,
++  friends: friendsScreen,
++  messages: friendsScreen,
+   marks: marksScreen,
+   "demo-pong": () => gameScreen("demo-pong"),
+   "demo-racer": () => gameScreen("demo-racer"),
+@@ -221,14 +223,45 @@ function sendSuspendedGameCommand(command, detail = {}) {
+   }
+ }
+ 
+-function gameTransitionNode({ mode = "launch", title = "" } = {}) {
++function cachedStoreLaunchArtwork(storeId = "") {
++  const id = String(storeId || "").trim();
++  if (!id) return { title: "", urls: [] };
++  try {
++    const parsed = JSON.parse(sessionStorage.getItem(`para.store.artwork.${id}`) || "{}");
++    return { title: String(parsed.title || ""), urls: Array.isArray(parsed.urls) ? parsed.urls.filter(Boolean).slice(0, 8) : [] };
++  } catch { return { title: "", urls: [] }; }
++}
++
++function storeArtworkFromProduct(item = {}) {
++  const assets = item.asset_references || {};
++  const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
++  const paths = [...new Set([assets.hero, assets.cover, ...shots, assets.icon].filter(Boolean))];
++  const urls = paths.slice(0, 8).map((path) => `/api/v1/store/asset?path=${encodeURIComponent(path)}`);
++  if (item.id) {
++    try { sessionStorage.setItem(`para.store.artwork.${item.id}`, JSON.stringify({ title: item.title || "PARA Game", urls })); } catch {}
++  }
++  return { title: String(item.title || ""), urls };
++}
++
++function gameTransitionNode({ mode = "launch", title = "", artwork = [] } = {}) {
+   const node = document.createElement("div");
+   node.className = `para-game-transition para-game-transition--${mode}`;
+   node.setAttribute("role", "status");
+   node.setAttribute("aria-live", "polite");
+   const heading = mode === "return" ? "Returning to PARA" : "Launching";
+   const detail = title ? `<strong>${String(title).replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch])}</strong>` : "";
+-  node.innerHTML = `<div class="para-game-transition__backdrop"></div><div class="para-game-transition__content"><img src="./assets/para-logo.png" alt=""><span>${heading}</span>${detail}<i aria-hidden="true"></i></div>`;
++  const slides = Array.isArray(artwork) ? artwork.filter(Boolean).slice(0, 8) : [];
++  const slideMarkup = slides.length ? `<div class="para-game-transition__slideshow" aria-hidden="true">${slides.map((url, index) => `<img src="${String(url).replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch])}" class="${index === 0 ? "is-active" : ""}">`).join("")}</div>` : "";
++  node.innerHTML = `<div class="para-game-transition__backdrop"></div>${slideMarkup}<div class="para-game-transition__shade"></div><div class="para-game-transition__content"><img src="./assets/para-logo.png" alt=""><span>${heading}</span>${detail}<i aria-hidden="true"></i></div>`;
++  if (slides.length > 1) {
++    const images = [...node.querySelectorAll(".para-game-transition__slideshow img")];
++    let slideIndex = 0;
++    node._paraSlideTimer = window.setInterval(() => {
++      images[slideIndex]?.classList.remove("is-active");
++      slideIndex = (slideIndex + 1) % images.length;
++      images[slideIndex]?.classList.add("is-active");
++    }, 1500);
++  }
+   document.body.append(node);
+   return node;
+ }
+@@ -242,12 +275,12 @@ function storeGameTitle(storeId) {
+   return cardTitle || "PARA Game";
+ }
+ 
+-function transitionIntoGame(destination, title = "PARA Game") {
++function transitionIntoGame(destination, title = "PARA Game", artwork = []) {
+   if (gameTransitionInFlight) return false;
+   gameTransitionInFlight = true;
+   closeControlCenter(false);
+   suspendMenuMusic();
+-  const node = gameTransitionNode({ mode: "launch", title });
++  const node = gameTransitionNode({ mode: "launch", title, artwork });
+   requestAnimationFrame(() => node.classList.add("is-visible"));
+   const reduced = getState().reducedMotion;
+   window.setTimeout(() => {
+@@ -407,8 +440,8 @@ function render(route) {
+     cleanupScreen = activateCreator();
+   } else if (route === "community") {
+     cleanupScreen = activateCommunity();
+-  } else if (route === "messages") {
+-    cleanupScreen = activateMessages({ focus });
++  } else if (route === "friends" || route === "messages") {
++    cleanupScreen = activateFriends({ focus });
+   } else if (route === "parastore") {
+     cleanupScreen = activateParaStore();
+   } else if (route === "store-product") {
+@@ -431,6 +464,8 @@ function render(route) {
+     });
+   } else if (route === "media-gallery") {
+     void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
++  } else if (route === "achievements") {
++    void activateAchievements({ focus }).then((cleanup) => { if (router.current() === "achievements") cleanupScreen = cleanup; });
+   } else if (route === "storage") {
+     activateStorage();
+   } else if (route === "network") {
+@@ -546,7 +581,7 @@ function openSwitcher() {
+   clearTimeout(overlayCloseTimer);
+   overlayReturnFocus = focus.current;
+   const running = runningExperiences().slice(0, 5);
+-  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Jump back in" : "Nothing suspended"}</h2><small>Open Switcher from the Control Center</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>`<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button type="button" data-action="resume-experience" data-experience-id="${item.id}" data-experience-route="${item.route}" data-store-id="${item.storeId || ''}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${item.mark || '◉'}</span><small>${item.kind || 'App'}</small><strong>${item.title}</strong><em>${item.queueStatus || 'Suspended'}</em></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${item.id}" aria-label="Close ${item.title}">×</button></article>`).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close app</span></footer></section>`;
++  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Running & suspended" : "Nothing running"}</h2><small>Resume a game or close it completely.</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>{ const art=item.artwork?`<img src="${escapeOverlayText(item.artwork)}" alt="">`:`<span>${item.kind === 'Game' ? '◈' : '▦'}</span>`; return `<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button class="switcher-card__resume" type="button" data-action="resume-experience" data-experience-id="${escapeOverlayText(item.id)}" data-experience-route="${escapeOverlayText(item.route || 'home')}" data-store-id="${escapeOverlayText(item.storeId || '')}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${art}</span><span class="switcher-card__copy"><small>${escapeOverlayText(item.kind || 'App')}</small><strong>${escapeOverlayText(item.title || 'Experience')}</strong><em>${escapeOverlayText(item.queueStatus || 'Suspended')}</em></span></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${escapeOverlayText(item.id)}" aria-label="Close ${escapeOverlayText(item.title || 'experience')}"><b>×</b><span>Close</span></button></article>`; }).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close</span></footer></section>`;
+   overlay.hidden = false;
+   overlay.classList.remove("is-closing");
+   updateControllerPrompts();
+@@ -1074,7 +1109,7 @@ async function openSystemApplication(target) {
+   }
+ }
+ 
+-function launchStoreGameDirect(storeId) {
++async function launchStoreGameDirect(storeId) {
+   const id = String(storeId || "").trim();
+   if (!id) return false;
+   sessionStorage.setItem("para.store.launch", id);
+@@ -1082,8 +1117,18 @@ function launchStoreGameDirect(storeId) {
+   if (IS_SUSPENDED_GAME_SHELL) {
+     return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
+   }
++  let artwork = cachedStoreLaunchArtwork(id);
++  if (!artwork.urls.length) {
++    try {
++      const item = await Promise.race([
++        paraApi.storeProduct(id),
++        new Promise((_, reject) => window.setTimeout(() => reject(new Error("art timeout")), 700)),
++      ]);
++      artwork = storeArtworkFromProduct(item || {});
++    } catch { /* launch immediately when artwork cannot be prefetched */ }
++  }
+   const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
+-  return transitionIntoGame(source, storeGameTitle(id));
++  return transitionIntoGame(source, artwork.title || storeGameTitle(id), artwork.urls);
+ }
+ 
+ function rememberAccountReturn(route = "account") {
+diff --git a/apps/para-home/src/screen-manifest.js b/apps/para-home/src/screen-manifest.js
+index c5a9dce..a918e72 100644
+--- a/apps/para-home/src/screen-manifest.js
++++ b/apps/para-home/src/screen-manifest.js
+@@ -22,7 +22,8 @@ export const screens = [
+   { id: "store-cart", label: "ParaStore cart", group: "library" },
+   { id: "creator", label: "Creator Playground", group: "apps" },
+   { id: "community", label: "PARA Community", group: "apps" },
+-  { id: "messages", label: "PARA Messages", group: "apps" },
++  { id: "friends", label: "PARA Friends", group: "apps" },
++  { id: "messages", label: "PARA Friends legacy route", group: "apps" },
+   { id: "marks", label: "PARA Marks", group: "identity" },
+   { id: "files", label: "PARA Files", group: "library" },
+   { id: "downloads", label: "Downloads", group: "system" },
+diff --git a/apps/para-home/src/screens/experiences.js b/apps/para-home/src/screens/experiences.js
+index 3ddce25..760d949 100644
+--- a/apps/para-home/src/screens/experiences.js
++++ b/apps/para-home/src/screens/experiences.js
+@@ -14,7 +14,6 @@ const STORE_INSTALL_KEY = "para.store.installed.v1";
+ const STORE_CART_KEY = "para.store.cart.v1";
+ const STORE_VIEW_KEY = "para.store.view.v1";
+ const STORE_WISHLIST_KEY = "para.store.wishlist.v1";
+-const MESSAGES_KEY = "para.messages.v1";
+ 
+ function storeWishlistIds() {
+   const profile = getState().activeProfile || "P1";
+@@ -102,10 +101,11 @@ export function installStoreItem(item) {
+     status: "complete", progress: 100, completedAt: installedAt, startedAt: installedAt,
+   };
+   setProfileRuntime({ downloads: [completedDownload, ...runtime.downloads.filter((entry) => entry.id !== completedDownload.id)].slice(0, 20) });
++  const artwork = storeArtworkUrls(item)[0] || "";
+   recordExperience({
+     id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game",
+     kind: item.project_type === "APP" ? "App" : "Game", accent: "#8d43ff",
+-    mark: (item.title || "P").slice(0, 1).toUpperCase(), storeId: item.id, queueStatus: "Ready to play",
++    mark: (item.title || "P").slice(0, 1).toUpperCase(), artwork, storeId: item.id, queueStatus: "Ready to play",
+   });
+   document.dispatchEvent(new CustomEvent("para-downloadcomplete", { detail: { downloads: [completedDownload] } }));
+   return true;
+@@ -120,7 +120,12 @@ export function isStoreItemInstalled(id) {
+ }
+ 
+ function installedStoreCard(item, autofocus = false) {
+-  return `<article class="demo-card"><span class="demo-art" style="--demo-accent:#8d43ff"><i>${escapeHtml((item.title || "P")[0])}</i><b></b></span><div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")} · <b class="ownership-badge">Installed · Owned</b></span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
++  const art = storeArtworkUrls(item)[0] || "";
++  cacheStoreArtwork(item);
++  const visual = art
++    ? `<span class="demo-art demo-art--store-image"><img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork"><b></b></span>`
++    : `<span class="demo-art demo-art--store-fallback"><img src="/assets/para-logo.png" alt=""><b></b></span>`;
++  return `<article class="demo-card">${visual}<div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")} · <b class="ownership-badge">Installed · Owned</b></span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
+ }
+ 
+ function demoCard(demo, { installed = false, autofocus = false } = {}) {
+@@ -152,8 +157,7 @@ export function gamesScreen() {
+     description: "Games installed for this profile and on this computer.",
+     eyebrow: "Explore",
+     className: "demo-library-page",
+-    body: `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div>
+-      <div class="demo-library" data-profile-games>${cards.join("")}</div>
++    body: `<div class="demo-library" data-profile-games>${cards.join("")}</div>
+       <div class="demo-library" data-native-game-library><div class="library-loading"><span></span><strong>Finding PC games…</strong></div></div>
+       <div class="library-empty" data-games-empty ${cards.length ? "hidden" : ""}><span>◉</span><h2>No games installed</h2><p>PARA checks ParaStore installs, demos, and local PC game libraries.</p><button class="action-button" data-route="parastore">Open ParaStore</button></div>`,
+   });
+@@ -206,7 +210,7 @@ export function paraStoreScreen() {
+       </section>
+       <section class="store-feature store-feature--live" data-store-feature>
+         <div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>Discover something new.</h2><p>Games and apps from PARA developers, all in one place.</p></div>
+-        <div class="store-feature__mark">P</div>
++        <div class="store-feature__mark store-feature__mark--logo"><img src="/assets/para-logo.png" alt=""></div>
+       </section>
+       <nav class="store-categories store-categories--primary" aria-label="Store categories">
+         <button class="is-active" data-store-type="ALL" aria-pressed="true" data-autofocus="true">Featured</button><button data-store-type="GAME" aria-pressed="false">Games</button><button data-store-type="APP" aria-pressed="false">Apps</button><button data-store-sort="new" aria-pressed="false">New Releases</button>
+@@ -223,9 +227,9 @@ function liveStoreCard(item) {
+   const type = item.project_type || "GAME";
+   const genre = meta.genre || type;
+   const price = priceLabel(commerceFor(item, meta));
+-  const art = assetUrl(assets.hero || assets.cover || assets.icon);
+-  const fallback = escapeHtml((item.title || "P").slice(0,1).toUpperCase());
+-  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork">` : `<span>${fallback}</span>`}<div class="store-live-card__badges"><small>${escapeHtml(genre)}</small><small>${escapeHtml(item.runtime || "PARA")}</small></div></div><div class="store-live-card__copy"><span>${escapeHtml(type)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>A View game</small></div></div></article>`;
++  const art = storeArtworkUrls(item)[0] || "";
++  cacheStoreArtwork(item);
++  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork">` : `<span class="store-live-card__fallback"><img src="/assets/para-logo.png" alt=""></span>`}<div class="store-live-card__badges"><small>${escapeHtml(genre)}</small><small>${escapeHtml(item.runtime || "PARA")}</small></div></div><div class="store-live-card__copy"><span>${escapeHtml(type)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>A View game</small></div></div></article>`;
+ }
+ 
+ export function activateParaStore() {
+@@ -280,6 +284,7 @@ export function activateParaStore() {
+       runtimeButton.dataset.storeRuntime = runtime;
+     }
+   };
++  let featureSlidesCleanup = () => {};
+   const runtimeMatch = (value) => {
+     if (runtime === "ALL") return true;
+     const r = String(value || "PARA").toUpperCase();
+@@ -302,9 +307,11 @@ export function activateParaStore() {
+     if (shelfTitle) shelfTitle.textContent = wishlistOnly ? "Wishlist" : q ? `Results for “${search.value.trim()}”` : newest ? "New Releases" : genre !== "All" ? genre : type === "GAME" ? "Games" : type === "APP" ? "Apps" : "Featured";
+     const featured = items[0] || catalog[0];
+     if (feature && featured) {
+-      const meta = featured.store_metadata || {}, assets = featured.asset_references || {}, hero = assetUrl(assets.hero || assets.cover || assets.icon);
+-      feature.style.setProperty("--store-feature-art", hero ? `url('${hero}')` : "none");
+-      feature.innerHTML = `<div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>${escapeHtml(featured.title || "Untitled")}</h2><p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p><div class="store-feature__meta"><span>${escapeHtml(meta.genre || featured.project_type || "Game")}</span><span>${escapeHtml(featured.runtime || "PARA")}</span><button type="button" data-action="open-store-product" data-store-id="${escapeHtml(featured.id)}">View game</button></div></div>`;
++      const meta = featured.store_metadata || {};
++      featureSlidesCleanup();
++      feature.style.setProperty("--store-feature-art", "none");
++      feature.innerHTML = `${storeSlideshowMarkup(featured, "store-feature__slideshow")}<div class="store-feature__shade"></div><div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>${escapeHtml(featured.title || "Untitled")}</h2><p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p><div class="store-feature__meta"><span>${escapeHtml(meta.genre || featured.project_type || "Game")}</span><span>${escapeHtml(featured.runtime || "PARA")}</span><button type="button" data-action="open-store-product" data-store-id="${escapeHtml(featured.id)}">View game</button></div></div>`;
++      featureSlidesCleanup = activateStoreSlideshows(feature);
+     }
+     syncFilterA11y();
+     saveView();
+@@ -330,7 +337,7 @@ export function activateParaStore() {
+     if (!alive) return;
+     host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`;
+   });
+-  return () => { alive = false; saveView(); listeners.forEach(fn=>fn()); };
++  return () => { alive = false; featureSlidesCleanup(); saveView(); listeners.forEach(fn=>fn()); };
+ }
+ 
+ 
+@@ -349,6 +356,47 @@ function assetUrl(path) {
+   return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
+ }
+ 
++function storeArtworkPaths(item = {}) {
++  const assets = item.asset_references || {};
++  const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
++  return [...new Set([assets.hero, assets.cover, ...shots, assets.icon].filter(Boolean))];
++}
++
++function storeArtworkUrls(item = {}) {
++  return storeArtworkPaths(item).map(assetUrl).filter(Boolean);
++}
++
++function cacheStoreArtwork(item = {}) {
++  if (!item?.id) return [];
++  const urls = storeArtworkUrls(item);
++  try {
++    sessionStorage.setItem(`para.store.artwork.${item.id}`, JSON.stringify({ title: item.title || "PARA Game", urls }));
++  } catch { /* launch art caching is optional */ }
++  return urls;
++}
++
++function storeSlideshowMarkup(item, className = "store-art-slideshow") {
++  const urls = cacheStoreArtwork(item);
++  if (!urls.length) return `<div class="${className} is-empty"><img src="/assets/para-logo.png" alt=""></div>`;
++  return `<div class="${className}" data-store-slideshow>${urls.map((url, index) => `<img src="${url}" alt="" class="${index === 0 ? "is-active" : ""}" data-store-slide="${index}">`).join("")}</div>`;
++}
++
++function activateStoreSlideshows(root = document) {
++  const cleanups = [];
++  root.querySelectorAll?.("[data-store-slideshow]").forEach((slideshow) => {
++    const slides = [...slideshow.querySelectorAll("[data-store-slide]")];
++    if (slides.length < 2) return;
++    let index = Math.max(0, slides.findIndex((slide) => slide.classList.contains("is-active")));
++    const timer = window.setInterval(() => {
++      slides[index]?.classList.remove("is-active");
++      index = (index + 1) % slides.length;
++      slides[index]?.classList.add("is-active");
++    }, 3600);
++    cleanups.push(() => window.clearInterval(timer));
++  });
++  return () => cleanups.forEach((cleanup) => cleanup());
++}
++
+ const ESRB_ART = {
+   RP: "/assets/esrb-rp.svg", E: "/assets/esrb-e.svg", "E10+": "/assets/esrb-e10.svg",
+   T: "/assets/esrb-t.svg", M: "/assets/esrb-m.svg", AO: "/assets/esrb-ao.svg", "RP-LM17": "/assets/esrb-rp-lm17.svg",
+@@ -378,6 +426,7 @@ export function activateStoreProduct() {
+   if (!host) return () => {};
+   const id = sessionStorage.getItem("para.store.product") || "";
+   let alive = true;
++  let slidesCleanup = () => {};
+   if (!id) {
+     host.innerHTML = `<div class="library-empty"><span>!</span><h2>No product selected</h2><button class="action-button" data-route="parastore">Back to ParaStore</button></div>`;
+     return () => {};
+@@ -386,9 +435,9 @@ export function activateStoreProduct() {
+     if (!alive) return;
+     const meta = item.store_metadata || {};
+     const assets = item.asset_references || {};
+-    const hero = assetUrl(assets.hero || assets.cover || assets.icon);
+-    const cover = assetUrl(assets.cover || assets.icon || assets.hero);
+     const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
++    const productArt = cacheStoreArtwork(item);
++    const cover = assetUrl(assets.cover || assets.icon || assets.hero || shots[0]) || productArt[0] || "";
+     const commerce = commerceFor(item, meta);
+     const price = priceLabel(commerce);
+     const rating = ratingFor(item, meta);
+@@ -400,11 +449,12 @@ export function activateStoreProduct() {
+     const genres = [meta.genre, ...(Array.isArray(meta.genres) ? meta.genres : [])].filter(Boolean);
+     sessionStorage.setItem("para.store.screenshots", JSON.stringify(shots));
+     host.innerHTML = `
+-      <section class="store-product-hero" ${hero ? `style="--product-hero:url('${hero}')"` : ""}>
++      <section class="store-product-hero">
++        ${storeSlideshowMarkup(item, "store-product-hero__slideshow")}
+         <div class="store-product-hero__shade"></div>
+         <button class="store-product-back" data-action="store-product-back">← Back</button>
+         <div class="store-product-hero__content">
+-          <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span>${escapeHtml((item.title || "P")[0])}</span>`}</div>
++          <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span class="store-product-cover__fallback"><img src="/assets/para-logo.png" alt=""></span>`}</div>
+           <div class="store-product-copy">
+             <span>${escapeHtml(genres[0] || item.project_type || "GAME")}</span>
+             <h1>${escapeHtml(item.title || "Untitled")}</h1>
+@@ -425,11 +475,13 @@ export function activateStoreProduct() {
+       </section>
+       ${shots.length ? `<section class="store-product-gallery store-product-gallery--prominent"><div class="store-product-gallery__heading"><div><span>MEDIA</span><h2>Screenshots</h2></div><small>${shots.length} image${shots.length === 1 ? "" : "s"} • A to enlarge</small></div><div class="store-product-gallery__track">${shots.map((shot, index) => `<button type="button" class="store-product-shot" data-action="open-store-screenshot" data-shot-index="${index}" aria-label="Open screenshot ${index + 1}"><img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot ${index + 1}"><span>${index + 1} / ${shots.length}</span></button>`).join("")}</div></section>` : ""}
+     `;
++    slidesCleanup();
++    slidesCleanup = activateStoreSlideshows(host);
+   }).catch((error) => {
+     if (!alive) return;
+     host.innerHTML = `<div class="library-empty"><span>!</span><h2>Product unavailable</h2><p>${escapeHtml(error.message || "Could not load product")}</p></div>`;
+   });
+-  return () => { alive = false; };
++  return () => { alive = false; slidesCleanup(); };
+ }
+ 
+ export function storeCartScreen() {
+@@ -463,7 +515,7 @@ export function activateStoreCart() {
+     const total = items.reduce((sum, item) => sum + commerceFor(item, item.store_metadata || {}).amount, 0);
+     const currency = commerceFor(items[0], items[0].store_metadata || {}).currency || "USD";
+     const totalLabel = priceLabel({ model: "PAID", amount: total, currency });
+-    host.innerHTML = `<div class="store-cart-head"><div><span>PARASTORE CART</span><h1>${items.length} ${items.length === 1 ? "item" : "items"}</h1><p>Prices are refreshed from PARA before checkout.</p></div><button type="button" data-route="parastore">Continue shopping</button></div><div class="store-cart-layout"><div class="store-cart-items">${items.map((item, index) => { const meta=item.store_metadata||{}; const assets=item.asset_references||{}; const commerce=commerceFor(item,meta); const art=assetUrl(assets.cover||assets.icon||assets.hero); return `<article class="store-cart-item"><button class="store-cart-item__art" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" ${index===0?'data-autofocus="true"':''}>${art?`<img src="${art}" alt="">`:`<span>${escapeHtml((item.title||"P")[0])}</span>`}</button><div class="store-cart-item__copy"><span>${escapeHtml(meta.genre||item.project_type||"GAME")}</span><h2>${escapeHtml(item.title||"Untitled")}</h2><small>${escapeHtml(item.runtime||"PARA")}</small><button type="button" data-action="remove-store-cart" data-store-id="${escapeHtml(item.id)}">Remove</button></div><strong>${escapeHtml(priceLabel(commerce))}</strong></article>`; }).join("")}</div><aside class="store-cart-summary"><span>ORDER SUMMARY</span><div><b>Subtotal</b><strong>${escapeHtml(totalLabel)}</strong></div><div><b>Tax</b><small>Calculated at checkout</small></div><hr><div class="store-cart-total"><b>Total before tax</b><strong>${escapeHtml(totalLabel)}</strong></div><button class="action-button" data-action="checkout-store-cart">Continue to secure checkout</button><p>Final prices and eligibility are verified by PARA Commerce on the server.</p></aside></div>`;
++    host.innerHTML = `<div class="store-cart-head"><div><span>PARASTORE CART</span><h1>${items.length} ${items.length === 1 ? "item" : "items"}</h1><p>Prices are refreshed from PARA before checkout.</p></div><button type="button" data-route="parastore">Continue shopping</button></div><div class="store-cart-layout"><div class="store-cart-items">${items.map((item, index) => { const meta=item.store_metadata||{}; const assets=item.asset_references||{}; const commerce=commerceFor(item,meta); const art=storeArtworkUrls(item)[0]||""; cacheStoreArtwork(item); return `<article class="store-cart-item"><button class="store-cart-item__art" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" ${index===0?'data-autofocus="true"':''}>${art?`<img src="${art}" alt="">`:`<span class="store-cart-item__fallback"><img src="/assets/para-logo.png" alt=""></span>`}</button><div class="store-cart-item__copy"><span>${escapeHtml(meta.genre||item.project_type||"GAME")}</span><h2>${escapeHtml(item.title||"Untitled")}</h2><small>${escapeHtml(item.runtime||"PARA")}</small><button type="button" data-action="remove-store-cart" data-store-id="${escapeHtml(item.id)}">Remove</button></div><strong>${escapeHtml(priceLabel(commerce))}</strong></article>`; }).join("")}</div><aside class="store-cart-summary"><span>ORDER SUMMARY</span><div><b>Subtotal</b><strong>${escapeHtml(totalLabel)}</strong></div><div><b>Tax</b><small>Calculated at checkout</small></div><hr><div class="store-cart-total"><b>Total before tax</b><strong>${escapeHtml(totalLabel)}</strong></div><button class="action-button" data-action="checkout-store-cart">Continue to secure checkout</button><p>Final prices and eligibility are verified by PARA Commerce on the server.</p></aside></div>`;
+   });
+   return () => { alive = false; };
+ }
+@@ -492,102 +544,6 @@ export function activateStoreGame() {
+   return () => {};
+ }
+ 
+-function messageStore() {
+-  const profile = getState().activeProfile || "P1";
+-  let all = {};
+-  try { all = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "{}"); } catch { all = {}; }
+-  if (!Array.isArray(all[profile]) || !all[profile].length) {
+-    all[profile] = [{ id: "para-friends", title: "PARA Friends", initial: "P", messages: [{ id: `m-${Date.now()}`, sender: "PARA", text: "Welcome to Messages. This conversation is saved to your PARA profile on this console.", at: Date.now() }] }];
+-    try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(all)); } catch {}
+-  }
+-  return { profile, all, threads: all[profile] };
+-}
+-
+-function saveMessageStore(profile, all, threads) {
+-  all[profile] = threads;
+-  localStorage.setItem(MESSAGES_KEY, JSON.stringify(all));
+-  window.dispatchEvent(new CustomEvent("para-messages-change"));
+-}
+-
+-function renderMessageThreads(threads, activeId) {
+-  return threads.map((thread, index) => {
+-    const last = thread.messages?.[thread.messages.length - 1];
+-    const time = last?.at ? new Date(last.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+-    return `<button type="button" class="message-thread ${thread.id === activeId ? "is-active" : ""}" data-message-thread="${escapeHtml(thread.id)}" ${index === 0 ? "data-autofocus='true'" : ""}><i>${escapeHtml(thread.initial || (thread.title || "?")[0])}</i><span><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${escapeHtml(last?.text || "No messages yet")}</small></span><time>${escapeHtml(time)}</time></button>`;
+-  }).join("");
+-}
+-
+-function renderMessageConversation(thread) {
+-  if (!thread) return `<section class="message-conversation"><div class="library-empty"><span>…</span><h2>Choose a conversation</h2></div></section>`;
+-  const bubbles = (thread.messages || []).map((message) => `<div class="message-bubble ${message.sender === "You" ? "is-self" : ""}"><span>${escapeHtml(message.sender || "PARA")}</span><p>${escapeHtml(message.text || "")}</p></div>`).join("");
+-  return `<section class="message-conversation" data-message-conversation><header><div><strong>${escapeHtml(thread.title)}</strong><small>Saved to this PARA profile</small></div></header><div class="message-conversation__body" data-message-body>${bubbles || `<div class="library-empty"><span>…</span><h2>No messages yet</h2></div>`}</div><form class="message-composer" data-message-form><button type="button" data-message-attach aria-label="Attach a file">＋</button><input type="file" data-message-file hidden><input placeholder="Message" aria-label="Message" data-message-input autocomplete="off"/><button type="submit">Send</button></form></section>`;
+-}
+-
+-export function messagesScreen() {
+-  const { threads } = messageStore();
+-  const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id || "";
+-  const active = threads.find((thread) => thread.id === activeId) || threads[0];
+-  return page({
+-    title: "Messages",
+-    description: "Conversations saved to your PARA profile.",
+-    eyebrow: "Community",
+-    className: "messages-page",
+-    body: `<div class="messages-shell" data-messages-shell><aside class="messages-list"><div class="messages-list__head"><h2>Chats</h2><button type="button" aria-label="New message" data-message-new>＋</button></div><div data-message-thread-list>${renderMessageThreads(threads, active?.id || "")}</div></aside>${renderMessageConversation(active)}</div>`,
+-  });
+-}
+-
+-export function activateMessages({ focus } = {}) {
+-  const shell = document.querySelector("[data-messages-shell]");
+-  if (!shell) return () => {};
+-  const render = (requestedId = "") => {
+-    const { threads } = messageStore();
+-    const activeId = requestedId || sessionStorage.getItem("para.messages.active") || threads[0]?.id || "";
+-    const active = threads.find((thread) => thread.id === activeId) || threads[0];
+-    if (active) sessionStorage.setItem("para.messages.active", active.id);
+-    const list = shell.querySelector("[data-message-thread-list]");
+-    if (list) list.innerHTML = renderMessageThreads(threads, active?.id || "");
+-    const conversation = shell.querySelector("[data-message-conversation]");
+-    const fresh = document.createElement("div"); fresh.innerHTML = renderMessageConversation(active);
+-    const replacement = fresh.firstElementChild;
+-    if (conversation && replacement) conversation.replaceWith(replacement);
+-    else if (replacement) shell.append(replacement);
+-    requestAnimationFrame(() => { const body = shell.querySelector("[data-message-body]"); if (body) body.scrollTop = body.scrollHeight; });
+-  };
+-  const onClick = (event) => {
+-    const threadButton = event.target.closest("[data-message-thread]");
+-    if (threadButton) { render(threadButton.dataset.messageThread); return; }
+-    if (event.target.closest("[data-message-new]")) {
+-      const { profile, all, threads } = messageStore();
+-      const id = `local-${Date.now()}`;
+-      const next = [...threads, { id, title: `Conversation ${threads.length + 1}`, initial: "+", messages: [] }];
+-      saveMessageStore(profile, all, next); sessionStorage.setItem("para.messages.active", id); render(id); shell.querySelector("[data-message-input]")?.focus(); return;
+-    }
+-    if (event.target.closest("[data-message-attach]")) shell.querySelector("[data-message-file]")?.click();
+-  };
+-  const onSubmit = (event) => {
+-    if (!event.target.matches("[data-message-form]")) return;
+-    event.preventDefault();
+-    const input = event.target.querySelector("[data-message-input]");
+-    const text = String(input?.value || "").trim(); if (!text) return;
+-    const { profile, all, threads } = messageStore();
+-    const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id;
+-    const next = threads.map((thread) => thread.id === activeId ? { ...thread, messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }] } : thread);
+-    saveMessageStore(profile, all, next); if (input) input.value = ""; render(activeId);
+-  };
+-  const onChange = (event) => {
+-    if (!event.target.matches("[data-message-file]") || !event.target.files?.[0]) return;
+-    const file = event.target.files[0];
+-    const { profile, all, threads } = messageStore();
+-    const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id;
+-    const text = `Attachment selected: ${file.name}`;
+-    const next = threads.map((thread) => thread.id === activeId ? { ...thread, messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }] } : thread);
+-    saveMessageStore(profile, all, next); render(activeId);
+-  };
+-  shell.addEventListener("click", onClick); shell.addEventListener("submit", onSubmit); shell.addEventListener("change", onChange);
+-  render(); focus?.focusFirst?.();
+-  return () => { shell.removeEventListener("click", onClick); shell.removeEventListener("submit", onSubmit); shell.removeEventListener("change", onChange); };
+-}
+-
+ export function activateDemoLibrary({ rerender }) {
+   let alive = true;
+   const timer = window.setInterval(() => {
+diff --git a/apps/para-home/src/screens/files.js b/apps/para-home/src/screens/files.js
+index dcb527c..d82d46e 100644
+--- a/apps/para-home/src/screens/files.js
++++ b/apps/para-home/src/screens/files.js
+@@ -1,5 +1,7 @@
+ import { paraApi, escapeHtml, formatBytes } from "../services/para-api.js";
+ import { brand, hints } from "../ui/components.js";
++import { getProfileRuntime } from "../state.js";
++import { listCaptures } from "../services/capture-service.js";
+ 
+ const VIEW_MODES = ["details", "list", "large", "small"];
+ const SORT_MODES = ["name", "modified", "type", "size"];
+@@ -200,6 +202,26 @@ export function activateFiles({ focus, initialLocation = "home" }) {
+     addressInput.value = model.location?.kind === "folder" ? model.location.path : model.location?.display_path || "";
+   }
+ 
++  async function renderWebEditionHome() {
++    const runtime = getProfileRuntime();
++    let captures = [];
++    try { captures = await listCaptures(); } catch { captures = []; }
++    const downloads = Array.isArray(runtime.downloads) ? runtime.downloads : [];
++    const saveData = Array.isArray(runtime.saveData) ? runtime.saveData : [];
++    model.location = { id: "para-web", path: "para:", display_path: "PARA Files", name: "PARA Files", parent: null, kind: "virtual", writable: false };
++    model.items = [];
++    model.places = [];
++    model.capabilities = { open: true, write: false, trash: false, volumes: false };
++    root.querySelector("[data-files-location-name]").textContent = "PARA Files";
++    root.querySelector("[data-files-location-count]").textContent = "Web Edition collections";
++    placesNode.innerHTML = `<button type="button" class="files-place is-active" data-route="files"><span class="files-place__icon">⌂</span><span>PARA Files</span></button><button type="button" class="files-place" data-route="media-gallery"><span class="files-place__icon">▣</span><span>Media Gallery</span></button><button type="button" class="files-place" data-route="downloads"><span class="files-place__icon">↓</span><span>Downloads</span></button><button type="button" class="files-place" data-route="saved-data"><span class="files-place__icon">◇</span><span>Saved Data</span></button>`;
++    columnsNode.hidden = true;
++    contentNode.innerHTML = `<section class="files-web-home"><header><span>WEB EDITION</span><h2>Your PARA collections are here.</h2><p>The browser build cannot silently browse the whole PC, so Files surfaces PARA-managed content instead of showing an empty server folder.</p></header><div class="files-web-grid"><button type="button" data-route="media-gallery" data-autofocus="true"><span>▣</span><strong>Media Gallery</strong><small>${captures.length} ${captures.length === 1 ? "capture" : "captures"}</small></button><button type="button" data-route="downloads"><span>↓</span><strong>Downloads</strong><small>${downloads.length} ${downloads.length === 1 ? "item" : "items"}</small></button><button type="button" data-route="saved-data"><span>◇</span><strong>Saved Data</strong><small>${saveData.length} ${saveData.length === 1 ? "record" : "records"}</small></button><button type="button" data-route="parastore"><span>P</span><strong>ParaStore</strong><small>Games and app content</small></button></div></section>`;
++    setStatus(`${captures.length + downloads.length + saveData.length} PARA-managed items`);
++    updateToolbar();
++    focus.focusFirst();
++  }
++
+   async function load(location, { record = true, focusContent = false } = {}) {
+     closeContext();
+     closeDialog(false);
+@@ -229,14 +251,7 @@ export function activateFiles({ focus, initialLocation = "home" }) {
+       }
+     } catch {
+       if (!alive) return;
+-      model.items = [];
+-      model.places = [];
+-      root.querySelector("[data-files-location-name]").textContent = "Files";
+-      root.querySelector("[data-files-location-count]").textContent = "";
+-      placesNode.innerHTML = "";
+-      contentNode.innerHTML = `<div class="files-empty"><span>▱</span><h2>Files aren’t available in this session</h2><button type="button" class="action-button" data-route="home" data-autofocus="true">Return Home</button></div>`;
+-      setStatus("Files unavailable");
+-      focus.focusFirst();
++      await renderWebEditionHome();
+     }
+   }
+ 
+diff --git a/apps/para-home/src/screens/friends.js b/apps/para-home/src/screens/friends.js
+new file mode 100644
+index 0000000..6ac2678
+--- /dev/null
++++ b/apps/para-home/src/screens/friends.js
+@@ -0,0 +1,191 @@
++import { content } from "../content-data.js";
++import { getState } from "../state.js";
++import { escapeHtml } from "../services/para-api.js";
++import { page } from "../ui/components.js";
++
++const FRIENDS_CHAT_KEY = "para.messages.v1";
++const ACTIVE_THREAD_KEY = "para.friends.activeThread";
++
++function chatStore() {
++  const profile = getState().activeProfile || "P1";
++  let all = {};
++  try { all = JSON.parse(localStorage.getItem(FRIENDS_CHAT_KEY) || "{}"); } catch { all = {}; }
++  if (!Array.isArray(all[profile]) || !all[profile].length) {
++    all[profile] = [{
++      id: "para-friends",
++      title: "PARA Friends",
++      initial: "P",
++      status: "System",
++      messages: [{
++        id: `m-${Date.now()}`,
++        sender: "PARA",
++        text: "Friends is ready. Local conversations work in this web edition; online PARA chat and connected network chat will plug into this app later.",
++        at: Date.now(),
++      }],
++    }];
++    try { localStorage.setItem(FRIENDS_CHAT_KEY, JSON.stringify(all)); } catch { /* local preview can still render */ }
++  }
++  return { profile, all, threads: all[profile] };
++}
++
++function saveChatStore(profile, all, threads) {
++  all[profile] = threads;
++  try { localStorage.setItem(FRIENDS_CHAT_KEY, JSON.stringify(all)); } catch { /* keep current DOM state */ }
++  window.dispatchEvent(new CustomEvent("para-friends-change"));
++}
++
++function threadForFriend(name) {
++  const { profile, all, threads } = chatStore();
++  const existing = threads.find((thread) => thread.friendName === name || thread.title === name);
++  if (existing) return existing.id;
++  const id = `friend-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
++  const friend = content.friends.find((item) => item.title === name);
++  const next = [...threads, {
++    id,
++    title: name,
++    friendName: name,
++    initial: (name || "?").slice(0, 1).toUpperCase(),
++    status: friend?.end || "Offline",
++    messages: [],
++  }];
++  saveChatStore(profile, all, next);
++  return id;
++}
++
++function friendMarkup(friend, index) {
++  const status = String(friend.end || "Offline");
++  const state = status.toLowerCase().includes("online") || status.toLowerCase().includes("join") ? "online" : "offline";
++  return `<button type="button" class="friends-person" data-friend-name="${escapeHtml(friend.title)}" ${index === 0 ? "data-autofocus='true'" : ""}>
++    <span class="friends-person__avatar">${escapeHtml(friend.icon || friend.title?.[0] || "?")}<i data-presence="${state}"></i></span>
++    <span class="friends-person__copy"><strong>${escapeHtml(friend.title)}</strong><small>${escapeHtml(friend.meta || status)}</small></span>
++    <span class="friends-person__status">${escapeHtml(status)}</span>
++  </button>`;
++}
++
++function threadMarkup(thread, activeId, index) {
++  const last = thread.messages?.[thread.messages.length - 1];
++  const time = last?.at ? new Date(last.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
++  return `<button type="button" class="friends-thread ${thread.id === activeId ? "is-active" : ""}" data-friends-thread="${escapeHtml(thread.id)}" ${index === 0 ? "data-thread-autofocus='true'" : ""}>
++    <span>${escapeHtml(thread.initial || thread.title?.[0] || "?")}</span>
++    <i><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${escapeHtml(last?.text || "No messages yet")}</small></i>
++    <time>${escapeHtml(time)}</time>
++  </button>`;
++}
++
++function conversationMarkup(thread) {
++  if (!thread) return `<section class="friends-chat"><div class="friends-chat-empty"><span>◌</span><h2>Pick a friend</h2><p>Select someone or a recent conversation.</p></div></section>`;
++  const bubbles = (thread.messages || []).map((message) => `<div class="friends-message ${message.sender === "You" ? "is-self" : ""}"><span>${escapeHtml(message.sender || thread.title || "PARA")}</span><p>${escapeHtml(message.text || "")}</p></div>`).join("");
++  const sub = thread.status === "System" ? "PARA system conversation" : `${escapeHtml(thread.status || "PARA friend")} · Local web preview`;
++  return `<section class="friends-chat" data-friends-chat>
++    <header><span class="friends-chat__avatar">${escapeHtml(thread.initial || thread.title?.[0] || "?")}</span><div><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${sub}</small></div></header>
++    <div class="friends-chat__body" data-friends-chat-body>${bubbles || `<div class="friends-chat-empty friends-chat-empty--small"><span>✦</span><h2>Start the conversation</h2><p>Messages sent here are saved to this PARA profile on this browser.</p></div>`}</div>
++    <form class="friends-composer" data-friends-message-form><input aria-label="Message" autocomplete="off" placeholder="Message ${escapeHtml(thread.title || "friend")}" data-friends-message-input><button type="submit">Send</button></form>
++  </section>`;
++}
++
++function providerMarkup() {
++  const providers = [
++    ["PARA", "Local preview", "ready"],
++    ["Steam", "Chat bridge planned", "planned"],
++    ["PlayStation", "Chat bridge planned", "planned"],
++    ["Discord", "Chat bridge planned", "planned"],
++    ["Xbox", "Chat bridge planned", "planned"],
++    ["Nintendo", "Parties planned", "planned"],
++  ];
++  return `<section class="friends-networks" aria-label="Connected chat networks"><div><span>NETWORKS</span><strong>One Friends app, multiple networks.</strong></div><div>${providers.map(([name, detail, state]) => `<span class="friends-network friends-network--${state}"><b>${escapeHtml(name)}</b><small>${escapeHtml(detail)}</small></span>`).join("")}</div></section>`;
++}
++
++export function friendsScreen() {
++  const { threads } = chatStore();
++  const activeId = sessionStorage.getItem(ACTIVE_THREAD_KEY) || threads[0]?.id || "";
++  const active = threads.find((thread) => thread.id === activeId) || threads[0];
++  return page({
++    title: "Friends",
++    description: "Friends, conversations, presence, and future connected gaming chat in one place.",
++    eyebrow: "System app",
++    className: "friends-page",
++    body: `${providerMarkup()}<div class="friends-app" data-friends-app>
++      <aside class="friends-people"><header><span>PARA FRIENDS</span><h2>Friends</h2><small>${content.friends.length} people</small></header><div data-friends-people>${content.friends.map(friendMarkup).join("")}</div></aside>
++      <aside class="friends-conversations"><header><span>RECENT</span><h2>Chats</h2><button type="button" data-friends-new aria-label="New local conversation">＋</button></header><div data-friends-thread-list>${threads.map((thread, index) => threadMarkup(thread, active?.id || "", index)).join("")}</div></aside>
++      ${conversationMarkup(active)}
++    </div>`,
++  });
++}
++
++export function activateFriends({ focus } = {}) {
++  const shell = document.querySelector("[data-friends-app]");
++  if (!shell) return () => {};
++
++  const render = (requestedId = "") => {
++    const { threads } = chatStore();
++    const activeId = requestedId || sessionStorage.getItem(ACTIVE_THREAD_KEY) || threads[0]?.id || "";
++    const active = threads.find((thread) => thread.id === activeId) || threads[0];
++    if (active) sessionStorage.setItem(ACTIVE_THREAD_KEY, active.id);
++    const list = shell.querySelector("[data-friends-thread-list]");
++    if (list) list.innerHTML = threads.map((thread, index) => threadMarkup(thread, active?.id || "", index)).join("");
++    const current = shell.querySelector("[data-friends-chat], .friends-chat");
++    const holder = document.createElement("div");
++    holder.innerHTML = conversationMarkup(active);
++    const replacement = holder.firstElementChild;
++    if (current && replacement) current.replaceWith(replacement);
++    requestAnimationFrame(() => {
++      const body = shell.querySelector("[data-friends-chat-body]");
++      if (body) body.scrollTop = body.scrollHeight;
++    });
++  };
++
++  const onClick = (event) => {
++    const friend = event.target.closest("[data-friend-name]");
++    if (friend) {
++      const id = threadForFriend(friend.dataset.friendName || "Friend");
++      sessionStorage.setItem(ACTIVE_THREAD_KEY, id);
++      render(id);
++      shell.querySelector("[data-friends-message-input]")?.focus();
++      return;
++    }
++    const thread = event.target.closest("[data-friends-thread]");
++    if (thread) {
++      sessionStorage.setItem(ACTIVE_THREAD_KEY, thread.dataset.friendsThread || "");
++      render(thread.dataset.friendsThread || "");
++      return;
++    }
++    if (event.target.closest("[data-friends-new]")) {
++      const { profile, all, threads } = chatStore();
++      const id = `local-${Date.now()}`;
++      const next = [...threads, { id, title: `Local Chat ${threads.length + 1}`, initial: "+", status: "Local", messages: [] }];
++      saveChatStore(profile, all, next);
++      sessionStorage.setItem(ACTIVE_THREAD_KEY, id);
++      render(id);
++      shell.querySelector("[data-friends-message-input]")?.focus();
++    }
++  };
++
++  const onSubmit = (event) => {
++    if (!event.target.matches("[data-friends-message-form]")) return;
++    event.preventDefault();
++    const input = event.target.querySelector("[data-friends-message-input]");
++    const text = String(input?.value || "").trim();
++    if (!text) return;
++    const { profile, all, threads } = chatStore();
++    const activeId = sessionStorage.getItem(ACTIVE_THREAD_KEY) || threads[0]?.id || "";
++    const next = threads.map((thread) => thread.id === activeId ? {
++      ...thread,
++      messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }],
++    } : thread);
++    saveChatStore(profile, all, next);
++    if (input) input.value = "";
++    render(activeId);
++  };
++
++  shell.addEventListener("click", onClick);
++  shell.addEventListener("submit", onSubmit);
++  requestAnimationFrame(() => {
++    const body = shell.querySelector("[data-friends-chat-body]");
++    if (body) body.scrollTop = body.scrollHeight;
++  });
++  if (focus && !focus.current) focus.focusFirst();
++  return () => {
++    shell.removeEventListener("click", onClick);
++    shell.removeEventListener("submit", onSubmit);
++  };
++}
+diff --git a/apps/para-home/src/screens/home.js b/apps/para-home/src/screens/home.js
+index 884aa0d..676a4d6 100644
+--- a/apps/para-home/src/screens/home.js
++++ b/apps/para-home/src/screens/home.js
+@@ -110,9 +110,10 @@ function exploreHubTile({ title, subtitle, route, mark, focusId, icon = "" }) {
+ function storeShelfCard(item, focusId) {
+   const meta = item.store_metadata || {};
+   const assets = item.asset_references || {};
+-  const art = storeAssetUrl(assets.cover || assets.icon || assets.hero);
++  const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
++  const art = storeAssetUrl(assets.cover || assets.hero || shots[0] || assets.icon);
+   const genre = meta.genre || item.project_type || "GAME";
+-  return `<button class="home-store-shelf-card" type="button" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" data-focus-id="${escapeHtml(focusId)}">${art ? `<img src="${art}" alt="" />` : `<span class="home-store-shelf-card__fallback">${escapeHtml((item.title || "P").slice(0,1).toUpperCase())}</span>`}<span class="home-store-shelf-card__shade"></span><span class="home-store-shelf-card__copy"><small>${escapeHtml(genre)}</small><strong>${escapeHtml(item.title || "Untitled")}</strong></span></button>`;
++  return `<button class="home-store-shelf-card" type="button" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" data-focus-id="${escapeHtml(focusId)}">${art ? `<img src="${art}" alt="" />` : `<span class="home-store-shelf-card__fallback"><img src="/assets/para-logo.png" alt="" /></span>`}<span class="home-store-shelf-card__shade"></span><span class="home-store-shelf-card__copy"><small>${escapeHtml(genre)}</small><strong>${escapeHtml(item.title || "Untitled")}</strong></span></button>`;
+ }
+ 
+ function storeShelf(title, items, shelfId) {
+@@ -126,7 +127,7 @@ function communityTile(title, subtitle, route, mark, focusId) {
+ 
+ function contextMarkup(section, model) {
+   if (section === "continue") return continueMarkup(model.recent);
+-  if (section === "community") return `<div class="home-community"><div class="home-community__head"><span>Community</span><h2>Stay connected.</h2></div><div class="home-community-grid">${communityTile("Messages", "Chat with friends", "messages", "✉", "home-route:messages")}${communityTile("Notifications", "Invites and activity", "notifications", "●", "home-route:notifications")}${communityTile("Profile", "Presence and account", "account", "◉", "home-route:account")}${communityTile("PARA Updates", "News, patches, and Lab notes", "community", "◎", "home-route:community")}</div></div>`;
++  if (section === "community") return `<div class="home-community"><div class="home-community__head"><span>Community</span><h2>Stay connected.</h2></div><div class="home-community-grid">${communityTile("Friends", "Friends, chats, and parties", "friends", "✉", "home-route:friends")}${communityTile("Notifications", "Invites and activity", "notifications", "●", "home-route:notifications")}${communityTile("Profile", "Presence and account", "account", "◉", "home-route:account")}${communityTile("PARA Updates", "News, patches, and Lab notes", "community", "◎", "home-route:community")}</div></div>`;
+   if (section === "explore") {
+     const catalog = model.catalog || [];
+     if (!model.catalogLoaded) {
+@@ -170,7 +171,7 @@ function contextMarkup(section, model) {
+ function primaryFocusId(section, model) {
+   if (section === "continue") return model.recent.length ? `continue:item:${model.recent[0].id}` : "continue:explore";
+   if (section === "explore") return "home-route:games";
+-  if (section === "community") return "home-route:messages";
++  if (section === "community") return "home-route:friends";
+   if (section === "create") return model.runtime.creator.note || model.runtime.creator.drawing ? "create:recent-project" : "create:playground";
+   return "";
+ }
+@@ -181,7 +182,7 @@ export function homeScreen() {
+   const activeDownloads = runtime.downloads.filter((item) => item.status === "downloading").length;
+   const unreadNotifications = runtime.notifications.filter((note) => !note.readAt).length;
+   const selected = sections.some(({ id }) => id === rememberedHomeSection) ? rememberedHomeSection : "continue";
+-  return `<section class="home-ui" data-home-section="${selected}" data-focus-scope="home" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header" data-focus-zone="home-header" data-nav-down-zone="home-nav"><button class="home-wordmark" type="button" data-action="open-control-center" data-focus-id="home-header:para" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-header__activity" aria-label="System activity"><span><i aria-hidden="true"></i>${activeDownloads ? `${activeDownloads} download${activeDownloads === 1 ? "" : "s"}` : "Downloads clear"}</span><span>${unreadNotifications ? `${unreadNotifications} notification${unreadNotifications === 1 ? "" : "s"}` : "No new alerts"}</span></div><div class="home-status"><button class="home-settings home-chat" type="button" data-route="messages" data-focus-id="home-header:messages" aria-label="Open Messages"><span aria-hidden="true">✉</span><strong>Chat</strong></button><button class="home-settings" type="button" data-route="settings" data-focus-id="home-header:settings" aria-label="Open Settings"><span aria-hidden="true">⚙</span><strong>Settings</strong></button><time class="home-status__clock" data-clock>--:--</time>${accountQuickMenu(profile, { home: true })}</div></header><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home" data-focus-zone="home-nav" data-nav-up-zone="home-header" data-nav-down-zone="home-content">${mainNavigation(selected)}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-${selected}" aria-live="polite" data-focus-zone="home-content" data-focus-scope="home:${selected}" data-nav-up="home-nav:${selected}">${continueEmptyState()}</section></main><footer class="home-control-legend control-legend" aria-hidden="true"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span><span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span><span><b class="prompt-key" data-prompt="shoulderPrevious">PgUp</b><b class="prompt-key" data-prompt="shoulderNext">PgDn</b>Sections</span></footer></section>`;
++  return `<section class="home-ui" data-home-section="${selected}" data-focus-scope="home" aria-label="PARA Home"><div class="home-backdrop profile-wallpaper" aria-hidden="true"><span class="home-backdrop__veil"></span><span class="home-backdrop__light"></span><span class="home-backdrop__particles"></span></div><header class="home-header" data-focus-zone="home-header" data-nav-down-zone="home-nav"><button class="home-wordmark" type="button" data-action="open-control-center" data-focus-id="home-header:para" aria-label="Open PARA Control Center">${paraLogo("home-wordmark__logo")}<strong>PARA</strong></button><div class="home-header__activity" aria-label="System activity"><span><i aria-hidden="true"></i>${activeDownloads ? `${activeDownloads} download${activeDownloads === 1 ? "" : "s"}` : "Downloads clear"}</span><span>${unreadNotifications ? `${unreadNotifications} notification${unreadNotifications === 1 ? "" : "s"}` : "No new alerts"}</span></div><div class="home-status"><button class="home-settings home-chat" type="button" data-route="friends" data-focus-id="home-header:friends" aria-label="Open Friends"><span aria-hidden="true">✉</span><strong>Friends</strong></button><button class="home-settings" type="button" data-route="settings" data-focus-id="home-header:settings" aria-label="Open Settings"><span aria-hidden="true">⚙</span><strong>Settings</strong></button><time class="home-status__clock" data-clock>--:--</time>${accountQuickMenu(profile, { home: true })}</div></header><main class="home-dock"><nav class="home-sections" role="tablist" aria-label="PARA Home" data-focus-zone="home-nav" data-nav-up-zone="home-header" data-nav-down-zone="home-content">${mainNavigation(selected)}</nav><section class="home-context" id="home-context" role="tabpanel" aria-labelledby="home-tab-${selected}" aria-live="polite" data-focus-zone="home-content" data-focus-scope="home:${selected}" data-nav-up="home-nav:${selected}">${continueEmptyState()}</section></main><footer class="home-control-legend control-legend" aria-hidden="true"><span><b class="prompt-key prompt-key--blue" data-prompt="confirm">Enter</b>Select</span><span><b class="prompt-key prompt-key--red" data-prompt="back">Esc</b>Back</span><span><b class="prompt-key" data-prompt="shoulderPrevious">PgUp</b><b class="prompt-key" data-prompt="shoulderNext">PgDn</b>Sections</span></footer></section>`;
+ }
+ 
+ 
+diff --git a/apps/para-home/src/screens/libraries.js b/apps/para-home/src/screens/libraries.js
+index 6e81924..72a5f05 100644
+--- a/apps/para-home/src/screens/libraries.js
++++ b/apps/para-home/src/screens/libraries.js
+@@ -1,17 +1,25 @@
+ import { paraApi, escapeHtml } from "../services/para-api.js";
+ import { page } from "../ui/components.js";
++import { systemApplicationRecords } from "../services/system-app-registry.js";
+ 
+ function applicationCard(application, index) {
+   const name = escapeHtml(application.name);
+   const route = application.launch?.kind === "route" ? `data-route="${escapeHtml(application.launch.route)}"` : `data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
+-  const icon = application.icon
++  const iconKind = application.iconType || application.icon || "";
++  const systemIcons = {
++    friends: "✦", achievements: "◇", media: "▣", files: "", store: "P", settings: "⚙",
++  };
++  const icon = application.icon && String(application.icon).includes("/")
+     ? `<img src="${application.icon}" alt="" />`
+-    : application.id === "para:files"
++    : application.id === "para:files" || iconKind === "files"
+       ? `<span class="app-icon app-icon--files" aria-hidden="true"><i></i></span>`
+       : application.id === "para:browser"
+         ? `<span class="app-icon app-icon--browser" aria-hidden="true">◎</span>`
+-        : `<span class="app-icon app-icon--letter" aria-hidden="true">${name.slice(0, 1)}</span>`;
+-  return `<button class="installed-app" ${route} data-app-category="${escapeHtml(application.category)}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="installed-app__icon">${icon}</span><span class="installed-app__name">${name}</span></button>`;
++        : iconKind && systemIcons[iconKind] !== undefined
++          ? `<span class="app-icon app-icon--system app-icon--${escapeHtml(iconKind)}" aria-hidden="true">${systemIcons[iconKind]}</span>`
++          : `<span class="app-icon app-icon--letter" aria-hidden="true">${name.slice(0, 1)}</span>`;
++  const detail = application.description ? `<span class="installed-app__meta">${escapeHtml(application.description)}</span>` : "";
++  return `<button class="installed-app" ${route} data-app-category="${escapeHtml(application.category)}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="installed-app__icon">${icon}</span><span class="installed-app__copy"><span class="installed-app__name">${name}</span>${detail}</span></button>`;
+ }
+ 
+ export function appsScreen() {
+@@ -30,9 +38,11 @@ export async function activateApps({ focus }) {
+   if (!container || !categories) return;
+   try {
+     const payload = await paraApi.applications();
+-    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", launch: { kind: "route", route: "browser" } };
+-    const applications = [browser, ...(payload.applications || []).filter((item) => item.id !== browser.id)];
+-    payload.categories = ["All Apps", ...new Set([...(payload.categories || []).filter((item) => item !== "All Apps"), "Tools"])];
++    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", iconType: "browser", description: "Browse the web", launch: { kind: "route", route: "browser" } };
++    const builtIns = [browser, ...systemApplicationRecords()];
++    const builtInIds = new Set(builtIns.map((item) => item.id));
++    const applications = [...builtIns, ...(payload.applications || []).filter((item) => !builtInIds.has(item.id))];
++    payload.categories = ["All Apps", ...new Set([...builtIns.map((item) => item.category), ...(payload.categories || []).filter((item) => item !== "All Apps")])];
+     if (!applications.length) {
+       container.innerHTML = `<div class="library-empty"><span>▦</span><h2>No applications available</h2></div>`;
+       return;
+@@ -42,7 +52,14 @@ export async function activateApps({ focus }) {
+     container.innerHTML = applications.map(applicationCard).join("");
+     focus.focusFirst();
+   } catch {
+-    container.innerHTML = `<div class="library-empty"><span>▦</span><h2>Apps couldn’t be loaded</h2><button class="action-button" data-action="reload-apps" data-autofocus="true">Try again</button></div>`;
++    // System apps belong to PARA itself and must remain launchable even when the
++    // native application scanner is unavailable in the hosted web edition.
++    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", iconType: "browser", description: "Browse the web", launch: { kind: "route", route: "browser" } };
++    const applications = [browser, ...systemApplicationRecords()];
++    categories.hidden = false;
++    const fallbackCategories = ["All Apps", ...new Set(applications.map((item) => item.category))];
++    categories.innerHTML = fallbackCategories.map((category, index) => `<button data-action="filter-apps" data-app-filter="${escapeHtml(category)}" class="${index === 0 ? "is-active" : ""}" aria-pressed="${index === 0}">${escapeHtml(category)}</button>`).join("");
++    container.innerHTML = applications.map(applicationCard).join("");
+     focus.focusFirst();
+   }
+ }
+diff --git a/apps/para-home/src/screens/media.js b/apps/para-home/src/screens/media.js
+index cd726bf..d58ffc4 100644
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -129,39 +129,122 @@ export async function removeCapture(id) {
+   return activateMediaGallery();
+ }
+ 
+-export function achievementsScreen() {
+-  const achievements = [...getProfileRuntime().achievements].sort((a, b) => {
++let selectedAchievementProject = "";
++
++function achievementAssetUrl(path) {
++  return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
++}
++
++function sortedAchievements() {
++  return [...getProfileRuntime().achievements].sort((a, b) => {
+     const aUnlocked = Number(a.unlockedAt || 0);
+     const bUnlocked = Number(b.unlockedAt || 0);
+     if (aUnlocked !== bUnlocked) return bUnlocked - aUnlocked;
+     return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+   });
++}
++
++function achievementSummaryMarkup(achievements) {
+   const unlocked = achievements.filter((item) => item.unlockedAt);
+   const score = unlocked.reduce((total, item) => total + Number(item.points || 0), 0);
+   const completion = achievements.length ? Math.round((unlocked.length / achievements.length) * 100) : 0;
+-  const body = achievements.length
+-    ? `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>${score}</strong><small>${unlocked.length} unlocked</small></div><div><span class="eyebrow">Completed</span><strong>${completion}%</strong><small>${unlocked.length} of ${achievements.length} tracked</small></div></section>
+-       <section class="achievement-list">${achievements.map((item, index) => {
+-         const unlockedAt = item.unlockedAt ? new Date(item.unlockedAt).toLocaleDateString() : '';
+-         const target = Math.max(1, Number(item.target || 1));
+-         const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
+-         const percent = Math.round((progress / target) * 100);
+-         const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
+-         const syncState = item.syncState === 'cloud' ? 'cloud' : item.syncState === 'pending' ? 'pending' : 'local';
+-         const syncLabel = syncState === 'cloud' ? 'CLOUD SYNCED' : syncState === 'pending' ? 'SYNC PENDING' : 'LOCAL ONLY';
+-         const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
+-         return `<article class="achievement-card ${item.unlockedAt ? 'is-unlocked' : ''}" tabindex="0" ${index === 0 ? 'data-autofocus="true"' : ''}>
+-           <div class="achievement-card__icon">${icon}</div>
+-           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><span class="achievement-sync achievement-sync--${syncState}">${syncLabel}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
+-           <b>${Number(item.points || 0)} pts</b>
+-         </article>`;
+-       }).join('')}</section>`
+-    : `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>0</strong><small>No unlocks yet</small></div><div><span class="eyebrow">Completed</span><strong>0%</strong><small>Across supported games</small></div></section><div class="library-empty achievements-empty"><span>◇</span><h2>No achievements yet</h2><p>Achievement lists appear here when a game reports progress through the PARA Achievement API.</p><button class="action-button" data-route="games" data-autofocus="true">Open Games</button></div>`;
++  return `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>${score}</strong><small>${unlocked.length} unlocked</small></div><div><span class="eyebrow">Completed</span><strong>${completion}%</strong><small>${unlocked.length} of ${achievements.length} tracked</small></div></section>`;
++}
++
++function achievementCardMarkup(item, index) {
++  const unlockedAt = item.unlockedAt ? new Date(item.unlockedAt).toLocaleDateString() : "";
++  const target = Math.max(1, Number(item.target || 1));
++  const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
++  const percent = Math.round((progress / target) * 100);
++  const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
++  const syncState = item.syncState === "cloud" ? "cloud" : item.syncState === "pending" ? "pending" : "local";
++  const syncLabel = syncState === "cloud" ? "CLOUD SYNCED" : syncState === "pending" ? "SYNC PENDING" : "LOCAL ONLY";
++  const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
++  return `<article class="achievement-card ${item.unlockedAt ? "is-unlocked" : ""}" tabindex="0" ${index === 0 ? "data-autofocus='true'" : ""}>
++    <div class="achievement-card__icon">${icon}</div>
++    <div class="achievement-card__copy"><div><span>${item.unlockedAt ? "UNLOCKED" : item.kind === "PROGRESS" ? "IN PROGRESS" : "LOCKED"}</span><span class="achievement-sync achievement-sync--${syncState}">${syncLabel}</span><strong>${hiddenLocked ? "Secret achievement" : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? "Keep playing to reveal this achievement." : escapeHtml(item.description || "")}</p>${item.kind === "PROGRESS" && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || "")}</small>`}</div>
++    <b>${Number(item.points || 0)} pts</b>
++  </article>`;
++}
++
++function achievementGroups(achievements, catalog = []) {
++  const catalogByProject = new Map(catalog.filter((item) => item?.project_id).map((item) => [String(item.project_id), item]));
++  const recent = getProfileRuntime().recent || [];
++  const runtimeByProject = new Map(recent.filter((item) => item?.projectId).map((item) => [String(item.projectId), item]));
++  const groups = new Map();
++  for (const item of achievements) {
++    const projectId = String(item.projectId || "legacy");
++    if (!groups.has(projectId)) groups.set(projectId, []);
++    groups.get(projectId).push(item);
++  }
++  return [...groups.entries()].map(([projectId, items]) => {
++    const catalogItem = catalogByProject.get(projectId);
++    const runtimeItem = runtimeByProject.get(projectId);
++    const assets = catalogItem?.asset_references || {};
++    const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
++    const artPath = assets.cover || assets.icon || assets.hero || shots[0] || "";
++    const unlocked = items.filter((item) => item.unlockedAt).length;
++    const score = items.filter((item) => item.unlockedAt).reduce((total, item) => total + Number(item.points || 0), 0);
++    const title = catalogItem?.title || runtimeItem?.title || (projectId === "legacy" ? "Other PARA Games" : "PARA Game");
++    return { projectId, items, title, art: achievementAssetUrl(artPath), unlocked, score };
++  }).sort((a, b) => (b.unlocked / Math.max(1, b.items.length)) - (a.unlocked / Math.max(1, a.items.length)) || a.title.localeCompare(b.title));
++}
++
++function achievementFoldersMarkup(groups) {
++  if (!groups.length) return `<div class="library-empty achievements-empty"><span>◇</span><h2>No achievements yet</h2><p>Achievement folders appear here when games report progress through the PARA Achievement API.</p><button class="action-button" data-route="games" data-autofocus="true">Open Games</button></div>`;
++  return `<section class="achievement-folders" aria-label="Achievement games">${groups.map((group, index) => {
++    const completion = Math.round((group.unlocked / Math.max(1, group.items.length)) * 100);
++    const art = group.art ? `<img src="${group.art}" alt="">` : `<span class="achievement-folder__fallback">◇</span>`;
++    return `<button type="button" class="achievement-folder" data-achievement-project="${escapeHtml(group.projectId)}" ${index === 0 ? "data-autofocus='true'" : ""}>
++      <span class="achievement-folder__art">${art}<i>${completion}%</i></span>
++      <span class="achievement-folder__copy"><span>GAME TROPHIES</span><strong>${escapeHtml(group.title)}</strong><small>${group.unlocked} of ${group.items.length} unlocked · ${group.score} pts</small><b><i style="width:${completion}%"></i></b></span>
++      <em aria-hidden="true">›</em>
++    </button>`;
++  }).join("")}</section>`;
++}
++
++function achievementGameMarkup(group) {
++  if (!group) return "";
++  const completion = Math.round((group.unlocked / Math.max(1, group.items.length)) * 100);
++  return `<section class="achievement-game-head"><button type="button" data-achievement-back>← All games</button><div class="achievement-game-head__art">${group.art ? `<img src="${group.art}" alt="">` : `<span>◇</span>`}</div><div><span>GAME TROPHIES</span><h2>${escapeHtml(group.title)}</h2><p>${group.unlocked} of ${group.items.length} unlocked · ${completion}% complete · ${group.score} pts</p></div></section><section class="achievement-list">${group.items.map(achievementCardMarkup).join("")}</section>`;
++}
++
++export function achievementsScreen() {
++  const achievements = sortedAchievements();
+   return page({
+     title: "Achievements",
+-    description: "Progress, unlocks, points, and completion history.",
+-    eyebrow: "Games",
+-    className: "achievements-page",
+-    body,
++    description: "Trophies are organized by game instead of scattered into one endless list.",
++    eyebrow: "System app",
++    className: "achievements-page achievements-app-page",
++    body: `${achievementSummaryMarkup(achievements)}<div data-achievements-app><div class="library-loading"><span></span><strong>Organizing game trophies…</strong></div></div>`,
+   });
+ }
++
++export async function activateAchievements({ focus } = {}) {
++  const host = document.querySelector("[data-achievements-app]");
++  if (!host) return () => {};
++  let alive = true;
++  let catalog = [];
++  try {
++    const payload = await paraApi.storeCatalog();
++    catalog = Array.isArray(payload?.items) ? payload.items : [];
++  } catch { /* local achievement folders still render */ }
++  if (!alive) return () => {};
++
++  const render = () => {
++    const achievements = sortedAchievements();
++    const groups = achievementGroups(achievements, catalog);
++    const selected = selectedAchievementProject ? groups.find((group) => group.projectId === selectedAchievementProject) : null;
++    if (selectedAchievementProject && !selected) selectedAchievementProject = "";
++    host.innerHTML = selected ? achievementGameMarkup(selected) : achievementFoldersMarkup(groups);
++    requestAnimationFrame(() => focus?.focusFirst?.());
++  };
++  const onClick = (event) => {
++    const folder = event.target.closest("[data-achievement-project]");
++    if (folder) { selectedAchievementProject = folder.dataset.achievementProject || ""; render(); return; }
++    if (event.target.closest("[data-achievement-back]")) { selectedAchievementProject = ""; render(); }
++  };
++  host.addEventListener("click", onClick);
++  render();
++  return () => { alive = false; host.removeEventListener("click", onClick); };
++}
+diff --git a/apps/para-home/src/screens/social.js b/apps/para-home/src/screens/social.js
+index 5af3686..79e8c22 100644
+--- a/apps/para-home/src/screens/social.js
++++ b/apps/para-home/src/screens/social.js
+@@ -3,7 +3,7 @@ import { page, tile, listRow } from "../ui/components.js";
+ 
+ export function socialScreen() {
+   const friends = content.friends.map((friend, index) => listRow({ ...friend, action: "friend-open", autofocus: index === 0 })).join("");
+-  return page({ title: "Community", description: "Play, share, and spend time together.", eyebrow: "Friends & parties", className: "social-page", body: `<section class="party-hero"><div class="party-avatars"><i>M</i><i>A</i><i>S</i><i>＋</i></div><div><span class="eyebrow">Your party</span><h2>Start something together</h2><p>Invite friends, choose a game, or begin a call.</p></div><div class="party-actions"><button class="action-button" data-action="party-start" data-autofocus="true">Start Party</button><button class="action-button action-button--ghost" data-route="calls">Calls</button></div></section><div class="social-layout"><section class="panel social-friends"><div class="panel__head"><h2>Friends</h2><button class="action-button action-button--ghost" data-action="find-friends">Find Friends</button></div><div class="list">${friends}</div></section><aside class="social-side"><h2>Jump in</h2>${tile({ title: "Garden Spirits", meta: "Aleciyah is playing", action: "join-friend", icon: "✦", className: "tile--slim" })}${tile({ title: "Messages", meta: "Two conversations", action: "messages-open", icon: "…", className: "tile--slim" })}${tile({ title: "Invitations", meta: "Nothing waiting", action: "invitations-open", icon: "↗", className: "tile--slim" })}</aside></div>` });
++  return page({ title: "Community", description: "Play, share, and spend time together.", eyebrow: "Friends & parties", className: "social-page", body: `<section class="party-hero"><div class="party-avatars"><i>M</i><i>A</i><i>S</i><i>＋</i></div><div><span class="eyebrow">Your party</span><h2>Start something together</h2><p>Invite friends, choose a game, or begin a call.</p></div><div class="party-actions"><button class="action-button" data-action="party-start" data-autofocus="true">Start Party</button><button class="action-button action-button--ghost" data-route="calls">Calls</button></div></section><div class="social-layout"><section class="panel social-friends"><div class="panel__head"><h2>Friends</h2><button class="action-button action-button--ghost" data-action="find-friends">Find Friends</button></div><div class="list">${friends}</div></section><aside class="social-side"><h2>Jump in</h2>${tile({ title: "Garden Spirits", meta: "Aleciyah is playing", action: "join-friend", icon: "✦", className: "tile--slim" })}${tile({ title: "Friends", meta: "Chats and presence", route: "friends", icon: "…", className: "tile--slim" })}${tile({ title: "Invitations", meta: "Nothing waiting", action: "invitations-open", icon: "↗", className: "tile--slim" })}</aside></div>` });
+ }
+ 
+ export function callsScreen() {
+diff --git a/apps/para-home/src/services/system-app-registry.js b/apps/para-home/src/services/system-app-registry.js
+new file mode 100644
+index 0000000..5814684
+--- /dev/null
++++ b/apps/para-home/src/services/system-app-registry.js
+@@ -0,0 +1,12 @@
++export const PARA_SYSTEM_APPS = Object.freeze([
++  { id: "para:friends", name: "Friends", category: "Social", route: "friends", icon: "friends", description: "Friends, chat, presence, and parties" },
++  { id: "para:achievements", name: "Achievements", category: "Games", route: "achievements", icon: "achievements", description: "Game trophies and progress" },
++  { id: "para:media-gallery", name: "Media Gallery", category: "Media", route: "media-gallery", icon: "media", description: "Screenshots and gameplay videos" },
++  { id: "para:files", name: "Files", category: "Tools", route: "files", icon: "files", description: "PARA files and storage" },
++  { id: "para:parastore", name: "ParaStore", category: "Store", route: "parastore", icon: "store", description: "Discover games and apps" },
++  { id: "para:settings", name: "Settings", category: "System", route: "settings", icon: "settings", description: "System, account, and accessibility" },
++]);
++
++export function systemApplicationRecords() {
++  return PARA_SYSTEM_APPS.map((app) => ({ ...app, launch: { kind: "route", route: app.route } }));
++}
+diff --git a/apps/para-home/src/ui/control-center.js b/apps/para-home/src/ui/control-center.js
+index 787dba4..894cd74 100644
+--- a/apps/para-home/src/ui/control-center.js
++++ b/apps/para-home/src/ui/control-center.js
+@@ -81,7 +81,13 @@ function contextMarkup(id) {
+   }
+   if (id === "switcher") {
+     const running = runningExperiences();
+-    return running.length ? `<div class="control-center-context__copy"><span>Running</span><strong>${running.length} ${running.length === 1 ? "experience" : "experiences"}</strong></div><div class="control-center-running">${running.map((item, index) => actionButton(`${escapeHtml(item.kind)} · ${escapeHtml(item.title)}`, `data-route="${escapeHtml(item.route)}"`, index === 0)).join("")}</div>` : `<div class="control-center-context__copy"><span>Switcher</span><strong>No other apps running</strong></div>`;
++    if (!running.length) return `<div class="control-center-context__copy"><span>Switcher</span><strong>No games or apps running</strong><small>Launch something and it will appear here.</small></div>`;
++    const cards = running.slice(0, 4).map((item, index) => {
++      const resumeAttrs = `data-action="resume-experience" data-experience-id="${escapeHtml(item.id)}" data-experience-route="${escapeHtml(item.route || "home")}" data-store-id="${escapeHtml(item.storeId || "")}"`;
++      const art = item.artwork ? `<img src="${escapeHtml(item.artwork)}" alt="">` : `<span>${item.kind === "Game" ? "◈" : "▦"}</span>`;
++      return `<div class="control-center-running-card"><button type="button" class="control-center-running-card__resume" ${resumeAttrs} ${index === 0 ? "data-context-autofocus='true'" : ""}><i>${art}</i><span><small>${escapeHtml(item.kind || "App")}</small><strong>${escapeHtml(item.title || "Experience")}</strong><em>${escapeHtml(item.queueStatus || "Suspended")}</em></span></button><button type="button" class="control-center-running-card__close" data-action="close-experience" data-experience-id="${escapeHtml(item.id)}" aria-label="Close ${escapeHtml(item.title || "experience")}">×</button></div>`;
++    }).join("");
++    return `<div class="control-center-context__copy"><span>Switcher</span><strong>${running.length} running</strong><small>Resume or close without leaving Control Center.</small></div><div class="control-center-running">${cards}</div>`;
+   }
+   if (id === "notifications") {
+     const notifications = currentData.runtime.notifications || [];
+diff --git a/apps/para-home/styles.css b/apps/para-home/styles.css
+index 9def502..47197df 100644
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -2109,3 +2109,55 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ @media(max-width:620px){.para-video-player__controls{gap:5px}.para-video-player__controls button{min-width:34px;padding:0 7px}.para-video-player__time{font-size:.62rem}.para-video-player__speed{display:none}.youtube-creator-snapshot{grid-template-columns:1fr}.youtube-upload-success footer{flex-direction:column}.youtube-upload-success footer .action-button{width:100%;justify-content:center}}
+ 
+ .youtube-upload-dialog{width:min(980px,calc(100% - 48px))}
++
++/* V52 · Friends + System Apps + layout hardening */
++.os-page .screen-head__copy,.os-page .content-scroll,.installed-app__copy,.store-live-card__copy,.store-product-copy,.achievement-card__copy,.friends-person__copy,.friends-thread i,.switcher-card__copy,.control-center-running-card__resume>span{min-width:0}
++.os-page h1,.os-page h2,.os-page h3,.os-page p,.os-page strong,.os-page small,.os-page span,.toast strong,.toast span{overflow-wrap:anywhere}
++.action-button,.capture-action,.store-product-actions button,.store-discovery-bar>button,.control-center-context-action{max-width:100%;height:auto;min-height:42px;white-space:normal;line-height:1.18}
++.store-product-actions,.capture-hero__actions,.party-actions,.action-row{flex-wrap:wrap}
++.screen-head__copy{min-width:0}.screen-head__copy h1,.screen-head__copy .lede{max-width:100%}
++
++/* System app library cards */
++.installed-app{min-width:0;gap:18px;justify-content:flex-start}
++.installed-app__copy{display:grid;gap:4px;margin-top:auto}
++.installed-app__name{display:block;line-height:1.15}
++.installed-app__meta{display:block;color:rgba(240,233,247,.5);font-size:.72rem;line-height:1.35}
++.app-icon--system{width:100%;height:100%;display:grid;place-items:center;font-size:2rem;font-weight:850;background:radial-gradient(circle at 50% 38%,rgba(177,113,255,.34),rgba(77,27,142,.18) 46%,rgba(10,7,15,.82));color:#f4e9ff}
++.app-icon--store{font-weight:950;color:#b27aff}.app-icon--media{font-size:1.75rem}.app-icon--settings{font-size:1.65rem}
++
++/* Friends is a real PARA system app, not a Messages sub-page. */
++.friends-page .content-scroll{padding-bottom:110px}
++.friends-networks{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(0,1.6fr);gap:18px;align-items:center;padding:16px 18px;margin-bottom:16px;border:1px solid rgba(195,150,255,.12);border-radius:18px;background:rgba(10,7,16,.58)}
++.friends-networks>div:first-child{min-width:0}.friends-networks>div:first-child span,.friends-people header>span,.friends-conversations header>span{color:#c68aff;font-size:.6rem;font-weight:900;letter-spacing:.14em}.friends-networks>div:first-child strong{display:block;margin-top:4px;font-size:.95rem}
++.friends-networks>div:last-child{display:flex;gap:8px;overflow-x:auto;padding:2px;scrollbar-width:none}.friends-networks>div:last-child::-webkit-scrollbar{display:none}
++.friends-network{flex:0 0 auto;min-width:118px;padding:9px 11px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.025)}.friends-network b,.friends-network small{display:block}.friends-network b{font-size:.72rem}.friends-network small{margin-top:2px;color:rgba(239,232,247,.45);font-size:.58rem}.friends-network--ready{border-color:rgba(100,225,162,.22);background:rgba(44,159,103,.07)}.friends-network--ready small{color:#8ce8b9}
++.friends-app{min-height:510px;display:grid;grid-template-columns:minmax(210px,.7fr) minmax(230px,.8fr) minmax(360px,1.55fr);overflow:hidden;border:1px solid rgba(201,164,255,.14);border-radius:22px;background:rgba(8,5,13,.72);box-shadow:0 24px 70px rgba(0,0,0,.24)}
++.friends-people,.friends-conversations{min-width:0;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,.075)}.friends-people>header,.friends-conversations>header{min-height:76px;padding:15px 16px;border-bottom:1px solid rgba(255,255,255,.07)}.friends-people header h2,.friends-conversations header h2{margin:3px 0 0;font-size:1.08rem}.friends-people header small{color:rgba(240,233,247,.45);font-size:.66rem}.friends-conversations>header{display:grid;grid-template-columns:1fr auto;align-items:end}.friends-conversations>header>span{grid-column:1/-1}.friends-conversations>header button{grid-column:2;grid-row:2;width:31px;height:31px;border:1px solid rgba(206,168,255,.18);border-radius:9px;background:rgba(137,73,225,.1);color:#fff}
++.friends-people>[data-friends-people],.friends-conversations>[data-friends-thread-list]{overflow:auto;scrollbar-width:none}.friends-person,.friends-thread{width:100%;min-width:0;display:grid;align-items:center;border:0;border-bottom:1px solid rgba(255,255,255,.055);background:transparent;color:#fff;text-align:left}.friends-person{grid-template-columns:44px minmax(0,1fr) auto;gap:10px;padding:11px 13px}.friends-person__avatar{position:relative;width:42px;height:42px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(145deg,#47227c,#1a0d2c);font-weight:850}.friends-person__avatar i{position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border:2px solid #0a0710;border-radius:50%;background:#68616f}.friends-person__avatar i[data-presence="online"]{background:#5bd79c}.friends-person__copy strong,.friends-person__copy small{display:block}.friends-person__copy strong{font-size:.78rem}.friends-person__copy small{margin-top:3px;color:rgba(239,232,247,.48);font-size:.63rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.friends-person__status{color:#ba8cff;font-size:.58rem;font-weight:800}
++.friends-thread{grid-template-columns:38px minmax(0,1fr) auto;gap:9px;padding:10px 12px}.friends-thread>span{width:36px;height:36px;display:grid;place-items:center;border-radius:12px;background:rgba(139,73,229,.16);color:#d3afff;font-weight:850}.friends-thread i{display:block;font-style:normal}.friends-thread strong,.friends-thread small{display:block}.friends-thread strong{font-size:.74rem}.friends-thread small{margin-top:3px;color:rgba(239,232,247,.42);font-size:.61rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.friends-thread time{color:rgba(239,232,247,.35);font-size:.56rem}.friends-thread.is-active,.friends-thread:hover,.friends-person:hover,.friends-thread:focus-visible,.friends-person:focus-visible{outline:none;background:rgba(132,69,221,.105)}
++.friends-chat{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:linear-gradient(160deg,rgba(19,11,31,.62),rgba(5,4,9,.74))}.friends-chat>header{min-width:0;display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.07)}.friends-chat__avatar{width:38px;height:38px;display:grid;place-items:center;flex:0 0 auto;border-radius:12px;background:linear-gradient(145deg,#6f32be,#251038);font-weight:850}.friends-chat>header div{min-width:0}.friends-chat>header strong,.friends-chat>header small{display:block}.friends-chat>header small{margin-top:2px;color:rgba(239,232,247,.44);font-size:.62rem}.friends-chat__body{min-height:250px;overflow:auto;display:flex;flex-direction:column;gap:9px;padding:18px;scrollbar-width:none}.friends-message{align-self:flex-start;max-width:min(78%,540px);padding:9px 11px;border:1px solid rgba(255,255,255,.08);border-radius:14px 14px 14px 4px;background:rgba(255,255,255,.045)}.friends-message.is-self{align-self:flex-end;border-color:rgba(187,125,255,.22);border-radius:14px 14px 4px 14px;background:rgba(123,56,203,.18)}.friends-message span{display:block;margin-bottom:3px;color:#bb8cff;font-size:.55rem;font-weight:850}.friends-message p{margin:0;font-size:.76rem;line-height:1.4}.friends-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:12px;border-top:1px solid rgba(255,255,255,.07)}.friends-composer input{min-width:0;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(255,255,255,.04);color:#fff;padding:10px 12px;outline:none}.friends-composer button{min-width:68px;border:1px solid rgba(193,139,255,.25);border-radius:12px;background:linear-gradient(135deg,#7c3aed,#a85bff);color:#fff;font-weight:800}.friends-chat-empty{min-height:100%;display:grid;place-items:center;align-content:center;gap:5px;text-align:center;color:rgba(239,232,247,.52)}.friends-chat-empty span{font-size:1.8rem;color:#b778ff}.friends-chat-empty h2,.friends-chat-empty p{margin:0}.friends-chat-empty h2{color:#fff;font-size:1.1rem}.friends-chat-empty p{max-width:340px;font-size:.7rem;line-height:1.45}.friends-chat-empty--small{min-height:210px}
++@media(max-width:980px){.friends-app{grid-template-columns:minmax(190px,.8fr) minmax(0,1.4fr)}.friends-people{display:none}.friends-networks{grid-template-columns:1fr}.friends-networks>div:first-child{display:none}}@media(max-width:680px){.friends-app{grid-template-columns:1fr}.friends-conversations{display:none}.friends-chat{min-height:480px}}
++
++/* ParaStore uses actual developer artwork and screenshots instead of placeholder letters. */
++.store-feature{isolation:isolate;background:linear-gradient(110deg,rgba(15,9,27,.9),rgba(25,10,47,.68))!important}
++.store-feature__slideshow,.store-product-hero__slideshow{position:absolute;inset:0;z-index:0;overflow:hidden}.store-feature__slideshow img,.store-product-hero__slideshow img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:scale(1.035);transition:opacity .65s ease,transform 4.2s ease}.store-feature__slideshow img.is-active,.store-product-hero__slideshow img.is-active{opacity:1;transform:scale(1)}.store-feature__slideshow.is-empty,.store-product-hero__slideshow.is-empty{display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,rgba(130,70,224,.25),rgba(8,5,14,.95) 56%)}.store-feature__slideshow.is-empty img,.store-product-hero__slideshow.is-empty img{position:static;width:62px;height:62px;object-fit:contain;opacity:.55;transform:none}
++.store-feature__shade{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(5,3,10,.93) 0,rgba(5,3,10,.72) 48%,rgba(5,3,10,.28) 100%),linear-gradient(0deg,rgba(5,3,10,.48),transparent 60%)}.store-feature__copy{position:relative;z-index:2;max-width:min(670px,72%)}
++.store-live-card__fallback{display:grid!important;place-items:center;width:100%;height:100%;background:radial-gradient(circle at 50% 48%,rgba(128,65,226,.28),rgba(8,5,14,.96))}.store-live-card__fallback img{width:58px!important;height:58px!important;object-fit:contain!important;opacity:.65}
++.store-product-hero{background-image:none!important}.store-product-hero__slideshow img{filter:saturate(.98) brightness(.74)}.store-product-hero__shade{z-index:1;background:linear-gradient(90deg,rgba(5,3,10,.96) 0%,rgba(5,3,10,.74) 46%,rgba(5,3,10,.32) 78%),linear-gradient(0deg,rgba(5,3,10,.8),transparent 60%)}.store-product-cover__fallback{display:grid!important;place-items:center!important}.store-product-cover__fallback img{width:48%!important;height:auto!important;object-fit:contain!important;opacity:.7}
++
++/* Launch transition artwork slideshow */
++.para-game-transition{overflow:hidden}.para-game-transition__slideshow{position:absolute;inset:0;z-index:0}.para-game-transition__slideshow img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:scale(1.03);transition:opacity .55s ease,transform 2.5s ease}.para-game-transition__slideshow img.is-active{opacity:.6;transform:scale(1)}.para-game-transition__shade{position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(3,2,7,.32),rgba(3,2,7,.75)),radial-gradient(circle at 50% 50%,transparent,rgba(3,2,7,.5) 76%)}.para-game-transition__content{z-index:2}
++
++/* Switcher: compact cards with a real close control. */
++.control-center-running{max-width:min(760px,68vw);display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;overflow:visible}.control-center-running-card{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:6px;align-items:stretch}.control-center-running-card__resume{min-width:0;display:grid;grid-template-columns:40px minmax(0,1fr);gap:9px;align-items:center;padding:8px 10px;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(255,255,255,.035);color:#fff;text-align:left}.control-center-running-card__resume>i{width:38px;height:38px;display:grid;place-items:center;overflow:hidden;border-radius:10px;background:rgba(135,71,223,.12);font-style:normal}.control-center-running-card__resume>i img{width:100%;height:100%;object-fit:cover}.control-center-running-card__resume>span small,.control-center-running-card__resume>span strong,.control-center-running-card__resume>span em{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.control-center-running-card__resume>span small{color:#bc85ff;font-size:.52rem;font-weight:850;text-transform:uppercase;letter-spacing:.1em}.control-center-running-card__resume>span strong{margin-top:2px;font-size:.68rem}.control-center-running-card__resume>span em{margin-top:2px;color:rgba(240,233,247,.44);font-size:.55rem;font-style:normal}.control-center-running-card__close{width:34px;min-width:34px;padding:0;border:1px solid rgba(255,130,145,.18);border-radius:11px;background:rgba(137,38,50,.08);color:#ffb1ba;font-size:1rem}.control-center-running-card__close:hover,.control-center-running-card__close:focus-visible{background:rgba(168,49,63,.2);outline:none}
++.para-switcher{gap:18px}.para-switcher header h2{font-size:clamp(1.8rem,3vw,3.1rem)}.para-switcher__cards{grid-template-columns:repeat(auto-fit,minmax(210px,270px));justify-content:start;gap:12px}.switcher-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:stretch}.switcher-card>.switcher-card__resume{min-height:148px!important;display:grid!important;grid-template-columns:74px minmax(0,1fr)!important;align-items:center!important;justify-content:initial!important;gap:13px!important;padding:14px!important;border-radius:18px!important}.switcher-card__art{width:70px;height:70px;margin:0!important;display:grid;place-items:center;overflow:hidden;border-radius:16px;background:rgba(122,60,207,.14);font-size:1.8rem!important;filter:none!important}.switcher-card__art img{width:100%;height:100%;object-fit:cover}.switcher-card__copy{display:grid;align-content:center;gap:4px}.switcher-card__copy small,.switcher-card__copy strong,.switcher-card__copy em{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.switcher-card__close{position:static!important;width:54px!important;height:auto!important;min-height:148px;display:grid;place-items:center;align-content:center;gap:5px;border-radius:16px!important;background:rgba(131,38,52,.12)!important}.switcher-card__close b{font-size:1.3rem}.switcher-card__close span{font-size:.55rem;font-weight:800;writing-mode:vertical-rl;text-orientation:mixed;letter-spacing:.07em;text-transform:uppercase;color:#ffb8c1}
++@media(max-width:700px){.para-switcher__cards{grid-template-columns:1fr}.switcher-card>.switcher-card__resume,.switcher-card__close{min-height:118px!important}.control-center-running{max-width:100%;grid-template-columns:1fr}}
++
++/* Achievements are folders by game, then trophies inside each folder. */
++.achievement-folders{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding-bottom:90px}.achievement-folder{min-width:0;display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:rgba(10,7,16,.72);color:#fff;text-align:left}.achievement-folder:hover,.achievement-folder:focus-visible{outline:none;border-color:rgba(187,125,255,.5);background:rgba(91,43,153,.13)}.achievement-folder__art{position:relative;width:88px;aspect-ratio:1;overflow:hidden;border-radius:15px;background:radial-gradient(circle at 50% 45%,rgba(134,75,225,.24),rgba(5,4,9,.92))}.achievement-folder__art img{width:100%;height:100%;object-fit:cover}.achievement-folder__art>i{position:absolute;right:5px;bottom:5px;padding:3px 6px;border-radius:999px;background:rgba(4,3,8,.8);font-style:normal;font-size:.52rem;font-weight:900}.achievement-folder__fallback{width:100%;height:100%;display:grid;place-items:center;color:#c48cff;font-size:2rem}.achievement-folder__copy{min-width:0}.achievement-folder__copy>span{color:#be87ff;font-size:.54rem;font-weight:900;letter-spacing:.12em}.achievement-folder__copy>strong,.achievement-folder__copy>small{display:block}.achievement-folder__copy>strong{margin-top:4px;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.achievement-folder__copy>small{margin-top:4px;color:rgba(241,234,248,.48);font-size:.64rem}.achievement-folder__copy>b{display:block;height:5px;margin-top:9px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}.achievement-folder__copy>b i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7c3aed,#c084fc)}.achievement-folder>em{color:#b991ef;font-style:normal;font-size:1.4rem}.achievement-game-head{display:grid;grid-template-columns:auto 88px minmax(0,1fr);gap:14px;align-items:center;margin-bottom:14px;padding:12px 14px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:rgba(10,7,16,.68)}.achievement-game-head>button{align-self:start;border:0;background:transparent;color:#c99aff;font-size:.68rem}.achievement-game-head__art{width:88px;height:88px;display:grid;place-items:center;overflow:hidden;border-radius:15px;background:rgba(120,63,202,.12);color:#c790ff;font-size:2rem}.achievement-game-head__art img{width:100%;height:100%;object-fit:cover}.achievement-game-head>div:last-child span{color:#c790ff;font-size:.56rem;font-weight:900;letter-spacing:.13em}.achievement-game-head h2{margin:3px 0;font-size:1.35rem}.achievement-game-head p{margin:0;color:rgba(241,234,248,.5);font-size:.7rem}@media(max-width:700px){.achievement-folder{grid-template-columns:70px minmax(0,1fr) auto}.achievement-folder__art{width:70px}.achievement-game-head{grid-template-columns:70px minmax(0,1fr)}.achievement-game-head>button{grid-column:1/-1}.achievement-game-head__art{width:70px;height:70px}}
++
++/* Files web edition now surfaces real PARA-managed collections instead of a dead empty page. */
++.files-web-home{padding:20px}.files-web-home>header{padding:12px 8px 18px}.files-web-home>header span{color:#c48cff;font-size:.6rem;font-weight:900;letter-spacing:.14em}.files-web-home>header h2{margin:5px 0 4px;font-size:1.45rem}.files-web-home>header p{max-width:760px;margin:0;color:rgba(240,233,247,.5);font-size:.75rem;line-height:1.45}.files-web-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:11px}.files-web-grid>button{min-width:0;min-height:122px;display:grid;grid-template-columns:42px minmax(0,1fr);grid-template-rows:auto auto;align-content:center;column-gap:11px;padding:15px;border:1px solid rgba(255,255,255,.09);border-radius:16px;background:rgba(255,255,255,.025);color:#fff;text-align:left}.files-web-grid>button>span{grid-row:1/3;width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:rgba(127,65,216,.14);color:#c993ff;font-size:1.25rem}.files-web-grid>button strong{font-size:.83rem}.files-web-grid>button small{margin-top:3px;color:rgba(240,233,247,.45);font-size:.65rem}.files-web-grid>button:hover,.files-web-grid>button:focus-visible{outline:none;border-color:rgba(188,127,255,.45);background:rgba(107,52,181,.1)}
++
++/* V52 store artwork must use publisher assets or PARA branding, never title-letter placeholders. */
++.demo-art--store-image:before,.demo-art--store-image:after,.demo-art--store-fallback:before,.demo-art--store-fallback:after{display:none}.demo-art--store-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.demo-art--store-image b{position:absolute;inset:0;background:linear-gradient(0deg,rgba(5,3,10,.34),transparent 52%)}.demo-art--store-fallback{background:radial-gradient(circle at 50% 45%,rgba(128,65,226,.24),rgba(5,4,9,.96))}.demo-art--store-fallback img{width:66px;height:66px;object-fit:contain;opacity:.68}.store-feature__mark--logo{display:grid;place-items:center}.store-feature__mark--logo img{width:78px;height:78px;object-fit:contain;opacity:.72}.store-cart-item__fallback{display:grid!important;place-items:center;width:100%;height:100%;background:radial-gradient(circle at 50% 45%,rgba(128,65,226,.22),rgba(6,4,10,.95))}.store-cart-item__fallback img{width:50px!important;height:50px!important;object-fit:contain!important;opacity:.68}.home-store-shelf-card__fallback img{width:44px;height:44px;object-fit:contain;opacity:.68}
+diff --git a/services/api/server.py b/services/api/server.py
+index 8c74576..7e71b87 100644
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -1515,6 +1515,15 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+             runtime_base_json = json.dumps(runtime_base)
+             game_title_json = json.dumps(str(item.get("title") or "PARA Game"))
+             project_id_json = json.dumps(str(item.get("project_id") or ""))
++            asset_refs = item.get("asset_references") if isinstance(item.get("asset_references"), dict) else {}
++            screenshots = asset_refs.get("screenshots") if isinstance(asset_refs.get("screenshots"), list) else []
++            artwork_paths = []
++            for candidate in [asset_refs.get("hero"), asset_refs.get("cover"), *screenshots, asset_refs.get("icon")]:
++                candidate = str(candidate or "").strip()
++                if candidate and candidate not in artwork_paths:
++                    artwork_paths.append(candidate)
++            artwork_urls = [f"/api/v1/store/asset?path={urllib.parse.quote(path, safe='')}" for path in artwork_paths[:8]]
++            game_artwork_json = json.dumps(artwork_urls)
+             injection = (
+                 f'<base href="{runtime_base}">\n'
+                 + (
+@@ -1524,6 +1533,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+   const RUNTIME_ID = __PARA_RUNTIME_ID__;
+   const GAME_TITLE = __PARA_GAME_TITLE__;
+   const PROJECT_ID = __PARA_PROJECT_ID__;
++  const GAME_ARTWORK = __PARA_GAME_ARTWORK__;
+   const GAME_RETURN_TRANSITION_KEY = 'para.game.transition.return';
+   let paraGameTransitionLeaving = false;
+   let gameSuspended = false;
+@@ -1591,14 +1601,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+   const transitionStyle = document.createElement('style');
+   transitionStyle.dataset.paraGameTransition = 'true';
+   transitionStyle.textContent = `
+-    .para-game-page-transition{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#030207;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;pointer-events:none;transition:opacity .28s ease}
++    .para-game-page-transition{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#030207;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;pointer-events:none;overflow:hidden;transition:opacity .28s ease}
+     .para-game-page-transition::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(124,54,235,.2),transparent 28%),radial-gradient(circle at 50% 50%,rgba(96,28,188,.08),transparent 54%),#030207;transform:scale(1.035);transition:transform .62s cubic-bezier(.2,.86,.24,1)}
+-    .para-game-page-transition>div{position:relative;display:grid;justify-items:center;gap:9px;text-align:center;opacity:0;transform:translateY(12px) scale(.985);transition:opacity .24s ease .08s,transform .42s cubic-bezier(.2,.86,.24,1) .04s}
++    .para-game-page-transition .para-game-page-transition__slides{position:absolute;inset:0;z-index:0}
++    .para-game-page-transition .para-game-page-transition__slides img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:scale(1.035);transition:opacity .55s ease,transform 2.4s ease}
++    .para-game-page-transition .para-game-page-transition__slides img.is-active{opacity:.56;transform:scale(1)}
++    .para-game-page-transition .para-game-page-transition__shade{position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(3,2,7,.28),rgba(3,2,7,.72)),radial-gradient(circle at 50% 50%,transparent 0,rgba(3,2,7,.55) 72%)}
++    .para-game-page-transition>div:not(.para-game-page-transition__slides):not(.para-game-page-transition__shade){position:relative;z-index:2;display:grid;justify-items:center;gap:9px;text-align:center;opacity:0;transform:translateY(12px) scale(.985);transition:opacity .24s ease .08s,transform .42s cubic-bezier(.2,.86,.24,1) .04s}
+     .para-game-page-transition b{width:46px;height:46px;display:grid;place-items:center;border:2px solid rgba(184,133,255,.38);border-top-color:#b66fff;border-radius:50%;box-shadow:0 0 26px rgba(142,74,255,.18);animation:paraGameSpin .9s linear infinite}
+     .para-game-page-transition span{color:#aaa0b7;font-size:12px;font-weight:800;letter-spacing:.2em;text-transform:uppercase}
+     .para-game-page-transition strong{max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(20px,2.3vw,32px);letter-spacing:-.03em}
+-    .para-game-page-transition.is-visible{opacity:1;pointer-events:all}.para-game-page-transition.is-visible::before{transform:scale(1)}.para-game-page-transition.is-visible>div{opacity:1;transform:none}
+-    .para-game-page-transition.is-revealing{opacity:0;pointer-events:none}.para-game-page-transition.is-revealing>div{opacity:0;transform:translateY(-8px) scale(1.01)}
++    .para-game-page-transition.is-visible{opacity:1;pointer-events:all}.para-game-page-transition.is-visible::before{transform:scale(1)}.para-game-page-transition.is-visible>div:not(.para-game-page-transition__slides):not(.para-game-page-transition__shade){opacity:1;transform:none}
++    .para-game-page-transition.is-revealing{opacity:0;pointer-events:none}.para-game-page-transition.is-revealing>div:not(.para-game-page-transition__slides):not(.para-game-page-transition__shade){opacity:0;transform:translateY(-8px) scale(1.01)}
+     @keyframes paraGameSpin{to{transform:rotate(360deg)}}
+     @media (prefers-reduced-motion:reduce){.para-game-page-transition,.para-game-page-transition::before,.para-game-page-transition>div{transition-duration:.001ms!important}.para-game-page-transition b{animation:none!important}}
+   `;
+@@ -1608,6 +1622,30 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     const node = document.createElement('div');
+     node.className = 'para-game-page-transition';
+     node.setAttribute('role', 'status');
++    if (Array.isArray(GAME_ARTWORK) && GAME_ARTWORK.length) {
++      const slides = document.createElement('div');
++      slides.className = 'para-game-page-transition__slides';
++      GAME_ARTWORK.slice(0, 8).forEach((url, index) => {
++        const image = document.createElement('img');
++        image.src = url;
++        image.alt = '';
++        if (index === 0) image.classList.add('is-active');
++        slides.append(image);
++      });
++      node.append(slides);
++      const shade = document.createElement('div');
++      shade.className = 'para-game-page-transition__shade';
++      node.append(shade);
++      if (GAME_ARTWORK.length > 1) {
++        let index = 0;
++        node.__paraArtworkTimer = setInterval(() => {
++          const images = [...slides.querySelectorAll('img')];
++          images[index]?.classList.remove('is-active');
++          index = (index + 1) % images.length;
++          images[index]?.classList.add('is-active');
++        }, 1200);
++      }
++    }
+     const content = document.createElement('div');
+     const spinner = document.createElement('b');
+     spinner.setAttribute('aria-hidden', 'true');
+@@ -2108,6 +2146,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+         ...previous,
+         id: GAME_ACTIVITY_ID,
+         storeId: RUNTIME_ID,
++        projectId: PROJECT_ID,
++        artwork: Array.isArray(GAME_ARTWORK) ? GAME_ARTWORK[0] || previous.artwork || '' : previous.artwork || '',
+         title: GAME_TITLE,
+         route: 'games',
+         kind: 'Game',
+@@ -3515,6 +3555,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+                     .replace('__PARA_RUNTIME_ID__', runtime_id)
+                     .replace('__PARA_GAME_TITLE__', game_title_json)
+                     .replace('__PARA_PROJECT_ID__', project_id_json)
++                    .replace('__PARA_GAME_ARTWORK__', game_artwork_json)
+                 )
+             )
+             # Rewrite the most common inline root navigations used by small
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index 6a79ea5..07f4611 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -149,7 +149,7 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn("context.scrollTo", screen)
+         self.assertIn('data-nav-left="${escapeHtml(focusId)}"', screen)
+         self.assertIn('data-nav-right="${escapeHtml(focusId)}"', screen)
+-        for heading in ["Games", "Apps", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates", "Messages"]:
++        for heading in ["Games", "Apps", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates", "Friends"]:
+             self.assertIn(heading, screen)
+         for distance in range(4):
+             self.assertIn(f'data-focus-distance="{distance}"', css)
+@@ -751,6 +751,10 @@ class RepositoryTests(unittest.TestCase):
+         self.assertIn(".account-shortcut-grid", css)
+ 
+ 
++
++    def test_v52_friends_system_apps_store_artwork_switcher_and_files(self):
++        self.assertTrue((ROOT / "apps/para-home/src/screens/friends.js").exists())
++
+ if __name__ == "__main__":
+     unittest.main()
+ 

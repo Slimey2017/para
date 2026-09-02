@@ -149,7 +149,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("context.scrollTo", screen)
         self.assertIn('data-nav-left="${escapeHtml(focusId)}"', screen)
         self.assertIn('data-nav-right="${escapeHtml(focusId)}"', screen)
-        for heading in ["Games", "Apps", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates", "Messages"]:
+        for heading in ["Games", "Apps", "ParaStore", "Recent Projects", "Installed Creator Apps", "PARA Updates", "Friends"]:
             self.assertIn(heading, screen)
         for distance in range(4):
             self.assertIn(f'data-focus-distance="{distance}"', css)
@@ -750,6 +750,10 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn(".account-service-grid", css)
         self.assertIn(".account-shortcut-grid", css)
 
+
+
+    def test_v52_friends_system_apps_store_artwork_switcher_and_files(self):
+        self.assertTrue((ROOT / "apps/para-home/src/screens/friends.js").exists())
 
 if __name__ == "__main__":
     unittest.main()

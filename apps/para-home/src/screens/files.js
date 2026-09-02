@@ -1,5 +1,7 @@
 import { paraApi, escapeHtml, formatBytes } from "../services/para-api.js";
 import { brand, hints } from "../ui/components.js";
+import { getProfileRuntime } from "../state.js";
+import { listCaptures } from "../services/capture-service.js";
 
 const VIEW_MODES = ["details", "list", "large", "small"];
 const SORT_MODES = ["name", "modified", "type", "size"];
@@ -200,6 +202,26 @@ export function activateFiles({ focus, initialLocation = "home" }) {
     addressInput.value = model.location?.kind === "folder" ? model.location.path : model.location?.display_path || "";
   }
 
+  async function renderWebEditionHome() {
+    const runtime = getProfileRuntime();
+    let captures = [];
+    try { captures = await listCaptures(); } catch { captures = []; }
+    const downloads = Array.isArray(runtime.downloads) ? runtime.downloads : [];
+    const saveData = Array.isArray(runtime.saveData) ? runtime.saveData : [];
+    model.location = { id: "para-web", path: "para:", display_path: "PARA Files", name: "PARA Files", parent: null, kind: "virtual", writable: false };
+    model.items = [];
+    model.places = [];
+    model.capabilities = { open: true, write: false, trash: false, volumes: false };
+    root.querySelector("[data-files-location-name]").textContent = "PARA Files";
+    root.querySelector("[data-files-location-count]").textContent = "Web Edition collections";
+    placesNode.innerHTML = `<button type="button" class="files-place is-active" data-route="files"><span class="files-place__icon">⌂</span><span>PARA Files</span></button><button type="button" class="files-place" data-route="media-gallery"><span class="files-place__icon">▣</span><span>Media Gallery</span></button><button type="button" class="files-place" data-route="downloads"><span class="files-place__icon">↓</span><span>Downloads</span></button><button type="button" class="files-place" data-route="saved-data"><span class="files-place__icon">◇</span><span>Saved Data</span></button>`;
+    columnsNode.hidden = true;
+    contentNode.innerHTML = `<section class="files-web-home"><header><span>WEB EDITION</span><h2>Your PARA collections are here.</h2><p>The browser build cannot silently browse the whole PC, so Files surfaces PARA-managed content instead of showing an empty server folder.</p></header><div class="files-web-grid"><button type="button" data-route="media-gallery" data-autofocus="true"><span>▣</span><strong>Media Gallery</strong><small>${captures.length} ${captures.length === 1 ? "capture" : "captures"}</small></button><button type="button" data-route="downloads"><span>↓</span><strong>Downloads</strong><small>${downloads.length} ${downloads.length === 1 ? "item" : "items"}</small></button><button type="button" data-route="saved-data"><span>◇</span><strong>Saved Data</strong><small>${saveData.length} ${saveData.length === 1 ? "record" : "records"}</small></button><button type="button" data-route="parastore"><span>P</span><strong>ParaStore</strong><small>Games and app content</small></button></div></section>`;
+    setStatus(`${captures.length + downloads.length + saveData.length} PARA-managed items`);
+    updateToolbar();
+    focus.focusFirst();
+  }
+
   async function load(location, { record = true, focusContent = false } = {}) {
     closeContext();
     closeDialog(false);
@@ -229,14 +251,7 @@ export function activateFiles({ focus, initialLocation = "home" }) {
       }
     } catch {
       if (!alive) return;
-      model.items = [];
-      model.places = [];
-      root.querySelector("[data-files-location-name]").textContent = "Files";
-      root.querySelector("[data-files-location-count]").textContent = "";
-      placesNode.innerHTML = "";
-      contentNode.innerHTML = `<div class="files-empty"><span>▱</span><h2>Files aren’t available in this session</h2><button type="button" class="action-button" data-route="home" data-autofocus="true">Return Home</button></div>`;
-      setStatus("Files unavailable");
-      focus.focusFirst();
+      await renderWebEditionHome();
     }
   }
 

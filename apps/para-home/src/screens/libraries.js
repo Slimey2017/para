@@ -1,17 +1,25 @@
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { page } from "../ui/components.js";
+import { systemApplicationRecords } from "../services/system-app-registry.js";
 
 function applicationCard(application, index) {
   const name = escapeHtml(application.name);
   const route = application.launch?.kind === "route" ? `data-route="${escapeHtml(application.launch.route)}"` : `data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
-  const icon = application.icon
+  const iconKind = application.iconType || application.icon || "";
+  const systemIcons = {
+    friends: "✦", achievements: "◇", media: "▣", files: "", store: "P", settings: "⚙",
+  };
+  const icon = application.icon && String(application.icon).includes("/")
     ? `<img src="${application.icon}" alt="" />`
-    : application.id === "para:files"
+    : application.id === "para:files" || iconKind === "files"
       ? `<span class="app-icon app-icon--files" aria-hidden="true"><i></i></span>`
       : application.id === "para:browser"
         ? `<span class="app-icon app-icon--browser" aria-hidden="true">◎</span>`
-        : `<span class="app-icon app-icon--letter" aria-hidden="true">${name.slice(0, 1)}</span>`;
-  return `<button class="installed-app" ${route} data-app-category="${escapeHtml(application.category)}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="installed-app__icon">${icon}</span><span class="installed-app__name">${name}</span></button>`;
+        : iconKind && systemIcons[iconKind] !== undefined
+          ? `<span class="app-icon app-icon--system app-icon--${escapeHtml(iconKind)}" aria-hidden="true">${systemIcons[iconKind]}</span>`
+          : `<span class="app-icon app-icon--letter" aria-hidden="true">${name.slice(0, 1)}</span>`;
+  const detail = application.description ? `<span class="installed-app__meta">${escapeHtml(application.description)}</span>` : "";
+  return `<button class="installed-app" ${route} data-app-category="${escapeHtml(application.category)}" ${index === 0 ? "data-autofocus='true'" : ""}><span class="installed-app__icon">${icon}</span><span class="installed-app__copy"><span class="installed-app__name">${name}</span>${detail}</span></button>`;
 }
 
 export function appsScreen() {
@@ -30,9 +38,11 @@ export async function activateApps({ focus }) {
   if (!container || !categories) return;
   try {
     const payload = await paraApi.applications();
-    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", launch: { kind: "route", route: "browser" } };
-    const applications = [browser, ...(payload.applications || []).filter((item) => item.id !== browser.id)];
-    payload.categories = ["All Apps", ...new Set([...(payload.categories || []).filter((item) => item !== "All Apps"), "Tools"])];
+    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", iconType: "browser", description: "Browse the web", launch: { kind: "route", route: "browser" } };
+    const builtIns = [browser, ...systemApplicationRecords()];
+    const builtInIds = new Set(builtIns.map((item) => item.id));
+    const applications = [...builtIns, ...(payload.applications || []).filter((item) => !builtInIds.has(item.id))];
+    payload.categories = ["All Apps", ...new Set([...builtIns.map((item) => item.category), ...(payload.categories || []).filter((item) => item !== "All Apps")])];
     if (!applications.length) {
       container.innerHTML = `<div class="library-empty"><span>▦</span><h2>No applications available</h2></div>`;
       return;
@@ -42,7 +52,14 @@ export async function activateApps({ focus }) {
     container.innerHTML = applications.map(applicationCard).join("");
     focus.focusFirst();
   } catch {
-    container.innerHTML = `<div class="library-empty"><span>▦</span><h2>Apps couldn’t be loaded</h2><button class="action-button" data-action="reload-apps" data-autofocus="true">Try again</button></div>`;
+    // System apps belong to PARA itself and must remain launchable even when the
+    // native application scanner is unavailable in the hosted web edition.
+    const browser = { id: "para:browser", name: "PARA Browser", category: "Tools", iconType: "browser", description: "Browse the web", launch: { kind: "route", route: "browser" } };
+    const applications = [browser, ...systemApplicationRecords()];
+    categories.hidden = false;
+    const fallbackCategories = ["All Apps", ...new Set(applications.map((item) => item.category))];
+    categories.innerHTML = fallbackCategories.map((category, index) => `<button data-action="filter-apps" data-app-filter="${escapeHtml(category)}" class="${index === 0 ? "is-active" : ""}" aria-pressed="${index === 0}">${escapeHtml(category)}</button>`).join("");
+    container.innerHTML = applications.map(applicationCard).join("");
     focus.focusFirst();
   }
 }

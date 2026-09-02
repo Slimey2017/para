@@ -81,7 +81,13 @@ function contextMarkup(id) {
   }
   if (id === "switcher") {
     const running = runningExperiences();
-    return running.length ? `<div class="control-center-context__copy"><span>Running</span><strong>${running.length} ${running.length === 1 ? "experience" : "experiences"}</strong></div><div class="control-center-running">${running.map((item, index) => actionButton(`${escapeHtml(item.kind)} · ${escapeHtml(item.title)}`, `data-route="${escapeHtml(item.route)}"`, index === 0)).join("")}</div>` : `<div class="control-center-context__copy"><span>Switcher</span><strong>No other apps running</strong></div>`;
+    if (!running.length) return `<div class="control-center-context__copy"><span>Switcher</span><strong>No games or apps running</strong><small>Launch something and it will appear here.</small></div>`;
+    const cards = running.slice(0, 4).map((item, index) => {
+      const resumeAttrs = `data-action="resume-experience" data-experience-id="${escapeHtml(item.id)}" data-experience-route="${escapeHtml(item.route || "home")}" data-store-id="${escapeHtml(item.storeId || "")}"`;
+      const art = item.artwork ? `<img src="${escapeHtml(item.artwork)}" alt="">` : `<span>${item.kind === "Game" ? "◈" : "▦"}</span>`;
+      return `<div class="control-center-running-card"><button type="button" class="control-center-running-card__resume" ${resumeAttrs} ${index === 0 ? "data-context-autofocus='true'" : ""}><i>${art}</i><span><small>${escapeHtml(item.kind || "App")}</small><strong>${escapeHtml(item.title || "Experience")}</strong><em>${escapeHtml(item.queueStatus || "Suspended")}</em></span></button><button type="button" class="control-center-running-card__close" data-action="close-experience" data-experience-id="${escapeHtml(item.id)}" aria-label="Close ${escapeHtml(item.title || "experience")}">×</button></div>`;
+    }).join("");
+    return `<div class="control-center-context__copy"><span>Switcher</span><strong>${running.length} running</strong><small>Resume or close without leaving Control Center.</small></div><div class="control-center-running">${cards}</div>`;
   }
   if (id === "notifications") {
     const notifications = currentData.runtime.notifications || [];

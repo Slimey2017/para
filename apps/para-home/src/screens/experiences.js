@@ -14,7 +14,6 @@ const STORE_INSTALL_KEY = "para.store.installed.v1";
 const STORE_CART_KEY = "para.store.cart.v1";
 const STORE_VIEW_KEY = "para.store.view.v1";
 const STORE_WISHLIST_KEY = "para.store.wishlist.v1";
-const MESSAGES_KEY = "para.messages.v1";
 
 function storeWishlistIds() {
   const profile = getState().activeProfile || "P1";
@@ -102,10 +101,11 @@ export function installStoreItem(item) {
     status: "complete", progress: 100, completedAt: installedAt, startedAt: installedAt,
   };
   setProfileRuntime({ downloads: [completedDownload, ...runtime.downloads.filter((entry) => entry.id !== completedDownload.id)].slice(0, 20) });
+  const artwork = storeArtworkUrls(item)[0] || "";
   recordExperience({
     id: `store:${item.id}`, title: item.title || "ParaStore game", route: "store-game",
     kind: item.project_type === "APP" ? "App" : "Game", accent: "#8d43ff",
-    mark: (item.title || "P").slice(0, 1).toUpperCase(), storeId: item.id, queueStatus: "Ready to play",
+    mark: (item.title || "P").slice(0, 1).toUpperCase(), artwork, storeId: item.id, queueStatus: "Ready to play",
   });
   document.dispatchEvent(new CustomEvent("para-downloadcomplete", { detail: { downloads: [completedDownload] } }));
   return true;
@@ -120,7 +120,12 @@ export function isStoreItemInstalled(id) {
 }
 
 function installedStoreCard(item, autofocus = false) {
-  return `<article class="demo-card"><span class="demo-art" style="--demo-accent:#8d43ff"><i>${escapeHtml((item.title || "P")[0])}</i><b></b></span><div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")} · <b class="ownership-badge">Installed · Owned</b></span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
+  const art = storeArtworkUrls(item)[0] || "";
+  cacheStoreArtwork(item);
+  const visual = art
+    ? `<span class="demo-art demo-art--store-image"><img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork"><b></b></span>`
+    : `<span class="demo-art demo-art--store-fallback"><img src="/assets/para-logo.png" alt=""><b></b></span>`;
+  return `<article class="demo-card">${visual}<div class="demo-card__copy"><span>${escapeHtml(item.runtime || "PARA")} · <b class="ownership-badge">Installed · Owned</b></span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(item.store_metadata?.short_description || "Installed from ParaStore")}</p></div><button class="action-button" data-action="play-store-game" data-store-id="${escapeHtml(item.id)}" ${autofocus ? "data-autofocus='true'" : ""}>Play</button><button class="demo-remove" data-action="uninstall-store-game" data-store-id="${escapeHtml(item.id)}">Uninstall</button></article>`;
 }
 
 function demoCard(demo, { installed = false, autofocus = false } = {}) {
@@ -152,8 +157,7 @@ export function gamesScreen() {
     description: "Games installed for this profile and on this computer.",
     eyebrow: "Explore",
     className: "demo-library-page",
-    body: `<div class="game-library-shortcuts"><button class="action-button action-button--ghost" data-route="achievements">Achievements</button><button class="action-button action-button--ghost" data-route="media-gallery">Media Gallery</button></div>
-      <div class="demo-library" data-profile-games>${cards.join("")}</div>
+    body: `<div class="demo-library" data-profile-games>${cards.join("")}</div>
       <div class="demo-library" data-native-game-library><div class="library-loading"><span></span><strong>Finding PC games…</strong></div></div>
       <div class="library-empty" data-games-empty ${cards.length ? "hidden" : ""}><span>◉</span><h2>No games installed</h2><p>PARA checks ParaStore installs, demos, and local PC game libraries.</p><button class="action-button" data-route="parastore">Open ParaStore</button></div>`,
   });
@@ -206,7 +210,7 @@ export function paraStoreScreen() {
       </section>
       <section class="store-feature store-feature--live" data-store-feature>
         <div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>Discover something new.</h2><p>Games and apps from PARA developers, all in one place.</p></div>
-        <div class="store-feature__mark">P</div>
+        <div class="store-feature__mark store-feature__mark--logo"><img src="/assets/para-logo.png" alt=""></div>
       </section>
       <nav class="store-categories store-categories--primary" aria-label="Store categories">
         <button class="is-active" data-store-type="ALL" aria-pressed="true" data-autofocus="true">Featured</button><button data-store-type="GAME" aria-pressed="false">Games</button><button data-store-type="APP" aria-pressed="false">Apps</button><button data-store-sort="new" aria-pressed="false">New Releases</button>
@@ -223,9 +227,9 @@ function liveStoreCard(item) {
   const type = item.project_type || "GAME";
   const genre = meta.genre || type;
   const price = priceLabel(commerceFor(item, meta));
-  const art = assetUrl(assets.hero || assets.cover || assets.icon);
-  const fallback = escapeHtml((item.title || "P").slice(0,1).toUpperCase());
-  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork">` : `<span>${fallback}</span>`}<div class="store-live-card__badges"><small>${escapeHtml(genre)}</small><small>${escapeHtml(item.runtime || "PARA")}</small></div></div><div class="store-live-card__copy"><span>${escapeHtml(type)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>A View game</small></div></div></article>`;
+  const art = storeArtworkUrls(item)[0] || "";
+  cacheStoreArtwork(item);
+  return `<article class="store-live-card" tabindex="0" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}"><div class="store-live-card__art">${art ? `<img src="${art}" alt="${escapeHtml(item.title || "Untitled")} artwork">` : `<span class="store-live-card__fallback"><img src="/assets/para-logo.png" alt=""></span>`}<div class="store-live-card__badges"><small>${escapeHtml(genre)}</small><small>${escapeHtml(item.runtime || "PARA")}</small></div></div><div class="store-live-card__copy"><span>${escapeHtml(type)}</span><h2>${escapeHtml(item.title || "Untitled")}</h2><p>${escapeHtml(description)}</p><div><strong>${escapeHtml(price)}</strong><small>A View game</small></div></div></article>`;
 }
 
 export function activateParaStore() {
@@ -280,6 +284,7 @@ export function activateParaStore() {
       runtimeButton.dataset.storeRuntime = runtime;
     }
   };
+  let featureSlidesCleanup = () => {};
   const runtimeMatch = (value) => {
     if (runtime === "ALL") return true;
     const r = String(value || "PARA").toUpperCase();
@@ -302,9 +307,11 @@ export function activateParaStore() {
     if (shelfTitle) shelfTitle.textContent = wishlistOnly ? "Wishlist" : q ? `Results for “${search.value.trim()}”` : newest ? "New Releases" : genre !== "All" ? genre : type === "GAME" ? "Games" : type === "APP" ? "Apps" : "Featured";
     const featured = items[0] || catalog[0];
     if (feature && featured) {
-      const meta = featured.store_metadata || {}, assets = featured.asset_references || {}, hero = assetUrl(assets.hero || assets.cover || assets.icon);
-      feature.style.setProperty("--store-feature-art", hero ? `url('${hero}')` : "none");
-      feature.innerHTML = `<div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>${escapeHtml(featured.title || "Untitled")}</h2><p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p><div class="store-feature__meta"><span>${escapeHtml(meta.genre || featured.project_type || "Game")}</span><span>${escapeHtml(featured.runtime || "PARA")}</span><button type="button" data-action="open-store-product" data-store-id="${escapeHtml(featured.id)}">View game</button></div></div>`;
+      const meta = featured.store_metadata || {};
+      featureSlidesCleanup();
+      feature.style.setProperty("--store-feature-art", "none");
+      feature.innerHTML = `${storeSlideshowMarkup(featured, "store-feature__slideshow")}<div class="store-feature__shade"></div><div class="store-feature__copy"><span class="eyebrow">Featured on PARA</span><h2>${escapeHtml(featured.title || "Untitled")}</h2><p>${escapeHtml(meta.short_description || "Published on ParaStore")}</p><div class="store-feature__meta"><span>${escapeHtml(meta.genre || featured.project_type || "Game")}</span><span>${escapeHtml(featured.runtime || "PARA")}</span><button type="button" data-action="open-store-product" data-store-id="${escapeHtml(featured.id)}">View game</button></div></div>`;
+      featureSlidesCleanup = activateStoreSlideshows(feature);
     }
     syncFilterA11y();
     saveView();
@@ -330,7 +337,7 @@ export function activateParaStore() {
     if (!alive) return;
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>ParaStore could not connect</h2><p>${escapeHtml(error.message || "Catalog unavailable")}</p></div>`;
   });
-  return () => { alive = false; saveView(); listeners.forEach(fn=>fn()); };
+  return () => { alive = false; featureSlidesCleanup(); saveView(); listeners.forEach(fn=>fn()); };
 }
 
 
@@ -347,6 +354,47 @@ export function storeProductScreen() {
 
 function assetUrl(path) {
   return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
+}
+
+function storeArtworkPaths(item = {}) {
+  const assets = item.asset_references || {};
+  const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+  return [...new Set([assets.hero, assets.cover, ...shots, assets.icon].filter(Boolean))];
+}
+
+function storeArtworkUrls(item = {}) {
+  return storeArtworkPaths(item).map(assetUrl).filter(Boolean);
+}
+
+function cacheStoreArtwork(item = {}) {
+  if (!item?.id) return [];
+  const urls = storeArtworkUrls(item);
+  try {
+    sessionStorage.setItem(`para.store.artwork.${item.id}`, JSON.stringify({ title: item.title || "PARA Game", urls }));
+  } catch { /* launch art caching is optional */ }
+  return urls;
+}
+
+function storeSlideshowMarkup(item, className = "store-art-slideshow") {
+  const urls = cacheStoreArtwork(item);
+  if (!urls.length) return `<div class="${className} is-empty"><img src="/assets/para-logo.png" alt=""></div>`;
+  return `<div class="${className}" data-store-slideshow>${urls.map((url, index) => `<img src="${url}" alt="" class="${index === 0 ? "is-active" : ""}" data-store-slide="${index}">`).join("")}</div>`;
+}
+
+function activateStoreSlideshows(root = document) {
+  const cleanups = [];
+  root.querySelectorAll?.("[data-store-slideshow]").forEach((slideshow) => {
+    const slides = [...slideshow.querySelectorAll("[data-store-slide]")];
+    if (slides.length < 2) return;
+    let index = Math.max(0, slides.findIndex((slide) => slide.classList.contains("is-active")));
+    const timer = window.setInterval(() => {
+      slides[index]?.classList.remove("is-active");
+      index = (index + 1) % slides.length;
+      slides[index]?.classList.add("is-active");
+    }, 3600);
+    cleanups.push(() => window.clearInterval(timer));
+  });
+  return () => cleanups.forEach((cleanup) => cleanup());
 }
 
 const ESRB_ART = {
@@ -378,6 +426,7 @@ export function activateStoreProduct() {
   if (!host) return () => {};
   const id = sessionStorage.getItem("para.store.product") || "";
   let alive = true;
+  let slidesCleanup = () => {};
   if (!id) {
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>No product selected</h2><button class="action-button" data-route="parastore">Back to ParaStore</button></div>`;
     return () => {};
@@ -386,9 +435,9 @@ export function activateStoreProduct() {
     if (!alive) return;
     const meta = item.store_metadata || {};
     const assets = item.asset_references || {};
-    const hero = assetUrl(assets.hero || assets.cover || assets.icon);
-    const cover = assetUrl(assets.cover || assets.icon || assets.hero);
     const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+    const productArt = cacheStoreArtwork(item);
+    const cover = assetUrl(assets.cover || assets.icon || assets.hero || shots[0]) || productArt[0] || "";
     const commerce = commerceFor(item, meta);
     const price = priceLabel(commerce);
     const rating = ratingFor(item, meta);
@@ -400,11 +449,12 @@ export function activateStoreProduct() {
     const genres = [meta.genre, ...(Array.isArray(meta.genres) ? meta.genres : [])].filter(Boolean);
     sessionStorage.setItem("para.store.screenshots", JSON.stringify(shots));
     host.innerHTML = `
-      <section class="store-product-hero" ${hero ? `style="--product-hero:url('${hero}')"` : ""}>
+      <section class="store-product-hero">
+        ${storeSlideshowMarkup(item, "store-product-hero__slideshow")}
         <div class="store-product-hero__shade"></div>
         <button class="store-product-back" data-action="store-product-back">← Back</button>
         <div class="store-product-hero__content">
-          <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span>${escapeHtml((item.title || "P")[0])}</span>`}</div>
+          <div class="store-product-cover">${cover ? `<img src="${cover}" alt="${escapeHtml(item.title)} cover">` : `<span class="store-product-cover__fallback"><img src="/assets/para-logo.png" alt=""></span>`}</div>
           <div class="store-product-copy">
             <span>${escapeHtml(genres[0] || item.project_type || "GAME")}</span>
             <h1>${escapeHtml(item.title || "Untitled")}</h1>
@@ -425,11 +475,13 @@ export function activateStoreProduct() {
       </section>
       ${shots.length ? `<section class="store-product-gallery store-product-gallery--prominent"><div class="store-product-gallery__heading"><div><span>MEDIA</span><h2>Screenshots</h2></div><small>${shots.length} image${shots.length === 1 ? "" : "s"} • A to enlarge</small></div><div class="store-product-gallery__track">${shots.map((shot, index) => `<button type="button" class="store-product-shot" data-action="open-store-screenshot" data-shot-index="${index}" aria-label="Open screenshot ${index + 1}"><img src="${assetUrl(shot)}" alt="${escapeHtml(item.title)} screenshot ${index + 1}"><span>${index + 1} / ${shots.length}</span></button>`).join("")}</div></section>` : ""}
     `;
+    slidesCleanup();
+    slidesCleanup = activateStoreSlideshows(host);
   }).catch((error) => {
     if (!alive) return;
     host.innerHTML = `<div class="library-empty"><span>!</span><h2>Product unavailable</h2><p>${escapeHtml(error.message || "Could not load product")}</p></div>`;
   });
-  return () => { alive = false; };
+  return () => { alive = false; slidesCleanup(); };
 }
 
 export function storeCartScreen() {
@@ -463,7 +515,7 @@ export function activateStoreCart() {
     const total = items.reduce((sum, item) => sum + commerceFor(item, item.store_metadata || {}).amount, 0);
     const currency = commerceFor(items[0], items[0].store_metadata || {}).currency || "USD";
     const totalLabel = priceLabel({ model: "PAID", amount: total, currency });
-    host.innerHTML = `<div class="store-cart-head"><div><span>PARASTORE CART</span><h1>${items.length} ${items.length === 1 ? "item" : "items"}</h1><p>Prices are refreshed from PARA before checkout.</p></div><button type="button" data-route="parastore">Continue shopping</button></div><div class="store-cart-layout"><div class="store-cart-items">${items.map((item, index) => { const meta=item.store_metadata||{}; const assets=item.asset_references||{}; const commerce=commerceFor(item,meta); const art=assetUrl(assets.cover||assets.icon||assets.hero); return `<article class="store-cart-item"><button class="store-cart-item__art" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" ${index===0?'data-autofocus="true"':''}>${art?`<img src="${art}" alt="">`:`<span>${escapeHtml((item.title||"P")[0])}</span>`}</button><div class="store-cart-item__copy"><span>${escapeHtml(meta.genre||item.project_type||"GAME")}</span><h2>${escapeHtml(item.title||"Untitled")}</h2><small>${escapeHtml(item.runtime||"PARA")}</small><button type="button" data-action="remove-store-cart" data-store-id="${escapeHtml(item.id)}">Remove</button></div><strong>${escapeHtml(priceLabel(commerce))}</strong></article>`; }).join("")}</div><aside class="store-cart-summary"><span>ORDER SUMMARY</span><div><b>Subtotal</b><strong>${escapeHtml(totalLabel)}</strong></div><div><b>Tax</b><small>Calculated at checkout</small></div><hr><div class="store-cart-total"><b>Total before tax</b><strong>${escapeHtml(totalLabel)}</strong></div><button class="action-button" data-action="checkout-store-cart">Continue to secure checkout</button><p>Final prices and eligibility are verified by PARA Commerce on the server.</p></aside></div>`;
+    host.innerHTML = `<div class="store-cart-head"><div><span>PARASTORE CART</span><h1>${items.length} ${items.length === 1 ? "item" : "items"}</h1><p>Prices are refreshed from PARA before checkout.</p></div><button type="button" data-route="parastore">Continue shopping</button></div><div class="store-cart-layout"><div class="store-cart-items">${items.map((item, index) => { const meta=item.store_metadata||{}; const assets=item.asset_references||{}; const commerce=commerceFor(item,meta); const art=storeArtworkUrls(item)[0]||""; cacheStoreArtwork(item); return `<article class="store-cart-item"><button class="store-cart-item__art" data-action="open-store-product" data-store-id="${escapeHtml(item.id)}" ${index===0?'data-autofocus="true"':''}>${art?`<img src="${art}" alt="">`:`<span class="store-cart-item__fallback"><img src="/assets/para-logo.png" alt=""></span>`}</button><div class="store-cart-item__copy"><span>${escapeHtml(meta.genre||item.project_type||"GAME")}</span><h2>${escapeHtml(item.title||"Untitled")}</h2><small>${escapeHtml(item.runtime||"PARA")}</small><button type="button" data-action="remove-store-cart" data-store-id="${escapeHtml(item.id)}">Remove</button></div><strong>${escapeHtml(priceLabel(commerce))}</strong></article>`; }).join("")}</div><aside class="store-cart-summary"><span>ORDER SUMMARY</span><div><b>Subtotal</b><strong>${escapeHtml(totalLabel)}</strong></div><div><b>Tax</b><small>Calculated at checkout</small></div><hr><div class="store-cart-total"><b>Total before tax</b><strong>${escapeHtml(totalLabel)}</strong></div><button class="action-button" data-action="checkout-store-cart">Continue to secure checkout</button><p>Final prices and eligibility are verified by PARA Commerce on the server.</p></aside></div>`;
   });
   return () => { alive = false; };
 }
@@ -490,102 +542,6 @@ export function activateStoreGame() {
   host.innerHTML = `<div class="store-game-boot"><span class="store-game-boot__spinner"></span><strong>Starting game…</strong><small>Opening direct PARA Game Mode…</small></div>`;
   window.location.replace(source);
   return () => {};
-}
-
-function messageStore() {
-  const profile = getState().activeProfile || "P1";
-  let all = {};
-  try { all = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "{}"); } catch { all = {}; }
-  if (!Array.isArray(all[profile]) || !all[profile].length) {
-    all[profile] = [{ id: "para-friends", title: "PARA Friends", initial: "P", messages: [{ id: `m-${Date.now()}`, sender: "PARA", text: "Welcome to Messages. This conversation is saved to your PARA profile on this console.", at: Date.now() }] }];
-    try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(all)); } catch {}
-  }
-  return { profile, all, threads: all[profile] };
-}
-
-function saveMessageStore(profile, all, threads) {
-  all[profile] = threads;
-  localStorage.setItem(MESSAGES_KEY, JSON.stringify(all));
-  window.dispatchEvent(new CustomEvent("para-messages-change"));
-}
-
-function renderMessageThreads(threads, activeId) {
-  return threads.map((thread, index) => {
-    const last = thread.messages?.[thread.messages.length - 1];
-    const time = last?.at ? new Date(last.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-    return `<button type="button" class="message-thread ${thread.id === activeId ? "is-active" : ""}" data-message-thread="${escapeHtml(thread.id)}" ${index === 0 ? "data-autofocus='true'" : ""}><i>${escapeHtml(thread.initial || (thread.title || "?")[0])}</i><span><strong>${escapeHtml(thread.title || "Conversation")}</strong><small>${escapeHtml(last?.text || "No messages yet")}</small></span><time>${escapeHtml(time)}</time></button>`;
-  }).join("");
-}
-
-function renderMessageConversation(thread) {
-  if (!thread) return `<section class="message-conversation"><div class="library-empty"><span>…</span><h2>Choose a conversation</h2></div></section>`;
-  const bubbles = (thread.messages || []).map((message) => `<div class="message-bubble ${message.sender === "You" ? "is-self" : ""}"><span>${escapeHtml(message.sender || "PARA")}</span><p>${escapeHtml(message.text || "")}</p></div>`).join("");
-  return `<section class="message-conversation" data-message-conversation><header><div><strong>${escapeHtml(thread.title)}</strong><small>Saved to this PARA profile</small></div></header><div class="message-conversation__body" data-message-body>${bubbles || `<div class="library-empty"><span>…</span><h2>No messages yet</h2></div>`}</div><form class="message-composer" data-message-form><button type="button" data-message-attach aria-label="Attach a file">＋</button><input type="file" data-message-file hidden><input placeholder="Message" aria-label="Message" data-message-input autocomplete="off"/><button type="submit">Send</button></form></section>`;
-}
-
-export function messagesScreen() {
-  const { threads } = messageStore();
-  const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id || "";
-  const active = threads.find((thread) => thread.id === activeId) || threads[0];
-  return page({
-    title: "Messages",
-    description: "Conversations saved to your PARA profile.",
-    eyebrow: "Community",
-    className: "messages-page",
-    body: `<div class="messages-shell" data-messages-shell><aside class="messages-list"><div class="messages-list__head"><h2>Chats</h2><button type="button" aria-label="New message" data-message-new>＋</button></div><div data-message-thread-list>${renderMessageThreads(threads, active?.id || "")}</div></aside>${renderMessageConversation(active)}</div>`,
-  });
-}
-
-export function activateMessages({ focus } = {}) {
-  const shell = document.querySelector("[data-messages-shell]");
-  if (!shell) return () => {};
-  const render = (requestedId = "") => {
-    const { threads } = messageStore();
-    const activeId = requestedId || sessionStorage.getItem("para.messages.active") || threads[0]?.id || "";
-    const active = threads.find((thread) => thread.id === activeId) || threads[0];
-    if (active) sessionStorage.setItem("para.messages.active", active.id);
-    const list = shell.querySelector("[data-message-thread-list]");
-    if (list) list.innerHTML = renderMessageThreads(threads, active?.id || "");
-    const conversation = shell.querySelector("[data-message-conversation]");
-    const fresh = document.createElement("div"); fresh.innerHTML = renderMessageConversation(active);
-    const replacement = fresh.firstElementChild;
-    if (conversation && replacement) conversation.replaceWith(replacement);
-    else if (replacement) shell.append(replacement);
-    requestAnimationFrame(() => { const body = shell.querySelector("[data-message-body]"); if (body) body.scrollTop = body.scrollHeight; });
-  };
-  const onClick = (event) => {
-    const threadButton = event.target.closest("[data-message-thread]");
-    if (threadButton) { render(threadButton.dataset.messageThread); return; }
-    if (event.target.closest("[data-message-new]")) {
-      const { profile, all, threads } = messageStore();
-      const id = `local-${Date.now()}`;
-      const next = [...threads, { id, title: `Conversation ${threads.length + 1}`, initial: "+", messages: [] }];
-      saveMessageStore(profile, all, next); sessionStorage.setItem("para.messages.active", id); render(id); shell.querySelector("[data-message-input]")?.focus(); return;
-    }
-    if (event.target.closest("[data-message-attach]")) shell.querySelector("[data-message-file]")?.click();
-  };
-  const onSubmit = (event) => {
-    if (!event.target.matches("[data-message-form]")) return;
-    event.preventDefault();
-    const input = event.target.querySelector("[data-message-input]");
-    const text = String(input?.value || "").trim(); if (!text) return;
-    const { profile, all, threads } = messageStore();
-    const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id;
-    const next = threads.map((thread) => thread.id === activeId ? { ...thread, messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }] } : thread);
-    saveMessageStore(profile, all, next); if (input) input.value = ""; render(activeId);
-  };
-  const onChange = (event) => {
-    if (!event.target.matches("[data-message-file]") || !event.target.files?.[0]) return;
-    const file = event.target.files[0];
-    const { profile, all, threads } = messageStore();
-    const activeId = sessionStorage.getItem("para.messages.active") || threads[0]?.id;
-    const text = `Attachment selected: ${file.name}`;
-    const next = threads.map((thread) => thread.id === activeId ? { ...thread, messages: [...(thread.messages || []), { id: `m-${Date.now()}`, sender: "You", text, at: Date.now() }] } : thread);
-    saveMessageStore(profile, all, next); render(activeId);
-  };
-  shell.addEventListener("click", onClick); shell.addEventListener("submit", onSubmit); shell.addEventListener("change", onChange);
-  render(); focus?.focusFirst?.();
-  return () => { shell.removeEventListener("click", onClick); shell.removeEventListener("submit", onSubmit); shell.removeEventListener("change", onChange); };
 }
 
 export function activateDemoLibrary({ rerender }) {

@@ -129,39 +129,122 @@ export async function removeCapture(id) {
   return activateMediaGallery();
 }
 
-export function achievementsScreen() {
-  const achievements = [...getProfileRuntime().achievements].sort((a, b) => {
+let selectedAchievementProject = "";
+
+function achievementAssetUrl(path) {
+  return path ? `/api/v1/store/asset?path=${encodeURIComponent(path)}` : "";
+}
+
+function sortedAchievements() {
+  return [...getProfileRuntime().achievements].sort((a, b) => {
     const aUnlocked = Number(a.unlockedAt || 0);
     const bUnlocked = Number(b.unlockedAt || 0);
     if (aUnlocked !== bUnlocked) return bUnlocked - aUnlocked;
     return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
   });
+}
+
+function achievementSummaryMarkup(achievements) {
   const unlocked = achievements.filter((item) => item.unlockedAt);
   const score = unlocked.reduce((total, item) => total + Number(item.points || 0), 0);
   const completion = achievements.length ? Math.round((unlocked.length / achievements.length) * 100) : 0;
-  const body = achievements.length
-    ? `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>${score}</strong><small>${unlocked.length} unlocked</small></div><div><span class="eyebrow">Completed</span><strong>${completion}%</strong><small>${unlocked.length} of ${achievements.length} tracked</small></div></section>
-       <section class="achievement-list">${achievements.map((item, index) => {
-         const unlockedAt = item.unlockedAt ? new Date(item.unlockedAt).toLocaleDateString() : '';
-         const target = Math.max(1, Number(item.target || 1));
-         const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
-         const percent = Math.round((progress / target) * 100);
-         const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
-         const syncState = item.syncState === 'cloud' ? 'cloud' : item.syncState === 'pending' ? 'pending' : 'local';
-         const syncLabel = syncState === 'cloud' ? 'CLOUD SYNCED' : syncState === 'pending' ? 'SYNC PENDING' : 'LOCAL ONLY';
-         const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
-         return `<article class="achievement-card ${item.unlockedAt ? 'is-unlocked' : ''}" tabindex="0" ${index === 0 ? 'data-autofocus="true"' : ''}>
-           <div class="achievement-card__icon">${icon}</div>
-           <div class="achievement-card__copy"><div><span>${item.unlockedAt ? 'UNLOCKED' : item.kind === 'PROGRESS' ? 'IN PROGRESS' : 'LOCKED'}</span><span class="achievement-sync achievement-sync--${syncState}">${syncLabel}</span><strong>${hiddenLocked ? 'Secret achievement' : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? 'Keep playing to reveal this achievement.' : escapeHtml(item.description || '')}</p>${item.kind === 'PROGRESS' && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || '')}</small>`}</div>
-           <b>${Number(item.points || 0)} pts</b>
-         </article>`;
-       }).join('')}</section>`
-    : `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>0</strong><small>No unlocks yet</small></div><div><span class="eyebrow">Completed</span><strong>0%</strong><small>Across supported games</small></div></section><div class="library-empty achievements-empty"><span>◇</span><h2>No achievements yet</h2><p>Achievement lists appear here when a game reports progress through the PARA Achievement API.</p><button class="action-button" data-route="games" data-autofocus="true">Open Games</button></div>`;
+  return `<section class="achievements-summary"><div><span class="eyebrow">PARA Score</span><strong>${score}</strong><small>${unlocked.length} unlocked</small></div><div><span class="eyebrow">Completed</span><strong>${completion}%</strong><small>${unlocked.length} of ${achievements.length} tracked</small></div></section>`;
+}
+
+function achievementCardMarkup(item, index) {
+  const unlockedAt = item.unlockedAt ? new Date(item.unlockedAt).toLocaleDateString() : "";
+  const target = Math.max(1, Number(item.target || 1));
+  const progress = Math.min(target, Math.max(0, Number(item.progress || 0)));
+  const percent = Math.round((progress / target) * 100);
+  const hiddenLocked = Boolean(item.hidden && !item.unlockedAt);
+  const syncState = item.syncState === "cloud" ? "cloud" : item.syncState === "pending" ? "pending" : "local";
+  const syncLabel = syncState === "cloud" ? "CLOUD SYNCED" : syncState === "pending" ? "SYNC PENDING" : "LOCAL ONLY";
+  const icon = item.iconUrl && !hiddenLocked ? `<img src="${escapeHtml(item.iconUrl)}" alt="">` : `<span>◇</span>`;
+  return `<article class="achievement-card ${item.unlockedAt ? "is-unlocked" : ""}" tabindex="0" ${index === 0 ? "data-autofocus='true'" : ""}>
+    <div class="achievement-card__icon">${icon}</div>
+    <div class="achievement-card__copy"><div><span>${item.unlockedAt ? "UNLOCKED" : item.kind === "PROGRESS" ? "IN PROGRESS" : "LOCKED"}</span><span class="achievement-sync achievement-sync--${syncState}">${syncLabel}</span><strong>${hiddenLocked ? "Secret achievement" : escapeHtml(item.name || item.key)}</strong></div><p>${hiddenLocked ? "Keep playing to reveal this achievement." : escapeHtml(item.description || "")}</p>${item.kind === "PROGRESS" && !item.unlockedAt ? `<div class="achievement-progress"><i style="width:${percent}%"></i></div><small>${progress} / ${target}</small>` : `<small>${unlockedAt ? `Earned ${escapeHtml(unlockedAt)}` : escapeHtml(item.key || "")}</small>`}</div>
+    <b>${Number(item.points || 0)} pts</b>
+  </article>`;
+}
+
+function achievementGroups(achievements, catalog = []) {
+  const catalogByProject = new Map(catalog.filter((item) => item?.project_id).map((item) => [String(item.project_id), item]));
+  const recent = getProfileRuntime().recent || [];
+  const runtimeByProject = new Map(recent.filter((item) => item?.projectId).map((item) => [String(item.projectId), item]));
+  const groups = new Map();
+  for (const item of achievements) {
+    const projectId = String(item.projectId || "legacy");
+    if (!groups.has(projectId)) groups.set(projectId, []);
+    groups.get(projectId).push(item);
+  }
+  return [...groups.entries()].map(([projectId, items]) => {
+    const catalogItem = catalogByProject.get(projectId);
+    const runtimeItem = runtimeByProject.get(projectId);
+    const assets = catalogItem?.asset_references || {};
+    const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+    const artPath = assets.cover || assets.icon || assets.hero || shots[0] || "";
+    const unlocked = items.filter((item) => item.unlockedAt).length;
+    const score = items.filter((item) => item.unlockedAt).reduce((total, item) => total + Number(item.points || 0), 0);
+    const title = catalogItem?.title || runtimeItem?.title || (projectId === "legacy" ? "Other PARA Games" : "PARA Game");
+    return { projectId, items, title, art: achievementAssetUrl(artPath), unlocked, score };
+  }).sort((a, b) => (b.unlocked / Math.max(1, b.items.length)) - (a.unlocked / Math.max(1, a.items.length)) || a.title.localeCompare(b.title));
+}
+
+function achievementFoldersMarkup(groups) {
+  if (!groups.length) return `<div class="library-empty achievements-empty"><span>◇</span><h2>No achievements yet</h2><p>Achievement folders appear here when games report progress through the PARA Achievement API.</p><button class="action-button" data-route="games" data-autofocus="true">Open Games</button></div>`;
+  return `<section class="achievement-folders" aria-label="Achievement games">${groups.map((group, index) => {
+    const completion = Math.round((group.unlocked / Math.max(1, group.items.length)) * 100);
+    const art = group.art ? `<img src="${group.art}" alt="">` : `<span class="achievement-folder__fallback">◇</span>`;
+    return `<button type="button" class="achievement-folder" data-achievement-project="${escapeHtml(group.projectId)}" ${index === 0 ? "data-autofocus='true'" : ""}>
+      <span class="achievement-folder__art">${art}<i>${completion}%</i></span>
+      <span class="achievement-folder__copy"><span>GAME TROPHIES</span><strong>${escapeHtml(group.title)}</strong><small>${group.unlocked} of ${group.items.length} unlocked · ${group.score} pts</small><b><i style="width:${completion}%"></i></b></span>
+      <em aria-hidden="true">›</em>
+    </button>`;
+  }).join("")}</section>`;
+}
+
+function achievementGameMarkup(group) {
+  if (!group) return "";
+  const completion = Math.round((group.unlocked / Math.max(1, group.items.length)) * 100);
+  return `<section class="achievement-game-head"><button type="button" data-achievement-back>← All games</button><div class="achievement-game-head__art">${group.art ? `<img src="${group.art}" alt="">` : `<span>◇</span>`}</div><div><span>GAME TROPHIES</span><h2>${escapeHtml(group.title)}</h2><p>${group.unlocked} of ${group.items.length} unlocked · ${completion}% complete · ${group.score} pts</p></div></section><section class="achievement-list">${group.items.map(achievementCardMarkup).join("")}</section>`;
+}
+
+export function achievementsScreen() {
+  const achievements = sortedAchievements();
   return page({
     title: "Achievements",
-    description: "Progress, unlocks, points, and completion history.",
-    eyebrow: "Games",
-    className: "achievements-page",
-    body,
+    description: "Trophies are organized by game instead of scattered into one endless list.",
+    eyebrow: "System app",
+    className: "achievements-page achievements-app-page",
+    body: `${achievementSummaryMarkup(achievements)}<div data-achievements-app><div class="library-loading"><span></span><strong>Organizing game trophies…</strong></div></div>`,
   });
+}
+
+export async function activateAchievements({ focus } = {}) {
+  const host = document.querySelector("[data-achievements-app]");
+  if (!host) return () => {};
+  let alive = true;
+  let catalog = [];
+  try {
+    const payload = await paraApi.storeCatalog();
+    catalog = Array.isArray(payload?.items) ? payload.items : [];
+  } catch { /* local achievement folders still render */ }
+  if (!alive) return () => {};
+
+  const render = () => {
+    const achievements = sortedAchievements();
+    const groups = achievementGroups(achievements, catalog);
+    const selected = selectedAchievementProject ? groups.find((group) => group.projectId === selectedAchievementProject) : null;
+    if (selectedAchievementProject && !selected) selectedAchievementProject = "";
+    host.innerHTML = selected ? achievementGameMarkup(selected) : achievementFoldersMarkup(groups);
+    requestAnimationFrame(() => focus?.focusFirst?.());
+  };
+  const onClick = (event) => {
+    const folder = event.target.closest("[data-achievement-project]");
+    if (folder) { selectedAchievementProject = folder.dataset.achievementProject || ""; render(); return; }
+    if (event.target.closest("[data-achievement-back]")) { selectedAchievementProject = ""; render(); }
+  };
+  host.addEventListener("click", onClick);
+  render();
+  return () => { alive = false; host.removeEventListener("click", onClick); };
 }

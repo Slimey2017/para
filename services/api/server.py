@@ -1515,6 +1515,15 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
             runtime_base_json = json.dumps(runtime_base)
             game_title_json = json.dumps(str(item.get("title") or "PARA Game"))
             project_id_json = json.dumps(str(item.get("project_id") or ""))
+            asset_refs = item.get("asset_references") if isinstance(item.get("asset_references"), dict) else {}
+            screenshots = asset_refs.get("screenshots") if isinstance(asset_refs.get("screenshots"), list) else []
+            artwork_paths = []
+            for candidate in [asset_refs.get("hero"), asset_refs.get("cover"), *screenshots, asset_refs.get("icon")]:
+                candidate = str(candidate or "").strip()
+                if candidate and candidate not in artwork_paths:
+                    artwork_paths.append(candidate)
+            artwork_urls = [f"/api/v1/store/asset?path={urllib.parse.quote(path, safe='')}" for path in artwork_paths[:8]]
+            game_artwork_json = json.dumps(artwork_urls)
             injection = (
                 f'<base href="{runtime_base}">\n'
                 + (
@@ -1524,6 +1533,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const RUNTIME_ID = __PARA_RUNTIME_ID__;
   const GAME_TITLE = __PARA_GAME_TITLE__;
   const PROJECT_ID = __PARA_PROJECT_ID__;
+  const GAME_ARTWORK = __PARA_GAME_ARTWORK__;
   const GAME_RETURN_TRANSITION_KEY = 'para.game.transition.return';
   let paraGameTransitionLeaving = false;
   let gameSuspended = false;
@@ -1591,14 +1601,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const transitionStyle = document.createElement('style');
   transitionStyle.dataset.paraGameTransition = 'true';
   transitionStyle.textContent = `
-    .para-game-page-transition{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#030207;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;pointer-events:none;transition:opacity .28s ease}
+    .para-game-page-transition{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#030207;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;pointer-events:none;overflow:hidden;transition:opacity .28s ease}
     .para-game-page-transition::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(124,54,235,.2),transparent 28%),radial-gradient(circle at 50% 50%,rgba(96,28,188,.08),transparent 54%),#030207;transform:scale(1.035);transition:transform .62s cubic-bezier(.2,.86,.24,1)}
-    .para-game-page-transition>div{position:relative;display:grid;justify-items:center;gap:9px;text-align:center;opacity:0;transform:translateY(12px) scale(.985);transition:opacity .24s ease .08s,transform .42s cubic-bezier(.2,.86,.24,1) .04s}
+    .para-game-page-transition .para-game-page-transition__slides{position:absolute;inset:0;z-index:0}
+    .para-game-page-transition .para-game-page-transition__slides img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:scale(1.035);transition:opacity .55s ease,transform 2.4s ease}
+    .para-game-page-transition .para-game-page-transition__slides img.is-active{opacity:.56;transform:scale(1)}
+    .para-game-page-transition .para-game-page-transition__shade{position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(3,2,7,.28),rgba(3,2,7,.72)),radial-gradient(circle at 50% 50%,transparent 0,rgba(3,2,7,.55) 72%)}
+    .para-game-page-transition>div:not(.para-game-page-transition__slides):not(.para-game-page-transition__shade){position:relative;z-index:2;display:grid;justify-items:center;gap:9px;text-align:center;opacity:0;transform:translateY(12px) scale(.985);transition:opacity .24s ease .08s,transform .42s cubic-bezier(.2,.86,.24,1) .04s}
     .para-game-page-transition b{width:46px;height:46px;display:grid;place-items:center;border:2px solid rgba(184,133,255,.38);border-top-color:#b66fff;border-radius:50%;box-shadow:0 0 26px rgba(142,74,255,.18);animation:paraGameSpin .9s linear infinite}
     .para-game-page-transition span{color:#aaa0b7;font-size:12px;font-weight:800;letter-spacing:.2em;text-transform:uppercase}
     .para-game-page-transition strong{max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(20px,2.3vw,32px);letter-spacing:-.03em}
-    .para-game-page-transition.is-visible{opacity:1;pointer-events:all}.para-game-page-transition.is-visible::before{transform:scale(1)}.para-game-page-transition.is-visible>div{opacity:1;transform:none}
-    .para-game-page-transition.is-revealing{opacity:0;pointer-events:none}.para-game-page-transition.is-revealing>div{opacity:0;transform:translateY(-8px) scale(1.01)}
+    .para-game-page-transition.is-visible{opacity:1;pointer-events:all}.para-game-page-transition.is-visible::before{transform:scale(1)}.para-game-page-transition.is-visible>div:not(.para-game-page-transition__slides):not(.para-game-page-transition__shade){opacity:1;transform:none}
+    .para-game-page-transition.is-revealing{opacity:0;pointer-events:none}.para-game-page-transition.is-revealing>div:not(.para-game-page-transition__slides):not(.para-game-page-transition__shade){opacity:0;transform:translateY(-8px) scale(1.01)}
     @keyframes paraGameSpin{to{transform:rotate(360deg)}}
     @media (prefers-reduced-motion:reduce){.para-game-page-transition,.para-game-page-transition::before,.para-game-page-transition>div{transition-duration:.001ms!important}.para-game-page-transition b{animation:none!important}}
   `;
@@ -1608,6 +1622,30 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const node = document.createElement('div');
     node.className = 'para-game-page-transition';
     node.setAttribute('role', 'status');
+    if (Array.isArray(GAME_ARTWORK) && GAME_ARTWORK.length) {
+      const slides = document.createElement('div');
+      slides.className = 'para-game-page-transition__slides';
+      GAME_ARTWORK.slice(0, 8).forEach((url, index) => {
+        const image = document.createElement('img');
+        image.src = url;
+        image.alt = '';
+        if (index === 0) image.classList.add('is-active');
+        slides.append(image);
+      });
+      node.append(slides);
+      const shade = document.createElement('div');
+      shade.className = 'para-game-page-transition__shade';
+      node.append(shade);
+      if (GAME_ARTWORK.length > 1) {
+        let index = 0;
+        node.__paraArtworkTimer = setInterval(() => {
+          const images = [...slides.querySelectorAll('img')];
+          images[index]?.classList.remove('is-active');
+          index = (index + 1) % images.length;
+          images[index]?.classList.add('is-active');
+        }, 1200);
+      }
+    }
     const content = document.createElement('div');
     const spinner = document.createElement('b');
     spinner.setAttribute('aria-hidden', 'true');
@@ -2108,6 +2146,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         ...previous,
         id: GAME_ACTIVITY_ID,
         storeId: RUNTIME_ID,
+        projectId: PROJECT_ID,
+        artwork: Array.isArray(GAME_ARTWORK) ? GAME_ARTWORK[0] || previous.artwork || '' : previous.artwork || '',
         title: GAME_TITLE,
         route: 'games',
         kind: 'Game',
@@ -3515,6 +3555,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
                     .replace('__PARA_RUNTIME_ID__', runtime_id)
                     .replace('__PARA_GAME_TITLE__', game_title_json)
                     .replace('__PARA_PROJECT_ID__', project_id_json)
+                    .replace('__PARA_GAME_ARTWORK__', game_artwork_json)
                 )
             )
             # Rewrite the most common inline root navigations used by small

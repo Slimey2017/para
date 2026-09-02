@@ -16,7 +16,7 @@ import {
   appsScreen, activateApps, filterApps, launchSystemApplication,
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
-import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
+import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
 import { capturePlaybackBlob, capturePlaybackMime, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
@@ -26,10 +26,11 @@ import {
 } from "./screens/system.js";
 import {
   gamesScreen, activateGames, demosScreen, paraStoreScreen, storeProductScreen, storeCartScreen, gameScreen, activateDemoGame,
-  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, messagesScreen, activateMessages, activateParaStore, activateStoreProduct, activateStoreCart,
+  creatorScreen, activateCreator, communityScreen, activateCommunity, marksScreen, activateParaStore, activateStoreProduct, activateStoreCart,
   storeGameScreen, activateStoreGame, installStoreItem, uninstallStoreItem, addStoreCartItem, removeStoreCartItem,
   playCreatorTone, clearCreatorDrawing, currentStoreCartIds, toggleStoreWishlistItem,
 } from "./screens/experiences.js";
+import { friendsScreen, activateFriends } from "./screens/friends.js";
 import {
   personalizationScreen, backgroundScreen, activateBackgroundScreen, openBackgroundPicker,
   cancelBackgroundPreview, applyCustomBackground, applyBackgroundSelection,
@@ -97,7 +98,8 @@ const renderers = {
   "store-game": storeGameScreen,
   creator: creatorScreen,
   community: communityScreen,
-  messages: messagesScreen,
+  friends: friendsScreen,
+  messages: friendsScreen,
   marks: marksScreen,
   "demo-pong": () => gameScreen("demo-pong"),
   "demo-racer": () => gameScreen("demo-racer"),
@@ -221,14 +223,45 @@ function sendSuspendedGameCommand(command, detail = {}) {
   }
 }
 
-function gameTransitionNode({ mode = "launch", title = "" } = {}) {
+function cachedStoreLaunchArtwork(storeId = "") {
+  const id = String(storeId || "").trim();
+  if (!id) return { title: "", urls: [] };
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(`para.store.artwork.${id}`) || "{}");
+    return { title: String(parsed.title || ""), urls: Array.isArray(parsed.urls) ? parsed.urls.filter(Boolean).slice(0, 8) : [] };
+  } catch { return { title: "", urls: [] }; }
+}
+
+function storeArtworkFromProduct(item = {}) {
+  const assets = item.asset_references || {};
+  const shots = Array.isArray(assets.screenshots) ? assets.screenshots : [];
+  const paths = [...new Set([assets.hero, assets.cover, ...shots, assets.icon].filter(Boolean))];
+  const urls = paths.slice(0, 8).map((path) => `/api/v1/store/asset?path=${encodeURIComponent(path)}`);
+  if (item.id) {
+    try { sessionStorage.setItem(`para.store.artwork.${item.id}`, JSON.stringify({ title: item.title || "PARA Game", urls })); } catch {}
+  }
+  return { title: String(item.title || ""), urls };
+}
+
+function gameTransitionNode({ mode = "launch", title = "", artwork = [] } = {}) {
   const node = document.createElement("div");
   node.className = `para-game-transition para-game-transition--${mode}`;
   node.setAttribute("role", "status");
   node.setAttribute("aria-live", "polite");
   const heading = mode === "return" ? "Returning to PARA" : "Launching";
   const detail = title ? `<strong>${String(title).replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch])}</strong>` : "";
-  node.innerHTML = `<div class="para-game-transition__backdrop"></div><div class="para-game-transition__content"><img src="./assets/para-logo.png" alt=""><span>${heading}</span>${detail}<i aria-hidden="true"></i></div>`;
+  const slides = Array.isArray(artwork) ? artwork.filter(Boolean).slice(0, 8) : [];
+  const slideMarkup = slides.length ? `<div class="para-game-transition__slideshow" aria-hidden="true">${slides.map((url, index) => `<img src="${String(url).replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch])}" class="${index === 0 ? "is-active" : ""}">`).join("")}</div>` : "";
+  node.innerHTML = `<div class="para-game-transition__backdrop"></div>${slideMarkup}<div class="para-game-transition__shade"></div><div class="para-game-transition__content"><img src="./assets/para-logo.png" alt=""><span>${heading}</span>${detail}<i aria-hidden="true"></i></div>`;
+  if (slides.length > 1) {
+    const images = [...node.querySelectorAll(".para-game-transition__slideshow img")];
+    let slideIndex = 0;
+    node._paraSlideTimer = window.setInterval(() => {
+      images[slideIndex]?.classList.remove("is-active");
+      slideIndex = (slideIndex + 1) % images.length;
+      images[slideIndex]?.classList.add("is-active");
+    }, 1500);
+  }
   document.body.append(node);
   return node;
 }
@@ -242,12 +275,12 @@ function storeGameTitle(storeId) {
   return cardTitle || "PARA Game";
 }
 
-function transitionIntoGame(destination, title = "PARA Game") {
+function transitionIntoGame(destination, title = "PARA Game", artwork = []) {
   if (gameTransitionInFlight) return false;
   gameTransitionInFlight = true;
   closeControlCenter(false);
   suspendMenuMusic();
-  const node = gameTransitionNode({ mode: "launch", title });
+  const node = gameTransitionNode({ mode: "launch", title, artwork });
   requestAnimationFrame(() => node.classList.add("is-visible"));
   const reduced = getState().reducedMotion;
   window.setTimeout(() => {
@@ -407,8 +440,8 @@ function render(route) {
     cleanupScreen = activateCreator();
   } else if (route === "community") {
     cleanupScreen = activateCommunity();
-  } else if (route === "messages") {
-    cleanupScreen = activateMessages({ focus });
+  } else if (route === "friends" || route === "messages") {
+    cleanupScreen = activateFriends({ focus });
   } else if (route === "parastore") {
     cleanupScreen = activateParaStore();
   } else if (route === "store-product") {
@@ -431,6 +464,8 @@ function render(route) {
     });
   } else if (route === "media-gallery") {
     void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
+  } else if (route === "achievements") {
+    void activateAchievements({ focus }).then((cleanup) => { if (router.current() === "achievements") cleanupScreen = cleanup; });
   } else if (route === "storage") {
     activateStorage();
   } else if (route === "network") {
@@ -546,7 +581,7 @@ function openSwitcher() {
   clearTimeout(overlayCloseTimer);
   overlayReturnFocus = focus.current;
   const running = runningExperiences().slice(0, 5);
-  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Jump back in" : "Nothing suspended"}</h2><small>Open Switcher from the Control Center</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>`<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button type="button" data-action="resume-experience" data-experience-id="${item.id}" data-experience-route="${item.route}" data-store-id="${item.storeId || ''}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${item.mark || '◉'}</span><small>${item.kind || 'App'}</small><strong>${item.title}</strong><em>${item.queueStatus || 'Suspended'}</em></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${item.id}" aria-label="Close ${item.title}">×</button></article>`).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close app</span></footer></section>`;
+  overlay.innerHTML = `<div class="switcher-scrim" data-action="close-control-center"></div><section class="para-switcher" role="dialog" aria-modal="true" aria-label="PARA Switcher"><header><span>PARA Switcher</span><h2>${running.length ? "Running & suspended" : "Nothing running"}</h2><small>Resume a game or close it completely.</small></header><div class="para-switcher__cards">${running.length ? running.map((item,index)=>{ const art=item.artwork?`<img src="${escapeOverlayText(item.artwork)}" alt="">`:`<span>${item.kind === 'Game' ? '◈' : '▦'}</span>`; return `<article class="switcher-card" style="--switcher-accent:${item.accent || '#8d43ff'}"><button class="switcher-card__resume" type="button" data-action="resume-experience" data-experience-id="${escapeOverlayText(item.id)}" data-experience-route="${escapeOverlayText(item.route || 'home')}" data-store-id="${escapeOverlayText(item.storeId || '')}" ${index===0?'data-autofocus="true"':''}><span class="switcher-card__art">${art}</span><span class="switcher-card__copy"><small>${escapeOverlayText(item.kind || 'App')}</small><strong>${escapeOverlayText(item.title || 'Experience')}</strong><em>${escapeOverlayText(item.queueStatus || 'Suspended')}</em></span></button><button class="switcher-card__close" data-action="close-experience" data-experience-id="${escapeOverlayText(item.id)}" aria-label="Close ${escapeOverlayText(item.title || 'experience')}"><b>×</b><span>Close</span></button></article>`; }).join('') : `<div class="switcher-empty">Open a game or app and it will appear here.</div>`}</div><footer><span><b data-prompt="confirm">A</b> Resume</span><span><b data-prompt="back">B</b> Back</span><span><b>×</b> Close</span></footer></section>`;
   overlay.hidden = false;
   overlay.classList.remove("is-closing");
   updateControllerPrompts();
@@ -1074,7 +1109,7 @@ async function openSystemApplication(target) {
   }
 }
 
-function launchStoreGameDirect(storeId) {
+async function launchStoreGameDirect(storeId) {
   const id = String(storeId || "").trim();
   if (!id) return false;
   sessionStorage.setItem("para.store.launch", id);
@@ -1082,8 +1117,18 @@ function launchStoreGameDirect(storeId) {
   if (IS_SUSPENDED_GAME_SHELL) {
     return sendSuspendedGameCommand(id === SUSPENDED_GAME_ID ? "resume" : "launch", { storeId: id });
   }
+  let artwork = cachedStoreLaunchArtwork(id);
+  if (!artwork.urls.length) {
+    try {
+      const item = await Promise.race([
+        paraApi.storeProduct(id),
+        new Promise((_, reject) => window.setTimeout(() => reject(new Error("art timeout")), 700)),
+      ]);
+      artwork = storeArtworkFromProduct(item || {});
+    } catch { /* launch immediately when artwork cannot be prefetched */ }
+  }
   const source = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
-  return transitionIntoGame(source, storeGameTitle(id));
+  return transitionIntoGame(source, artwork.title || storeGameTitle(id), artwork.urls);
 }
 
 function rememberAccountReturn(route = "account") {
