@@ -94,6 +94,8 @@ YOUTUBE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
 CAPTURE_NORMALIZE_MAX_BYTES = 256 * 1024 * 1024
 CAPTURE_NORMALIZE_TIMEOUT_SECONDS = 180
 CAPTURE_NORMALIZE_CONTENT_TYPES = {"video/webm", "video/x-matroska", "application/octet-stream"}
+CAPTURE_NORMALIZE_QUEUE_MAX = 8
+CAPTURE_NORMALIZE_JOB_TTL_SECONDS = 30 * 60
 GOOGLE_OAUTH_STATE_COOKIE = "para_google_oauth_state"
 GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60
 GOOGLE_OAUTH_SCOPES = (
@@ -107,7 +109,11 @@ _youtube_upload_lock = threading.Lock()
 _email_verifications: dict[str, dict] = {}
 _email_verification_client_sends: dict[str, list[float]] = {}
 _email_verification_lock = threading.Lock()
-_capture_transcode_slots = threading.BoundedSemaphore(1)
+_capture_jobs: dict[str, dict] = {}
+_capture_pending_jobs: list[str] = []
+_capture_jobs_lock = threading.Lock()
+_capture_jobs_ready = threading.Condition(_capture_jobs_lock)
+_capture_worker_thread: threading.Thread | None = None
 
 
 def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | None = None, bearer: str = "") -> tuple[int, dict]:
@@ -1426,6 +1432,176 @@ def normalize_capture_file(input_path: Path, output_path: Path, *, timeout: int 
         "audio_codec": "aac",
         "size": output_path.stat().st_size,
     }
+
+
+
+def _capture_cleanup_locked(now: float | None = None) -> None:
+    """Drop finished capture jobs after their short result-retention window."""
+    current = time.time() if now is None else now
+    stale: list[str] = []
+    for job_id, job in _capture_jobs.items():
+        if job.get("state") not in {"completed", "failed"}:
+            continue
+        finished = float(job.get("finished_at") or job.get("created_at") or current)
+        if current - finished >= CAPTURE_NORMALIZE_JOB_TTL_SECONDS:
+            stale.append(job_id)
+    for job_id in stale:
+        job = _capture_jobs.pop(job_id, None) or {}
+        try:
+            shutil.rmtree(str(job.get("temp_dir") or ""), ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _capture_ahead_locked(job_id: str) -> int:
+    job = _capture_jobs.get(job_id) or {}
+    if job.get("state") == "processing":
+        return 0
+    processing = 1 if any(candidate.get("state") == "processing" for candidate in _capture_jobs.values()) else 0
+    try:
+        pending_index = _capture_pending_jobs.index(job_id)
+    except ValueError:
+        pending_index = 0
+    return max(0, processing + pending_index)
+
+
+def _capture_queue_worker() -> None:
+    while True:
+        with _capture_jobs_ready:
+            while not _capture_pending_jobs:
+                _capture_jobs_ready.wait()
+            job_id = _capture_pending_jobs.pop(0)
+            job = _capture_jobs.get(job_id)
+            if not job:
+                continue
+            job["state"] = "processing"
+            job["started_at"] = time.time()
+            input_path = Path(str(job["input_path"]))
+            output_path = Path(str(job["output_path"]))
+
+        try:
+            status, payload = normalize_capture_file(input_path, output_path)
+        except Exception as error:  # keep the worker alive if one encoder job crashes
+            status, payload = 500, {
+                "error": "capture_processing_failed",
+                "message": "PARA capture processing failed unexpectedly.",
+                "detail": str(error)[-300:],
+            }
+
+        with _capture_jobs_ready:
+            current = _capture_jobs.get(job_id)
+            if not current:
+                continue
+            current["status_code"] = int(status)
+            current["result"] = payload
+            current["finished_at"] = time.time()
+            current["state"] = "completed" if status == 200 else "failed"
+            _capture_cleanup_locked()
+            _capture_jobs_ready.notify_all()
+
+
+def _ensure_capture_worker_locked() -> None:
+    global _capture_worker_thread
+    if _capture_worker_thread and _capture_worker_thread.is_alive():
+        return
+    _capture_worker_thread = threading.Thread(
+        target=_capture_queue_worker,
+        name="para-capture-normalizer",
+        daemon=True,
+    )
+    _capture_worker_thread.start()
+
+
+def enqueue_capture_normalization(input_path: Path, output_path: Path, temp_dir: Path, owner: str) -> tuple[int, dict]:
+    """Queue one uploaded capture instead of rejecting it when the encoder is busy."""
+    with _capture_jobs_ready:
+        _capture_cleanup_locked()
+        if len(_capture_pending_jobs) >= CAPTURE_NORMALIZE_QUEUE_MAX:
+            return 503, {
+                "error": "capture_queue_full",
+                "message": "PARA's capture queue is full. Your recording was not discarded; try saving again in a moment.",
+            }
+        _ensure_capture_worker_locked()
+        job_id = secrets.token_urlsafe(18)
+        now = time.time()
+        _capture_jobs[job_id] = {
+            "id": job_id,
+            "owner": owner,
+            "state": "queued",
+            "created_at": now,
+            "input_path": str(input_path),
+            "output_path": str(output_path),
+            "temp_dir": str(temp_dir),
+            "status_code": 202,
+            "result": {},
+        }
+        _capture_pending_jobs.append(job_id)
+        ahead = _capture_ahead_locked(job_id)
+        _capture_jobs_ready.notify()
+        return 202, {
+            "job_id": job_id,
+            "state": "queued" if ahead else "processing",
+            "ahead": ahead,
+            "message": f"Queued capture · {ahead} ahead" if ahead else "Processing capture · creating MP4",
+        }
+
+
+def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
+    with _capture_jobs_ready:
+        _capture_cleanup_locked()
+        job = _capture_jobs.get(job_id)
+        if not job or str(job.get("owner") or "") != owner:
+            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
+        state = str(job.get("state") or "queued")
+        ahead = _capture_ahead_locked(job_id) if state == "queued" else 0
+        payload = {
+            "job_id": job_id,
+            "state": state,
+            "ahead": ahead,
+            "message": (
+                f"Queued capture · {ahead} ahead"
+                if state == "queued"
+                else "Processing capture · creating MP4"
+                if state == "processing"
+                else "Capture ready"
+                if state == "completed"
+                else str((job.get("result") or {}).get("message") or "Capture processing failed.")
+            ),
+        }
+        if state == "failed":
+            payload.update(job.get("result") or {})
+            payload["state"] = "failed"
+        return 200, payload
+
+
+def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int, bytes | dict]:
+    with _capture_jobs_ready:
+        _capture_cleanup_locked()
+        job = _capture_jobs.get(job_id)
+        if not job or str(job.get("owner") or "") != owner:
+            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
+        state = str(job.get("state") or "queued")
+        if state in {"queued", "processing"}:
+            return 409, {
+                "error": "capture_not_ready",
+                "state": state,
+                "ahead": _capture_ahead_locked(job_id) if state == "queued" else 0,
+                "message": "PARA is still processing this capture.",
+            }
+        if state == "failed":
+            return int(job.get("status_code") or 422), dict(job.get("result") or {})
+        output_path = Path(str(job.get("output_path") or ""))
+        temp_dir = str(job.get("temp_dir") or "")
+
+    try:
+        body = output_path.read_bytes()
+    except OSError:
+        return 500, {"error": "capture_result_missing", "message": "PARA finished the job but could not read the MP4 result."}
+
+    with _capture_jobs_ready:
+        _capture_jobs.pop(job_id, None)
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    return 200, body
 
 
 def _store_build_storage_prefix(item: dict) -> str:
@@ -2972,24 +3148,104 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
-  async function normalizeRuntimeCapture(rawBlob, captureMode = '') {
-    const response = await fetch('/api/v1/capture/normalize', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': rawBlob.type || 'video/webm',
-        'X-PARA-Capture-Mode': captureMode || 'game-frames',
-      },
-      body: rawBlob,
-    });
-    if (!response.ok) {
-      let payload = null;
-      try { payload = await response.json(); } catch (_) {}
-      const detail = payload?.detail ? ` ${payload.detail}` : '';
-      throw new Error(`${payload?.message || `Capture processing failed (${response.status}).`}${detail}`.trim());
+  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture') {
+    const kind = captureKind === 'replay' ? 'replay' : 'capture';
+    let response = null;
+    let initialPayload = null;
+    for (let submitAttempt = 0; submitAttempt < 60; submitAttempt += 1) {
+      response = await fetch('/api/v1/capture/normalize', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': rawBlob.type || 'video/webm',
+          'X-PARA-Capture-Mode': captureMode || 'game-frames',
+        },
+        body: rawBlob,
+      });
+      if (response.status !== 503) break;
+      try { initialPayload = await response.json(); } catch (_) { initialPayload = null; }
+      if (initialPayload?.error !== 'capture_queue_full') break;
+      toast(`Capture queue is full · waiting to save ${kind}`);
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      response = null;
+      initialPayload = null;
     }
-    const output = await response.blob();
-    const mp4 = output.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
+    if (!response) throw new Error('PARA capture processing stayed busy for too long.');
+
+    let output = null;
+    if (response.status === 202) {
+      let queued = initialPayload;
+      if (!queued) {
+        try { queued = await response.json(); } catch (_) {}
+      }
+      const jobId = String(queued?.job_id || '');
+      if (!jobId) throw new Error('PARA accepted the capture but did not return a processing job.');
+
+      const deadline = Date.now() + (10 * 60 * 1000);
+      let lastMessage = '';
+      const showStatus = (message) => {
+        const text = String(message || '');
+        if (!text || text === lastMessage) return;
+        lastMessage = text;
+        toast(text);
+      };
+      if (Number(queued?.ahead || 0) > 0) showStatus(`Queued ${kind} · ${Number(queued.ahead)} ahead`);
+      else showStatus(`Processing ${kind} · creating MP4`);
+
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        const statusResponse = await fetch(`/api/v1/capture/normalize/status?id=${encodeURIComponent(jobId)}`, {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+        });
+        let statusPayload = null;
+        try { statusPayload = await statusResponse.json(); } catch (_) {}
+        if (!statusResponse.ok) {
+          throw new Error(statusPayload?.message || `Capture queue status failed (${statusResponse.status}).`);
+        }
+        const state = String(statusPayload?.state || '');
+        if (state === 'queued') {
+          const ahead = Math.max(0, Number(statusPayload?.ahead || 0));
+          showStatus(ahead > 0 ? `Queued ${kind} · ${ahead} ahead` : `Queued ${kind}`);
+          continue;
+        }
+        if (state === 'processing') {
+          showStatus(`Processing ${kind} · creating MP4`);
+          continue;
+        }
+        if (state === 'failed') {
+          const detail = statusPayload?.detail ? ` ${statusPayload.detail}` : '';
+          throw new Error(`${statusPayload?.message || 'PARA could not process this gameplay recording.'}${detail}`.trim());
+        }
+        if (state === 'completed') break;
+      }
+      if (Date.now() >= deadline) throw new Error('PARA capture processing took too long in the queue.');
+
+      const resultResponse = await fetch(`/api/v1/capture/normalize/result?id=${encodeURIComponent(jobId)}`, {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'video/mp4' },
+      });
+      if (!resultResponse.ok) {
+        let payload = null;
+        try { payload = await resultResponse.json(); } catch (_) {}
+        const detail = payload?.detail ? ` ${payload.detail}` : '';
+        throw new Error(`${payload?.message || `Capture processing failed (${resultResponse.status}).`}${detail}`.trim());
+      }
+      output = await resultResponse.blob();
+    } else {
+      // Backward compatibility for a V50/V51 server during a rolling deploy.
+      if (!response.ok) {
+        let payload = initialPayload;
+        if (!payload) {
+          try { payload = await response.json(); } catch (_) {}
+        }
+        const detail = payload?.detail ? ` ${payload.detail}` : '';
+        throw new Error(`${payload?.message || `Capture processing failed (${response.status}).`}${detail}`.trim());
+      }
+      output = await response.blob();
+    }
+
+    const mp4 = output?.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
     await verifyNormalizedCapture(mp4);
     return mp4;
   }
@@ -3324,7 +3580,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     try {
       const rawBlob = await finalizeRuntimeRecorderSession(active.session);
       toast('Processing capture · creating MP4');
-      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames');
+      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture');
       await saveCapture({
         type: 'clip',
         blob,
@@ -3388,7 +3644,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
       const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
       toast('Processing replay · creating MP4');
-      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames');
+      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay');
       await saveCapture({
         type: 'clip',
         blob,
@@ -3771,6 +4027,27 @@ class ParaHandler(SimpleHTTPRequestHandler):
             return 401, {"signed_in": False, "user": None}, "", refreshed_headers
         return 200, session, access, refreshed_headers
 
+    def _capture_access_owner(self) -> tuple[int, str, list[tuple[str, str]]]:
+        """Return a stable owner id for capture queue jobs.
+
+        Hosted PARA requires a signed-in account. Loopback/local PARA keeps the
+        capture pipeline available without cloud auth.
+        """
+        server_host = str(self.server.server_address[0] if self.server and self.server.server_address else "")
+        try:
+            local_server = ipaddress.ip_address(server_host).is_loopback
+        except ValueError:
+            local_server = False
+        if local_server:
+            return 200, "local", []
+        status, session, _, refreshed_headers = self._authenticated_access()
+        if status != 200:
+            return 401, "", refreshed_headers
+        owner = str(session.get("user", {}).get("id") or "")
+        if not owner:
+            return 401, "", refreshed_headers
+        return 200, owner, refreshed_headers
+
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         try:
             body = path.read_bytes()
@@ -3803,6 +4080,28 @@ class ParaHandler(SimpleHTTPRequestHandler):
         request = urlparse(self.path)
         if request.path in {"/privacy", "/privacy/"}:
             self._send_file(HOME_ROOT / "privacy" / "index.html", "text/html; charset=utf-8")
+            return
+        if request.path in {"/api/v1/capture/normalize/status", "/api/v1/capture/normalize/result"}:
+            access_status, owner, refreshed_headers = self._capture_access_owner()
+            if access_status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+                return
+            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
+            if request.path.endswith("/status"):
+                job_status, payload = capture_normalization_status(job_id, owner)
+                self._send_json(job_status, payload, refreshed_headers)
+                return
+            result_status, result = consume_capture_normalization_result(job_id, owner)
+            if result_status != 200 or not isinstance(result, (bytes, bytearray)):
+                self._send_json(result_status, result if isinstance(result, dict) else {"error": "capture_result_missing"}, refreshed_headers)
+                return
+            headers = [
+                *refreshed_headers,
+                ("X-PARA-Capture-Normalized", "1"),
+                ("X-PARA-Video-Codec", "h264"),
+                ("X-PARA-Audio-Codec", "aac"),
+            ]
+            self._send_bytes(200, bytes(result), "video/mp4", headers)
             return
         if request.path == "/api/v1/achievements/progress":
             status, _, access, refreshed_headers = self._authenticated_access()
@@ -4004,19 +4303,10 @@ class ParaHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         request = urlparse(self.path)
         if request.path == "/api/v1/capture/normalize":
-            # Public hosted PARA requires an account before spending server CPU on
-            # video transcoding. Loopback/local PARA can normalize without cloud auth.
-            server_host = str(self.server.server_address[0] if self.server and self.server.server_address else "")
-            try:
-                local_server = ipaddress.ip_address(server_host).is_loopback
-            except ValueError:
-                local_server = False
-            refreshed_headers: list[tuple[str, str]] = []
-            if not local_server:
-                status, _, _, refreshed_headers = self._authenticated_access()
-                if status != 200:
-                    self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
-                    return
+            access_status, owner, refreshed_headers = self._capture_access_owner()
+            if access_status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
@@ -4034,45 +4324,41 @@ class ParaHandler(SimpleHTTPRequestHandler):
                     "message": "PARA capture processing currently accepts temporary WebM recordings only.",
                 }, refreshed_headers)
                 return
-            if not _capture_transcode_slots.acquire(timeout=2):
-                self._send_json(429, {
-                    "error": "capture_encoder_busy",
-                    "message": "PARA is already processing another capture. Try again in a moment.",
+
+            temporary = Path(tempfile.mkdtemp(prefix="para-capture-job-"))
+            input_path = temporary / "capture.webm"
+            output_path = temporary / "capture.mp4"
+            remaining = length
+            try:
+                with input_path.open("wb") as destination:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        destination.write(chunk)
+                        remaining -= len(chunk)
+                if remaining != 0 or input_path.stat().st_size != length:
+                    shutil.rmtree(temporary, ignore_errors=True)
+                    self._send_json(400, {
+                        "error": "capture_upload_incomplete",
+                        "message": "The capture upload ended before PARA received the complete recording.",
+                    }, refreshed_headers)
+                    return
+            except OSError:
+                shutil.rmtree(temporary, ignore_errors=True)
+                self._send_json(500, {
+                    "error": "capture_upload_failed",
+                    "message": "PARA could not stage this capture for processing.",
                 }, refreshed_headers)
                 return
-            try:
-                with tempfile.TemporaryDirectory(prefix="para-capture-") as temporary:
-                    input_path = Path(temporary) / "capture.webm"
-                    output_path = Path(temporary) / "capture.mp4"
-                    remaining = length
-                    with input_path.open("wb") as destination:
-                        while remaining > 0:
-                            chunk = self.rfile.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                break
-                            destination.write(chunk)
-                            remaining -= len(chunk)
-                    if remaining != 0 or input_path.stat().st_size != length:
-                        self._send_json(400, {
-                            "error": "capture_upload_incomplete",
-                            "message": "The capture upload ended before PARA received the complete recording.",
-                        }, refreshed_headers)
-                        return
-                    transcode_status, transcode = normalize_capture_file(input_path, output_path)
-                    if transcode_status != 200:
-                        self._send_json(transcode_status, transcode, refreshed_headers)
-                        return
-                    body = output_path.read_bytes()
-                    headers = [
-                        *refreshed_headers,
-                        ("X-PARA-Capture-Normalized", "1"),
-                        ("X-PARA-Video-Codec", "h264"),
-                        ("X-PARA-Audio-Codec", "aac"),
-                    ]
-                    self._send_bytes(200, body, "video/mp4", headers)
-                    return
-            finally:
-                _capture_transcode_slots.release()
+
+            queue_status, payload = enqueue_capture_normalization(input_path, output_path, temporary, owner)
+            if queue_status != 202:
+                shutil.rmtree(temporary, ignore_errors=True)
+                self._send_json(queue_status, payload, refreshed_headers)
+                return
+            self._send_json(202, payload, [*refreshed_headers, ("Retry-After", "1")])
+            return
 
         if request.path == "/api/v1/integrations/google/youtube/upload":
             status, _, para_access, refreshed_headers = self._authenticated_access()

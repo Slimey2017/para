@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -521,6 +521,75 @@ class ApiContractTests(unittest.TestCase):
             self.assertIn(b"ftyp", body[:64])
             self.assertIn(b"moov", body)
             self.assertLess(body.find(b"moov"), body.find(b"mdat"))
+
+    def test_capture_queue_serializes_jobs_instead_of_returning_busy_429(self):
+        import server
+        import threading
+        import time
+
+        with server._capture_jobs_ready:
+            for job in server._capture_jobs.values():
+                server.shutil.rmtree(str(job.get("temp_dir") or ""), ignore_errors=True)
+            server._capture_jobs.clear()
+            server._capture_pending_jobs.clear()
+
+        first_started = threading.Event()
+        release_first = threading.Event()
+        order = []
+
+        def fake_normalize(input_path, output_path, *, timeout=server.CAPTURE_NORMALIZE_TIMEOUT_SECONDS):
+            order.append(input_path.name)
+            if len(order) == 1:
+                first_started.set()
+                release_first.wait(2)
+            output_path.write_bytes(b"0" * 2048)
+            return 200, {
+                "normalized": True,
+                "mime_type": "video/mp4",
+                "video_codec": "h264",
+                "audio_codec": "aac",
+                "size": 2048,
+            }
+
+        temporary_dirs = []
+        try:
+            with patch("server.normalize_capture_file", side_effect=fake_normalize):
+                payloads = []
+                for index in range(2):
+                    temporary = Path(tempfile.mkdtemp(prefix=f"para-queue-test-{index}-"))
+                    temporary_dirs.append(temporary)
+                    source = temporary / "capture.webm"
+                    output = temporary / "capture.mp4"
+                    source.write_bytes(b"webm" * 512)
+                    status, payload = enqueue_capture_normalization(source, output, temporary, "test-owner")
+                    self.assertEqual(status, 202)
+                    self.assertNotEqual(status, 429)
+                    payloads.append(payload)
+
+                self.assertTrue(first_started.wait(1))
+                second_status, second = capture_normalization_status(payloads[1]["job_id"], "test-owner")
+                self.assertEqual(second_status, 200)
+                self.assertEqual(second["state"], "queued")
+                self.assertGreaterEqual(second["ahead"], 1)
+
+                release_first.set()
+                deadline = time.time() + 3
+                while time.time() < deadline:
+                    states = [capture_normalization_status(payload["job_id"], "test-owner")[1].get("state") for payload in payloads]
+                    if states == ["completed", "completed"]:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(states, ["completed", "completed"])
+
+                for payload in payloads:
+                    result_status, body = consume_capture_normalization_result(payload["job_id"], "test-owner")
+                    self.assertEqual(result_status, 200)
+                    self.assertIsInstance(body, bytes)
+                    self.assertEqual(len(body), 2048)
+        finally:
+            release_first.set()
+            for temporary in temporary_dirs:
+                server.shutil.rmtree(temporary, ignore_errors=True)
 
     def test_unknown_route_returns_not_found(self):
         status, payload = resolve("/api/v1/does-not-exist")

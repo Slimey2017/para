@@ -256,9 +256,18 @@ export async function activateAchievements({ focus } = {}) {
   const knownStoreIds = new Set(catalog.map((item) => String(item?.id || "")).filter(Boolean));
   const missingStoreIds = [...new Set(sortedAchievements().map((item) => String(item?.storeId || "")).filter((id) => id && !knownStoreIds.has(id)))];
   if (missingStoreIds.length) {
-    const resolved = await Promise.allSettled(missingStoreIds.map((id) => paraApi.storeProduct(id)));
-    for (const result of resolved) {
-      if (result.status === "fulfilled" && result.value?.id) catalog.push(result.value);
+    // Resolve old trophy metadata gently. V53 used Promise.allSettled here,
+    // which could fan out a pile of product requests during one screen render.
+    // para-api.js now dedupes/caches globally too, but this path stays sequential
+    // so opening Achievements never creates its own request burst.
+    for (const id of missingStoreIds) {
+      try {
+        const product = await paraApi.storeProduct(id);
+        if (product?.id) catalog.push(product);
+      } catch {
+        // Keep rendering the folder with runtime/saved identity fallbacks.
+      }
+      if (!alive) return () => {};
     }
   }
   if (!alive) return () => {};

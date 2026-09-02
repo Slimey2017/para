@@ -776,6 +776,37 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn(' : "PARA Game"', media)
         self.assertFalse((ROOT / "apps/para-home/src/mock-data.js").exists())
 
+    def test_v54_global_rate_limit_resilience_and_capture_queue(self):
+        api = (ROOT / "apps/para-home/src/services/para-api.js").read_text(encoding="utf-8")
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+
+        for marker in [
+            "API_MAX_CONCURRENT_REQUESTS = 4",
+            "apiInFlight",
+            "apiCache",
+            "Retry-After",
+            "retryAfterMs",
+            "queueApiRequest",
+        ]:
+            self.assertIn(marker, api)
+        self.assertIn("storeProduct(id)", media)
+        self.assertNotIn("Promise.allSettled(missingStoreIds.map", media)
+
+        for marker in [
+            "enqueue_capture_normalization",
+            "capture_normalization_status",
+            "consume_capture_normalization_result",
+            "/api/v1/capture/normalize/status",
+            "/api/v1/capture/normalize/result",
+            "Queued ${kind}",
+        ]:
+            self.assertIn(marker, server)
+        self.assertNotIn("capture_encoder_busy", server)
+        self.assertNotIn("_capture_transcode_slots", server)
+        self.assertNotIn("self._send_json(429", server[server.find('if request.path == "/api/v1/capture/normalize"'):server.find('if request.path == "/api/v1/integrations/google/youtube/upload"')])
+
+
 
 if __name__ == "__main__":
     unittest.main()

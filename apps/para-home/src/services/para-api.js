@@ -1,18 +1,161 @@
-async function request(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Accept": "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
-    signal: AbortSignal.timeout(4000),
-    ...options,
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(payload.message || payload.error || `Request failed: ${response.status}`);
-    error.code = payload.error || "request_failed";
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
+const API_MAX_CONCURRENT_REQUESTS = 4;
+const API_DEFAULT_TIMEOUT_MS = 4_000;
+const API_MAX_429_RETRIES = 3;
+const API_CACHE_DEFAULT_TTL_MS = 750;
+const apiQueue = [];
+const apiInFlight = new Map();
+const apiCache = new Map();
+let apiActiveRequests = 0;
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+function pumpApiQueue() {
+  while (apiActiveRequests < API_MAX_CONCURRENT_REQUESTS && apiQueue.length) {
+    const entry = apiQueue.shift();
+    apiActiveRequests += 1;
+    Promise.resolve()
+      .then(entry.task)
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        apiActiveRequests = Math.max(0, apiActiveRequests - 1);
+        pumpApiQueue();
+      });
   }
-  return payload;
+}
+
+function queueApiRequest(task) {
+  return new Promise((resolve, reject) => {
+    apiQueue.push({ task, resolve, reject });
+    pumpApiQueue();
+  });
+}
+
+function retryAfterMs(response, attempt) {
+  const raw = String(response?.headers?.get?.("Retry-After") || "").trim();
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(30_000, seconds * 1000);
+    const absolute = Date.parse(raw);
+    if (Number.isFinite(absolute)) return Math.min(30_000, Math.max(0, absolute - Date.now()));
+  }
+  // Keep retries gentle enough to avoid a synchronized request stampede.
+  const backoff = Math.min(8_000, 650 * (2 ** Math.max(0, attempt)));
+  return backoff + Math.floor(Math.random() * 250);
+}
+
+function cacheTtlFor(path, explicit) {
+  if (Number.isFinite(explicit)) return Math.max(0, Number(explicit));
+  if (path.startsWith("/api/v1/auth/")) return 0;
+  if (path.startsWith("/api/v1/integrations/")) return 1_500;
+  if (path === "/api/v1/store/catalog") return 10_000;
+  if (path.startsWith("/api/v1/store/product")) return 30_000;
+  if (path.startsWith("/api/v1/store/achievements")) return 10_000;
+  if (path === "/api/v1/capabilities") return 5_000;
+  if (/^\/api\/v1\/(system|storage|network|audio|apps|directories)(?:\?|$)/.test(path)) return 1_500;
+  return API_CACHE_DEFAULT_TTL_MS;
+}
+
+function requestKey(method, path, body = "") {
+  return `${method}:${path}:${typeof body === "string" ? body : ""}`;
+}
+
+async function rawFetchWithPolicy(path, options = {}, { retry429 = false, timeoutMs = API_DEFAULT_TIMEOUT_MS } = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const maxRetries = retry429 ? API_MAX_429_RETRIES : 0;
+  let lastResponse = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const signal = options.signal || AbortSignal.timeout(timeoutMs);
+    const response = await queueApiRequest(() => fetch(path, { ...options, method, signal }));
+    lastResponse = response;
+    if (response.status !== 429 || attempt >= maxRetries) return response;
+    await wait(retryAfterMs(response, attempt));
+  }
+  return lastResponse;
+}
+
+async function request(path, options = {}) {
+  const {
+    cacheTtl,
+    dedupe,
+    retry429,
+    timeoutMs = API_DEFAULT_TIMEOUT_MS,
+    ...fetchOptions
+  } = options;
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  const body = fetchOptions.body || "";
+  const key = requestKey(method, path, body);
+  const safeRead = method === "GET" || method === "HEAD";
+  const shouldDedupe = dedupe == null ? safeRead : Boolean(dedupe);
+  const ttl = safeRead ? cacheTtlFor(path, cacheTtl) : 0;
+
+  if (safeRead && ttl > 0) {
+    const cached = apiCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.payload;
+    if (cached) apiCache.delete(key);
+  }
+
+  if (shouldDedupe && apiInFlight.has(key)) return apiInFlight.get(key);
+
+  const operation = (async () => {
+    const maxRetries = retry429 === false
+      ? 0
+      : Number.isFinite(retry429)
+        ? Math.max(0, Math.min(API_MAX_429_RETRIES, Number(retry429)))
+        : safeRead ? API_MAX_429_RETRIES : 0;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      const headers = {
+        "Accept": "application/json",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(fetchOptions.headers || {}),
+      };
+      const signal = fetchOptions.signal || AbortSignal.timeout(timeoutMs);
+      const { response, payload } = await queueApiRequest(async () => {
+        const response = await fetch(path, {
+          ...fetchOptions,
+          method,
+          headers,
+          signal,
+        });
+        let payload = {};
+        try { payload = await response.json(); } catch {}
+        return { response, payload };
+      });
+
+      if (response.status === 429 && attempt < maxRetries) {
+        await wait(retryAfterMs(response, attempt));
+        continue;
+      }
+
+      if (!response.ok) {
+        const error = new Error(payload.message || payload.error || `Request failed: ${response.status}`);
+        error.code = payload.error || (response.status === 429 ? "rate_limited" : "request_failed");
+        error.status = response.status;
+        error.payload = payload;
+        error.retryAfterMs = response.status === 429 ? retryAfterMs(response, attempt) : 0;
+        throw error;
+      }
+
+      if (safeRead && ttl > 0) {
+        apiCache.set(key, { payload, expiresAt: Date.now() + ttl });
+      } else if (!safeRead) {
+        // Mutations can change data shown by any system app. Clear short-lived
+        // GET snapshots instead of letting a stale screen trigger another burst.
+        apiCache.clear();
+      }
+      return payload;
+    }
+    throw new Error("PARA request retry loop ended unexpectedly.");
+  })();
+
+  if (shouldDedupe) apiInFlight.set(key, operation);
+  try {
+    return await operation;
+  } finally {
+    if (shouldDedupe && apiInFlight.get(key) === operation) apiInFlight.delete(key);
+  }
 }
 
 export const paraApi = {
@@ -71,11 +214,11 @@ export const paraApi = {
     xhr.send(file);
   }),
   youtubeSetThumbnail: async (videoId, imageBlob) => {
-    const response = await fetch(`/api/v1/integrations/google/youtube/thumbnail?video_id=${encodeURIComponent(String(videoId || ""))}`, {
+    const response = await rawFetchWithPolicy(`/api/v1/integrations/google/youtube/thumbnail?video_id=${encodeURIComponent(String(videoId || ""))}`, {
       method: "POST",
       headers: { "Accept": "application/json", "Content-Type": imageBlob?.type || "image/jpeg" },
       body: imageBlob,
-    });
+    }, { timeoutMs: 30_000 });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = new Error(payload.message || payload.error || `Thumbnail upload failed: ${response.status}`);
@@ -110,12 +253,12 @@ export const paraApi = {
   personalization: (profile) => request(`/api/v1/personalization?profile=${encodeURIComponent(profile)}`),
   savePersonalization: (profile, preferences) => request("/api/v1/personalization", { method: "POST", body: JSON.stringify({ profile, preferences }) }),
   uploadBackground: async (profile, file) => {
-    const response = await fetch(`/api/v1/backgrounds/custom?profile=${encodeURIComponent(profile)}`, {
+    const response = await rawFetchWithPolicy(`/api/v1/backgrounds/custom?profile=${encodeURIComponent(profile)}`, {
       method: "POST",
       headers: { "Accept": "application/json", "Content-Type": file.type },
       body: file,
       signal: AbortSignal.timeout(12_000),
-    });
+    }, { timeoutMs: 12_000 });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.message || payload.error || `Request failed: ${response.status}`);
     return payload;
