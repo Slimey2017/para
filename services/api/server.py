@@ -1563,7 +1563,7 @@ def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
                 if state == "queued"
                 else "Processing capture · creating MP4"
                 if state == "processing"
-                else "Capture ready"
+                else "MP4 ready · saving to Media Gallery"
                 if state == "completed"
                 else str((job.get("result") or {}).get("message") or "Capture processing failed.")
             ),
@@ -1575,6 +1575,7 @@ def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
 
 
 def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int, bytes | dict]:
+    """Return a finished MP4 without deleting it until the browser confirms its local save."""
     with _capture_jobs_ready:
         _capture_cleanup_locked()
         job = _capture_jobs.get(job_id)
@@ -1591,17 +1592,28 @@ def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int, 
         if state == "failed":
             return int(job.get("status_code") or 422), dict(job.get("result") or {})
         output_path = Path(str(job.get("output_path") or ""))
-        temp_dir = str(job.get("temp_dir") or "")
 
     try:
         body = output_path.read_bytes()
     except OSError:
         return 500, {"error": "capture_result_missing", "message": "PARA finished the job but could not read the MP4 result."}
+    return 200, body
 
+
+def acknowledge_capture_normalization_result(job_id: str, owner: str) -> tuple[int, dict]:
+    """Delete a completed encoder result only after Media Gallery confirms persistence."""
     with _capture_jobs_ready:
+        _capture_cleanup_locked()
+        job = _capture_jobs.get(job_id)
+        if not job or str(job.get("owner") or "") != owner:
+            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
+        state = str(job.get("state") or "queued")
+        if state in {"queued", "processing"}:
+            return 409, {"error": "capture_not_ready", "state": state, "message": "PARA is still processing this capture."}
+        temp_dir = str(job.get("temp_dir") or "")
         _capture_jobs.pop(job_id, None)
     shutil.rmtree(temp_dir, ignore_errors=True)
-    return 200, body
+    return 200, {"acknowledged": True, "job_id": job_id}
 
 
 def _store_build_storage_prefix(item: dict) -> str:
@@ -2062,6 +2074,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   const DB_NAME = 'para-media-gallery';
   const DB_STORE = 'captures';
+  const CAPTURE_SYNC_CHANNEL = 'para-capture-library-v1';
+  const CAPTURE_SYNC_STORAGE_KEY = 'para.capture.library.pulse.v1';
   let shellOpen = false;
   let contextName = '';
   let manualRecording = null;
@@ -2721,30 +2735,97 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     });
   }
 
-  async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '' }) {
+  function announceCaptureLibraryChange(item, reason = 'updated') {
+    const detail = { type: 'para-capture-library-change', reason, id: String(item?.id || ''), state: String(item?.captureState || 'ready'), at: Date.now() };
+    try {
+      const channel = new BroadcastChannel(CAPTURE_SYNC_CHANNEL);
+      channel.postMessage(detail);
+      channel.close();
+    } catch (_) {}
+    try { localStorage.setItem(CAPTURE_SYNC_STORAGE_KEY, JSON.stringify(detail)); } catch (_) {}
+    try { parent.postMessage(detail, location.origin); } catch (_) {}
+  }
+
+  async function readCaptureRecord(id) {
     const db = await openDb();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readonly');
+        const request = tx.objectStore(DB_STORE).get(id);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+        tx.onabort = () => reject(tx.error || new Error('Capture readback was aborted.'));
+      });
+    } finally { db.close(); }
+  }
+
+  async function writeCaptureRecord(item, reason = 'updated') {
+    const db = await openDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put(item);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Capture save was aborted.'));
+      });
+    } finally { db.close(); }
+    announceCaptureLibraryChange(item, reason);
+    return item;
+  }
+
+  async function verifyPersistedCapture(id, expectedBlob, expectedState = 'ready') {
+    const persisted = await readCaptureRecord(id);
+    const persistedBlob = persisted?.blob;
+    if (!persisted || !(persistedBlob instanceof Blob) || !persistedBlob.size) {
+      throw new Error('PARA could not confirm that the video exists in Media Gallery.');
+    }
+    if (expectedBlob?.size && persistedBlob.size !== expectedBlob.size) {
+      throw new Error('PARA saved an incomplete video. The original recording was kept for recovery.');
+    }
+    if (String(persisted.captureState || 'ready') !== String(expectedState || 'ready')) {
+      throw new Error('PARA could not confirm the final Media Gallery state for this video.');
+    }
+    return persisted;
+  }
+
+  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready', normalizeJobId = '', failureMessage = '' }) {
     const item = {
-      id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      id: id || crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
-      createdAt: Date.now(), source: 'PARA', captureVersion: 5,
+      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 6,
+      captureState, normalizeJobId, failureMessage,
       ...(type === 'clip' ? {
-        playbackVerified: true,
+        playbackVerified: captureState === 'ready',
         recorderMimeType: sourceMimeType || 'video/webm',
         sourceMimeType: sourceMimeType || 'video/webm',
-        normalized: blob.type === 'video/mp4',
-        videoCodec: blob.type === 'video/mp4' ? 'h264' : '',
-        audioCodec: blob.type === 'video/mp4' ? 'aac' : '',
+        normalized: captureState === 'ready' && blob.type === 'video/mp4',
+        videoCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'h264' : '',
+        audioCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'aac' : '',
       } : {})
     };
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(DB_STORE, 'readwrite');
-      tx.objectStore(DB_STORE).put(item);
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-    db.close();
-    return item;
+    await writeCaptureRecord(item, captureState === 'ready' ? 'saved' : captureState);
+    return verifyPersistedCapture(item.id, blob, captureState);
+  }
+
+  async function patchCaptureState(id, patch = {}, reason = 'updated') {
+    const existing = await readCaptureRecord(id);
+    if (!existing) return null;
+    const next = { ...existing, ...patch, updatedAt: Date.now() };
+    await writeCaptureRecord(next, reason);
+    return readCaptureRecord(id);
+  }
+
+  async function acknowledgeCaptureJob(jobId) {
+    if (!jobId) return false;
+    try {
+      const response = await fetch(`/api/v1/capture/normalize/ack?id=${encodeURIComponent(jobId)}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      return response.ok;
+    } catch (_) { return false; }
   }
 
   function stopStream(stream) {
@@ -3148,7 +3229,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
-  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture') {
+  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture', onState = null) {
     const kind = captureKind === 'replay' ? 'replay' : 'capture';
     let response = null;
     let initialPayload = null;
@@ -3180,6 +3261,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       }
       const jobId = String(queued?.job_id || '');
       if (!jobId) throw new Error('PARA accepted the capture but did not return a processing job.');
+      try { onState?.({ state: Number(queued?.ahead || 0) > 0 ? 'queued' : 'processing', jobId, ahead: Math.max(0, Number(queued?.ahead || 0)) }); } catch (_) {}
 
       const deadline = Date.now() + (10 * 60 * 1000);
       let lastMessage = '';
@@ -3206,10 +3288,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         const state = String(statusPayload?.state || '');
         if (state === 'queued') {
           const ahead = Math.max(0, Number(statusPayload?.ahead || 0));
+          try { onState?.({ state: 'queued', jobId, ahead }); } catch (_) {}
           showStatus(ahead > 0 ? `Queued ${kind} · ${ahead} ahead` : `Queued ${kind}`);
           continue;
         }
         if (state === 'processing') {
+          try { onState?.({ state: 'processing', jobId, ahead: 0 }); } catch (_) {}
           showStatus(`Processing ${kind} · creating MP4`);
           continue;
         }
@@ -3217,7 +3301,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
           const detail = statusPayload?.detail ? ` ${statusPayload.detail}` : '';
           throw new Error(`${statusPayload?.message || 'PARA could not process this gameplay recording.'}${detail}`.trim());
         }
-        if (state === 'completed') break;
+        if (state === 'completed') {
+          try { onState?.({ state: 'saving', jobId, ahead: 0 }); } catch (_) {}
+          showStatus(`MP4 ready · saving ${kind} to Media Gallery`);
+          break;
+        }
       }
       if (Date.now() >= deadline) throw new Error('PARA capture processing took too long in the queue.');
 
@@ -3247,6 +3335,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
     const mp4 = output?.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
     await verifyNormalizedCapture(mp4);
+    try { onState?.({ state: 'verified' }); } catch (_) {}
     return mp4;
   }
 
@@ -3577,22 +3666,62 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const active = manualRecording;
     if (!active || active.stopping) return;
     active.stopping = true;
+    let staged = null;
+    let captureJobId = '';
+    let captureStateUpdates = Promise.resolve();
     try {
       const rawBlob = await finalizeRuntimeRecorderSession(active.session);
-      toast('Processing capture · creating MP4');
-      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture');
-      await saveCapture({
+      if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('The recording was empty.');
+      const durationMs = Date.now() - active.startedAt;
+      staged = await saveCapture({
+        type: 'clip',
+        blob: rawBlob,
+        width: active.width || 0,
+        height: active.height || 0,
+        durationMs,
+        captureMode: active.captureMode || '',
+        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
+        captureState: 'processing'
+      });
+      toast('Recording secured locally · processing MP4');
+      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture', (status) => {
+        captureJobId = String(status?.jobId || captureJobId || '');
+        const state = String(status?.state || 'processing');
+        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
+          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
+          normalizeJobId: captureJobId,
+          queueAhead: Math.max(0, Number(status?.ahead || 0)),
+          failureMessage: ''
+        }, state)).catch(() => null);
+      });
+      await captureStateUpdates;
+      const saved = await saveCapture({
+        id: staged.id,
+        createdAt: staged.createdAt,
         type: 'clip',
         blob,
         width: active.width || 0,
         height: active.height || 0,
-        durationMs: Date.now() - active.startedAt,
+        durationMs,
         captureMode: active.captureMode || '',
-        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm'
+        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
+        captureState: 'ready',
+        normalizeJobId: captureJobId
       });
-      toast('Gameplay capture verified and saved');
+      await verifyPersistedCapture(saved.id, blob, 'ready');
+      void acknowledgeCaptureJob(captureJobId);
+      toast('Gameplay capture saved to Media Gallery');
     } catch (error) {
-      toast(error?.message || 'Recording could not be saved');
+      if (staged?.id) {
+        try {
+          await patchCaptureState(staged.id, {
+            captureState: 'failed',
+            normalizeJobId: captureJobId,
+            failureMessage: String(error?.message || 'MP4 processing failed.')
+          }, 'failed');
+        } catch (_) {}
+      }
+      toast(staged ? 'MP4 processing failed · original recording kept in Media Gallery' : (error?.message || 'Recording could not be saved'));
     } finally {
       manualRecording = null;
       stopStream(active.stream);
@@ -3637,26 +3766,66 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   async function saveReplay(durationMs) {
     if (!replay) { toast('Start PARA Replay first'); return; }
+    let staged = null;
+    let captureJobId = '';
+    let captureStateUpdates = Promise.resolve();
     try {
       replay.recorder.requestData();
       await new Promise((resolve) => setTimeout(resolve, 220));
       const cutoff = Date.now() - durationMs;
       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
       const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
-      toast('Processing replay · creating MP4');
-      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay');
-      await saveCapture({
+      if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('Replay has not buffered enough gameplay yet.');
+      const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
+      staged = await saveCapture({
+        type: 'clip',
+        blob: rawBlob,
+        width: replay.width || 0,
+        height: replay.height || 0,
+        durationMs: actualDuration,
+        captureMode: replay.captureMode || '',
+        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
+        captureState: 'processing'
+      });
+      toast('Replay secured locally · processing MP4');
+      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay', (status) => {
+        captureJobId = String(status?.jobId || captureJobId || '');
+        const state = String(status?.state || 'processing');
+        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
+          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
+          normalizeJobId: captureJobId,
+          queueAhead: Math.max(0, Number(status?.ahead || 0)),
+          failureMessage: ''
+        }, state)).catch(() => null);
+      });
+      await captureStateUpdates;
+      const saved = await saveCapture({
+        id: staged.id,
+        createdAt: staged.createdAt,
         type: 'clip',
         blob,
         width: replay.width || 0,
         height: replay.height || 0,
-        durationMs: Math.min(durationMs, Date.now() - replay.startedAt),
+        durationMs: actualDuration,
         captureMode: replay.captureMode || '',
-        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm'
+        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
+        captureState: 'ready',
+        normalizeJobId: captureJobId
       });
-      toast('Recent gameplay verified and saved to PARA Media');
+      await verifyPersistedCapture(saved.id, blob, 'ready');
+      void acknowledgeCaptureJob(captureJobId);
+      toast('Recent gameplay saved to Media Gallery');
     } catch (error) {
-      toast(error?.message || 'Replay could not be saved');
+      if (staged?.id) {
+        try {
+          await patchCaptureState(staged.id, {
+            captureState: 'failed',
+            normalizeJobId: captureJobId,
+            failureMessage: String(error?.message || 'MP4 processing failed.')
+          }, 'failed');
+        } catch (_) {}
+      }
+      toast(staged ? 'Replay MP4 failed · original recording kept in Media Gallery' : (error?.message || 'Replay could not be saved'));
     }
   }
 
@@ -4302,6 +4471,15 @@ class ParaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         request = urlparse(self.path)
+        if request.path == "/api/v1/capture/normalize/ack":
+            access_status, owner, refreshed_headers = self._capture_access_owner()
+            if access_status != 200:
+                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
+                return
+            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
+            ack_status, payload = acknowledge_capture_normalization_result(job_id, owner)
+            self._send_json(ack_status, payload, refreshed_headers)
+            return
         if request.path == "/api/v1/capture/normalize":
             access_status, owner, refreshed_headers = self._capture_access_owner()
             if access_status != 200:

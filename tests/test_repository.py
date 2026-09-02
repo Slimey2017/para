@@ -807,6 +807,32 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("self._send_json(429", server[server.find('if request.path == "/api/v1/capture/normalize"'):server.find('if request.path == "/api/v1/integrations/google/youtube/upload"')])
 
 
+    def test_v55_capture_success_requires_media_gallery_readback(self):
+        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+
+        for marker in [
+            "captureVersion: 6",
+            "verifyPersistedCapture",
+            "captureState: 'processing'",
+            "original recording kept in Media Gallery",
+            "Gameplay capture saved to Media Gallery",
+            "BroadcastChannel(CAPTURE_SYNC_CHANNEL)",
+            "/api/v1/capture/normalize/ack",
+            "acknowledge_capture_normalization_result",
+            "MP4 ready · saving to Media Gallery",
+        ]:
+            self.assertIn(marker, server)
+        self.assertIn("captureStateLabel", media)
+        self.assertIn("para-capture-library-v1", media)
+        self.assertIn("The original recording is already stored locally", media)
+
+        final_save = server.find("await verifyPersistedCapture(saved.id, blob, 'ready')")
+        success_toast = server.find("toast('Gameplay capture saved to Media Gallery')")
+        self.assertGreater(final_save, -1)
+        self.assertGreater(success_toast, final_save)
+
+
 
 if __name__ == "__main__":
     unittest.main()

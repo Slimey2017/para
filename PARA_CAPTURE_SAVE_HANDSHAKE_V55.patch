@@ -1,0 +1,606 @@
+diff --git a/apps/para-home/src/screens/media.js b/apps/para-home/src/screens/media.js
+index a687fdd..a7f6dee 100644
+--- a/apps/para-home/src/screens/media.js
++++ b/apps/para-home/src/screens/media.js
+@@ -9,6 +9,10 @@ const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric",
+ let activeItems = [];
+ let selectedCaptureId = "";
+ let galleryFilter = "all";
++const CAPTURE_SYNC_CHANNEL = "para-capture-library-v1";
++const CAPTURE_SYNC_STORAGE_KEY = "para.capture.library.pulse.v1";
++let captureSyncChannel = null;
++let captureStorageListener = null;
+ 
+ function releaseUrls() {
+   for (const url of liveUrls.values()) URL.revokeObjectURL(url);
+@@ -27,25 +31,49 @@ function durationLabel(ms = 0) {
+   return minutes ? `${minutes}:${seconds}` : `0:${seconds}`;
+ }
+ 
++function captureState(item = {}) {
++  const state = String(item.captureState || "ready").toLowerCase();
++  return ["queued", "processing", "saving", "failed", "ready"].includes(state) ? state : "ready";
++}
++
++function captureStateLabel(item = {}) {
++  const state = captureState(item);
++  if (state === "queued") return Number(item.queueAhead || 0) > 0 ? `Queued · ${Number(item.queueAhead)} ahead` : "Queued";
++  if (state === "processing") return "Processing MP4";
++  if (state === "saving") return "Saving to Media Gallery";
++  if (state === "failed") return "MP4 failed · original kept";
++  return "Ready";
++}
++
+ function details(item) {
+-  if (item.type === "clip") return `${durationLabel(item.durationMs)} · ${item.mimeType?.includes("mp4") ? "MP4" : item.mimeType?.includes("webm") ? "WebM" : "Video"}`;
++  if (item.type === "clip") {
++    const format = item.mimeType?.includes("mp4") ? "MP4" : item.mimeType?.includes("webm") ? "WebM" : "Video";
++    const state = captureState(item);
++    return `${durationLabel(item.durationMs)} · ${format}${state === "ready" ? "" : ` · ${captureStateLabel(item)}`}`;
++  }
+   return `${item.width || ""}${item.width ? " × " : ""}${item.height || ""}${item.width ? " · " : ""}Screenshot`;
+ }
+ 
+ function heroMarkup(item) {
+   if (!item) return `<div class="capture-gallery-empty"><span>▣</span><h2>No captures here</h2><p>Take a screenshot or save recent gameplay from Control Center.</p></div>`;
+   const url = mediaUrl(item);
++  const state = captureState(item);
++  const isReady = state === "ready";
++  const statusMarkup = item.type === "clip" && !isReady
++    ? `<div class="capture-processing-banner capture-processing-banner--${state}"><strong>${escapeHtml(captureStateLabel(item))}</strong><span>${state === "failed" ? escapeHtml(item.failureMessage || "PARA kept the original WebM recording so the video is not lost.") : "The original recording is already stored locally. PARA will only mark this video ready after the MP4 is verified and read back from Media Gallery."}</span></div>`
++    : "";
+   const mediaStage = item.type === "clip"
+     ? `<div class="capture-hero__media capture-hero__media--video">${paraVideoPlayerMarkup({ src: url, mimeType: capturePlaybackMime(item), durationMs: item.durationMs, className: "para-video-player--hero" })}</div>`
+     : `<button class="capture-hero__media" type="button" data-action="open-media-viewer" data-capture-id="${item.id}" data-autofocus="true" aria-label="View screenshot fullscreen"><img src="${url}" alt="Screenshot captured ${fmt.format(item.createdAt)}"></button>`;
+-  return `<article class="capture-hero" data-selected-capture="${item.id}">
++  return `<article class="capture-hero capture-hero--${state}" data-selected-capture="${item.id}">
+     ${mediaStage}
+     <div class="capture-hero__info">
+-      <div><span>${item.type === "clip" ? "GAMEPLAY VIDEO" : "SCREENSHOT"}</span><h2>${item.type === "clip" ? "Gameplay capture" : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
++      ${statusMarkup}
++      <div><span>${item.type === "clip" ? (isReady ? "GAMEPLAY VIDEO" : "LOCAL RECORDING") : "SCREENSHOT"}</span><h2>${item.type === "clip" ? (state === "failed" ? "Original gameplay recording" : state === "ready" ? "Gameplay capture" : "Gameplay capture processing") : "Screenshot"}</h2><p>${fmt.format(item.createdAt)} · ${details(item)}</p></div>
+       <div class="capture-hero__actions" data-focus-zone="capture-actions">
+         <button type="button" class="capture-action capture-action--primary" data-action="open-media-viewer" data-capture-id="${item.id}"><b>▶</b><span>View</span></button>
+-        ${item.type === "clip" ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
+-        <button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}"><b>↗</b><span>Share</span></button>
++        ${item.type === "clip" && isReady ? `<button type="button" class="capture-action capture-action--youtube" data-action="share-capture" data-share-target="youtube" data-capture-id="${item.id}"><b>▶</b><span>Upload to YouTube</span></button>` : ""}
++        ${isReady ? `<button type="button" class="capture-action" data-action="open-share-center" data-capture-id="${item.id}" data-capture-kind="${item.type}"><b>↗</b><span>Share</span></button>` : ""}
+         <button type="button" class="capture-action" data-action="share-capture" data-share-target="files" data-capture-id="${item.id}"><b>⇩</b><span>Save</span></button>
+         <button type="button" class="capture-action capture-action--danger" data-action="delete-capture" data-capture-id="${item.id}"><b>×</b><span>Delete</span></button>
+       </div>
+@@ -58,7 +86,8 @@ function railMarkup(items) {
+   return `<section class="capture-rail" aria-label="Captures"><header><strong>${items.length} ${items.length === 1 ? "capture" : "captures"}</strong><small>Choose a capture to preview</small></header><div class="capture-rail__track" data-focus-zone="capture-rail">${items.map((item) => {
+     const url = mediaUrl(item);
+     const media = item.type === "clip" ? `<video src="${url}" preload="metadata" muted playsinline></video>` : `<img src="${url}" alt="">`;
+-    return `<button type="button" class="capture-thumb ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${durationLabel(item.durationMs)}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${fmt.format(item.createdAt)}</small></span></button>`;
++    const state = captureState(item);
++    return `<button type="button" class="capture-thumb capture-thumb--${state} ${item.id === selectedCaptureId ? "is-selected" : ""}" data-action="select-media-capture" data-capture-id="${item.id}" aria-label="${item.type === "clip" ? "Video" : "Screenshot"} from ${fmt.format(item.createdAt)}"><span class="capture-thumb__media">${media}${item.type === "clip" ? `<em>${state === "ready" ? durationLabel(item.durationMs) : escapeHtml(captureStateLabel(item))}</em>` : ""}</span><span class="capture-thumb__copy"><strong>${item.type === "clip" ? "Video" : "Screenshot"}</strong><small>${state === "ready" ? fmt.format(item.createdAt) : escapeHtml(captureStateLabel(item))}</small></span></button>`;
+   }).join("")}</div></section>`;
+ }
+ 
+@@ -95,18 +124,42 @@ export function mediaGalleryScreen() {
+   });
+ }
+ 
++async function reloadCaptureLibrary() {
++  releaseUrls();
++  activeItems = await listCaptures();
++  if (!selectedCaptureId || !activeItems.some((item) => item.id === selectedCaptureId)) selectedCaptureId = activeItems[0]?.id || "";
++  refreshGalleryMarkup();
++}
++
++function stopCaptureLibrarySync() {
++  try { captureSyncChannel?.close?.(); } catch {}
++  captureSyncChannel = null;
++  if (captureStorageListener) window.removeEventListener("storage", captureStorageListener);
++  captureStorageListener = null;
++}
++
++function startCaptureLibrarySync() {
++  stopCaptureLibrarySync();
++  const refresh = () => { void reloadCaptureLibrary().catch(() => {}); };
++  try {
++    captureSyncChannel = new BroadcastChannel(CAPTURE_SYNC_CHANNEL);
++    captureSyncChannel.onmessage = (event) => { if (event?.data?.type === "para-capture-library-change") refresh(); };
++  } catch { captureSyncChannel = null; }
++  captureStorageListener = (event) => { if (event.key === CAPTURE_SYNC_STORAGE_KEY) refresh(); };
++  window.addEventListener("storage", captureStorageListener);
++}
++
+ export async function activateMediaGallery() {
+   releaseUrls();
+   const host = document.querySelector("[data-media-gallery]");
+-  if (!host) return () => releaseUrls();
++  if (!host) return () => { stopCaptureLibrarySync(); releaseUrls(); };
+   try {
+-    activeItems = await listCaptures();
+-    if (!selectedCaptureId || !activeItems.some((item) => item.id === selectedCaptureId)) selectedCaptureId = activeItems[0]?.id || "";
+-    refreshGalleryMarkup();
++    await reloadCaptureLibrary();
++    startCaptureLibrarySync();
+   } catch (error) {
+     host.innerHTML = `<div class="capture-gallery-empty"><span>!</span><h2>Gallery could not open</h2><p>${String(error?.message || "Capture storage is unavailable.")}</p></div>`;
+   }
+-  return () => releaseUrls();
++  return () => { stopCaptureLibrarySync(); releaseUrls(); };
+ }
+ 
+ export function selectMediaCapture(id) {
+diff --git a/apps/para-home/styles.css b/apps/para-home/styles.css
+index 8b12b9c..8caca2f 100644
+--- a/apps/para-home/styles.css
++++ b/apps/para-home/styles.css
+@@ -2174,3 +2174,13 @@ html[data-modal-owner] #para-app { overflow:hidden; }
+ .friends-empty{width:min(560px,100%);text-align:center}.friends-empty__icon{width:76px;height:76px;margin:0 auto 20px;display:grid;place-items:center;border:1px solid rgba(195,139,255,.2);border-radius:22px;background:radial-gradient(circle at 50% 35%,rgba(143,72,230,.25),rgba(21,11,35,.78));color:#ce96ff;font-size:2rem;box-shadow:0 18px 50px rgba(82,31,145,.18)}
+ .friends-empty h2{margin:0;color:#fff;font-size:1.55rem}.friends-empty p{max-width:520px;margin:10px auto 0;color:rgba(239,231,246,.58);font-size:.86rem;line-height:1.55}.friends-empty small{display:block;margin-top:14px;color:rgba(213,195,228,.4);font-size:.7rem;line-height:1.45}
+ @media(max-width:720px){.friends-console__bar{align-items:flex-start;flex-direction:column}.friends-tabs{width:100%;overflow-x:auto}.friends-tabs button{flex:1}.friends-console__content{padding:34px 20px}}
++
++/* V55: capture truth-state UI. A video is only "ready" after MP4 verification and IndexedDB readback. */
++.capture-processing-banner{padding:12px 13px;border:1px solid rgba(190,145,255,.22);border-radius:14px;background:rgba(116,55,181,.09)}
++.capture-processing-banner strong,.capture-processing-banner span{display:block;max-width:100%;overflow-wrap:anywhere}
++.capture-processing-banner strong{color:#d3a7ff;font-size:.72rem;font-weight:900;letter-spacing:.04em}
++.capture-processing-banner span{margin-top:5px;color:rgba(244,239,249,.58);font-size:.72rem;line-height:1.45}
++.capture-processing-banner--failed{border-color:rgba(255,121,121,.28);background:rgba(183,55,66,.09)}
++.capture-processing-banner--failed strong{color:#ffabab}
++.capture-thumb--queued,.capture-thumb--processing,.capture-thumb--saving{border-color:rgba(188,128,255,.24)}
++.capture-thumb--failed{border-color:rgba(255,111,111,.24)}
+diff --git a/services/api/server.py b/services/api/server.py
+index d538b86..fbee3d7 100644
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -1563,7 +1563,7 @@ def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
+                 if state == "queued"
+                 else "Processing capture · creating MP4"
+                 if state == "processing"
+-                else "Capture ready"
++                else "MP4 ready · saving to Media Gallery"
+                 if state == "completed"
+                 else str((job.get("result") or {}).get("message") or "Capture processing failed.")
+             ),
+@@ -1575,6 +1575,7 @@ def capture_normalization_status(job_id: str, owner: str) -> tuple[int, dict]:
+ 
+ 
+ def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int, bytes | dict]:
++    """Return a finished MP4 without deleting it until the browser confirms its local save."""
+     with _capture_jobs_ready:
+         _capture_cleanup_locked()
+         job = _capture_jobs.get(job_id)
+@@ -1591,17 +1592,28 @@ def consume_capture_normalization_result(job_id: str, owner: str) -> tuple[int,
+         if state == "failed":
+             return int(job.get("status_code") or 422), dict(job.get("result") or {})
+         output_path = Path(str(job.get("output_path") or ""))
+-        temp_dir = str(job.get("temp_dir") or "")
+ 
+     try:
+         body = output_path.read_bytes()
+     except OSError:
+         return 500, {"error": "capture_result_missing", "message": "PARA finished the job but could not read the MP4 result."}
++    return 200, body
++
+ 
++def acknowledge_capture_normalization_result(job_id: str, owner: str) -> tuple[int, dict]:
++    """Delete a completed encoder result only after Media Gallery confirms persistence."""
+     with _capture_jobs_ready:
++        _capture_cleanup_locked()
++        job = _capture_jobs.get(job_id)
++        if not job or str(job.get("owner") or "") != owner:
++            return 404, {"error": "capture_job_not_found", "message": "This capture job is no longer available."}
++        state = str(job.get("state") or "queued")
++        if state in {"queued", "processing"}:
++            return 409, {"error": "capture_not_ready", "state": state, "message": "PARA is still processing this capture."}
++        temp_dir = str(job.get("temp_dir") or "")
+         _capture_jobs.pop(job_id, None)
+     shutil.rmtree(temp_dir, ignore_errors=True)
+-    return 200, body
++    return 200, {"acknowledged": True, "job_id": job_id}
+ 
+ 
+ def _store_build_storage_prefix(item: dict) -> str:
+@@ -2062,6 +2074,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+ 
+   const DB_NAME = 'para-media-gallery';
+   const DB_STORE = 'captures';
++  const CAPTURE_SYNC_CHANNEL = 'para-capture-library-v1';
++  const CAPTURE_SYNC_STORAGE_KEY = 'para.capture.library.pulse.v1';
+   let shellOpen = false;
+   let contextName = '';
+   let manualRecording = null;
+@@ -2721,30 +2735,97 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     });
+   }
+ 
+-  async function saveCapture({ type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '' }) {
++  function announceCaptureLibraryChange(item, reason = 'updated') {
++    const detail = { type: 'para-capture-library-change', reason, id: String(item?.id || ''), state: String(item?.captureState || 'ready'), at: Date.now() };
++    try {
++      const channel = new BroadcastChannel(CAPTURE_SYNC_CHANNEL);
++      channel.postMessage(detail);
++      channel.close();
++    } catch (_) {}
++    try { localStorage.setItem(CAPTURE_SYNC_STORAGE_KEY, JSON.stringify(detail)); } catch (_) {}
++    try { parent.postMessage(detail, location.origin); } catch (_) {}
++  }
++
++  async function readCaptureRecord(id) {
+     const db = await openDb();
++    try {
++      return await new Promise((resolve, reject) => {
++        const tx = db.transaction(DB_STORE, 'readonly');
++        const request = tx.objectStore(DB_STORE).get(id);
++        request.onsuccess = () => resolve(request.result || null);
++        request.onerror = () => reject(request.error);
++        tx.onabort = () => reject(tx.error || new Error('Capture readback was aborted.'));
++      });
++    } finally { db.close(); }
++  }
++
++  async function writeCaptureRecord(item, reason = 'updated') {
++    const db = await openDb();
++    try {
++      await new Promise((resolve, reject) => {
++        const tx = db.transaction(DB_STORE, 'readwrite');
++        tx.objectStore(DB_STORE).put(item);
++        tx.oncomplete = resolve;
++        tx.onerror = () => reject(tx.error);
++        tx.onabort = () => reject(tx.error || new Error('Capture save was aborted.'));
++      });
++    } finally { db.close(); }
++    announceCaptureLibraryChange(item, reason);
++    return item;
++  }
++
++  async function verifyPersistedCapture(id, expectedBlob, expectedState = 'ready') {
++    const persisted = await readCaptureRecord(id);
++    const persistedBlob = persisted?.blob;
++    if (!persisted || !(persistedBlob instanceof Blob) || !persistedBlob.size) {
++      throw new Error('PARA could not confirm that the video exists in Media Gallery.');
++    }
++    if (expectedBlob?.size && persistedBlob.size !== expectedBlob.size) {
++      throw new Error('PARA saved an incomplete video. The original recording was kept for recovery.');
++    }
++    if (String(persisted.captureState || 'ready') !== String(expectedState || 'ready')) {
++      throw new Error('PARA could not confirm the final Media Gallery state for this video.');
++    }
++    return persisted;
++  }
++
++  async function saveCapture({ id = '', createdAt = 0, type, blob, width = 0, height = 0, durationMs = 0, captureMode = '', sourceMimeType = '', captureState = 'ready', normalizeJobId = '', failureMessage = '' }) {
+     const item = {
+-      id: crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
++      id: id || crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+       type, blob, mimeType: blob.type, width, height, durationMs, captureMode,
+-      createdAt: Date.now(), source: 'PARA', captureVersion: 5,
++      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 6,
++      captureState, normalizeJobId, failureMessage,
+       ...(type === 'clip' ? {
+-        playbackVerified: true,
++        playbackVerified: captureState === 'ready',
+         recorderMimeType: sourceMimeType || 'video/webm',
+         sourceMimeType: sourceMimeType || 'video/webm',
+-        normalized: blob.type === 'video/mp4',
+-        videoCodec: blob.type === 'video/mp4' ? 'h264' : '',
+-        audioCodec: blob.type === 'video/mp4' ? 'aac' : '',
++        normalized: captureState === 'ready' && blob.type === 'video/mp4',
++        videoCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'h264' : '',
++        audioCodec: captureState === 'ready' && blob.type === 'video/mp4' ? 'aac' : '',
+       } : {})
+     };
+-    await new Promise((resolve, reject) => {
+-      const tx = db.transaction(DB_STORE, 'readwrite');
+-      tx.objectStore(DB_STORE).put(item);
+-      tx.oncomplete = resolve;
+-      tx.onerror = () => reject(tx.error);
+-      tx.onabort = () => reject(tx.error);
+-    });
+-    db.close();
+-    return item;
++    await writeCaptureRecord(item, captureState === 'ready' ? 'saved' : captureState);
++    return verifyPersistedCapture(item.id, blob, captureState);
++  }
++
++  async function patchCaptureState(id, patch = {}, reason = 'updated') {
++    const existing = await readCaptureRecord(id);
++    if (!existing) return null;
++    const next = { ...existing, ...patch, updatedAt: Date.now() };
++    await writeCaptureRecord(next, reason);
++    return readCaptureRecord(id);
++  }
++
++  async function acknowledgeCaptureJob(jobId) {
++    if (!jobId) return false;
++    try {
++      const response = await fetch(`/api/v1/capture/normalize/ack?id=${encodeURIComponent(jobId)}`, {
++        method: 'POST',
++        credentials: 'same-origin',
++        headers: { 'Accept': 'application/json' },
++      });
++      return response.ok;
++    } catch (_) { return false; }
+   }
+ 
+   function stopStream(stream) {
+@@ -3148,7 +3229,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     }
+   }
+ 
+-  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture') {
++  async function normalizeRuntimeCapture(rawBlob, captureMode = '', captureKind = 'capture', onState = null) {
+     const kind = captureKind === 'replay' ? 'replay' : 'capture';
+     let response = null;
+     let initialPayload = null;
+@@ -3180,6 +3261,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       }
+       const jobId = String(queued?.job_id || '');
+       if (!jobId) throw new Error('PARA accepted the capture but did not return a processing job.');
++      try { onState?.({ state: Number(queued?.ahead || 0) > 0 ? 'queued' : 'processing', jobId, ahead: Math.max(0, Number(queued?.ahead || 0)) }); } catch (_) {}
+ 
+       const deadline = Date.now() + (10 * 60 * 1000);
+       let lastMessage = '';
+@@ -3206,10 +3288,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+         const state = String(statusPayload?.state || '');
+         if (state === 'queued') {
+           const ahead = Math.max(0, Number(statusPayload?.ahead || 0));
++          try { onState?.({ state: 'queued', jobId, ahead }); } catch (_) {}
+           showStatus(ahead > 0 ? `Queued ${kind} · ${ahead} ahead` : `Queued ${kind}`);
+           continue;
+         }
+         if (state === 'processing') {
++          try { onState?.({ state: 'processing', jobId, ahead: 0 }); } catch (_) {}
+           showStatus(`Processing ${kind} · creating MP4`);
+           continue;
+         }
+@@ -3217,7 +3301,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+           const detail = statusPayload?.detail ? ` ${statusPayload.detail}` : '';
+           throw new Error(`${statusPayload?.message || 'PARA could not process this gameplay recording.'}${detail}`.trim());
+         }
+-        if (state === 'completed') break;
++        if (state === 'completed') {
++          try { onState?.({ state: 'saving', jobId, ahead: 0 }); } catch (_) {}
++          showStatus(`MP4 ready · saving ${kind} to Media Gallery`);
++          break;
++        }
+       }
+       if (Date.now() >= deadline) throw new Error('PARA capture processing took too long in the queue.');
+ 
+@@ -3247,6 +3335,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+ 
+     const mp4 = output?.type === 'video/mp4' ? output : new Blob([output], { type: 'video/mp4' });
+     await verifyNormalizedCapture(mp4);
++    try { onState?.({ state: 'verified' }); } catch (_) {}
+     return mp4;
+   }
+ 
+@@ -3577,22 +3666,62 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     const active = manualRecording;
+     if (!active || active.stopping) return;
+     active.stopping = true;
++    let staged = null;
++    let captureJobId = '';
++    let captureStateUpdates = Promise.resolve();
+     try {
+       const rawBlob = await finalizeRuntimeRecorderSession(active.session);
+-      toast('Processing capture · creating MP4');
+-      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture');
+-      await saveCapture({
++      if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('The recording was empty.');
++      const durationMs = Date.now() - active.startedAt;
++      staged = await saveCapture({
++        type: 'clip',
++        blob: rawBlob,
++        width: active.width || 0,
++        height: active.height || 0,
++        durationMs,
++        captureMode: active.captureMode || '',
++        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
++        captureState: 'processing'
++      });
++      toast('Recording secured locally · processing MP4');
++      const blob = await normalizeRuntimeCapture(rawBlob, active.captureMode || 'game-frames', 'capture', (status) => {
++        captureJobId = String(status?.jobId || captureJobId || '');
++        const state = String(status?.state || 'processing');
++        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
++          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
++          normalizeJobId: captureJobId,
++          queueAhead: Math.max(0, Number(status?.ahead || 0)),
++          failureMessage: ''
++        }, state)).catch(() => null);
++      });
++      await captureStateUpdates;
++      const saved = await saveCapture({
++        id: staged.id,
++        createdAt: staged.createdAt,
+         type: 'clip',
+         blob,
+         width: active.width || 0,
+         height: active.height || 0,
+-        durationMs: Date.now() - active.startedAt,
++        durationMs,
+         captureMode: active.captureMode || '',
+-        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm'
++        sourceMimeType: rawBlob.type || active.mimeType || 'video/webm',
++        captureState: 'ready',
++        normalizeJobId: captureJobId
+       });
+-      toast('Gameplay capture verified and saved');
++      await verifyPersistedCapture(saved.id, blob, 'ready');
++      void acknowledgeCaptureJob(captureJobId);
++      toast('Gameplay capture saved to Media Gallery');
+     } catch (error) {
+-      toast(error?.message || 'Recording could not be saved');
++      if (staged?.id) {
++        try {
++          await patchCaptureState(staged.id, {
++            captureState: 'failed',
++            normalizeJobId: captureJobId,
++            failureMessage: String(error?.message || 'MP4 processing failed.')
++          }, 'failed');
++        } catch (_) {}
++      }
++      toast(staged ? 'MP4 processing failed · original recording kept in Media Gallery' : (error?.message || 'Recording could not be saved'));
+     } finally {
+       manualRecording = null;
+       stopStream(active.stream);
+@@ -3637,26 +3766,66 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+ 
+   async function saveReplay(durationMs) {
+     if (!replay) { toast('Start PARA Replay first'); return; }
++    let staged = null;
++    let captureJobId = '';
++    let captureStateUpdates = Promise.resolve();
+     try {
+       replay.recorder.requestData();
+       await new Promise((resolve) => setTimeout(resolve, 220));
+       const cutoff = Date.now() - durationMs;
+       const selected = replay.chunks.filter((part, index) => index === 0 || part.at >= cutoff);
+       const rawBlob = new Blob(selected.map((part) => part.blob), { type: replay.recorder.mimeType || 'video/webm' });
+-      toast('Processing replay · creating MP4');
+-      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay');
+-      await saveCapture({
++      if (!rawBlob?.size || rawBlob.size < 1024) throw new Error('Replay has not buffered enough gameplay yet.');
++      const actualDuration = Math.min(durationMs, Date.now() - replay.startedAt);
++      staged = await saveCapture({
++        type: 'clip',
++        blob: rawBlob,
++        width: replay.width || 0,
++        height: replay.height || 0,
++        durationMs: actualDuration,
++        captureMode: replay.captureMode || '',
++        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
++        captureState: 'processing'
++      });
++      toast('Replay secured locally · processing MP4');
++      const blob = await normalizeRuntimeCapture(rawBlob, replay.captureMode || 'game-frames', 'replay', (status) => {
++        captureJobId = String(status?.jobId || captureJobId || '');
++        const state = String(status?.state || 'processing');
++        captureStateUpdates = captureStateUpdates.then(() => patchCaptureState(staged.id, {
++          captureState: state === 'queued' ? 'queued' : state === 'saving' ? 'saving' : 'processing',
++          normalizeJobId: captureJobId,
++          queueAhead: Math.max(0, Number(status?.ahead || 0)),
++          failureMessage: ''
++        }, state)).catch(() => null);
++      });
++      await captureStateUpdates;
++      const saved = await saveCapture({
++        id: staged.id,
++        createdAt: staged.createdAt,
+         type: 'clip',
+         blob,
+         width: replay.width || 0,
+         height: replay.height || 0,
+-        durationMs: Math.min(durationMs, Date.now() - replay.startedAt),
++        durationMs: actualDuration,
+         captureMode: replay.captureMode || '',
+-        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm'
++        sourceMimeType: rawBlob.type || replay.mimeType || 'video/webm',
++        captureState: 'ready',
++        normalizeJobId: captureJobId
+       });
+-      toast('Recent gameplay verified and saved to PARA Media');
++      await verifyPersistedCapture(saved.id, blob, 'ready');
++      void acknowledgeCaptureJob(captureJobId);
++      toast('Recent gameplay saved to Media Gallery');
+     } catch (error) {
+-      toast(error?.message || 'Replay could not be saved');
++      if (staged?.id) {
++        try {
++          await patchCaptureState(staged.id, {
++            captureState: 'failed',
++            normalizeJobId: captureJobId,
++            failureMessage: String(error?.message || 'MP4 processing failed.')
++          }, 'failed');
++        } catch (_) {}
++      }
++      toast(staged ? 'Replay MP4 failed · original recording kept in Media Gallery' : (error?.message || 'Replay could not be saved'));
+     }
+   }
+ 
+@@ -4302,6 +4471,15 @@ class ParaHandler(SimpleHTTPRequestHandler):
+ 
+     def do_POST(self) -> None:  # noqa: N802
+         request = urlparse(self.path)
++        if request.path == "/api/v1/capture/normalize/ack":
++            access_status, owner, refreshed_headers = self._capture_access_owner()
++            if access_status != 200:
++                self._send_json(401, {"error": "not_signed_in", "message": "Sign in to process PARA gameplay captures."}, refreshed_headers)
++                return
++            job_id = str(parse_qs(request.query).get("id", [""])[0] or "")
++            ack_status, payload = acknowledge_capture_normalization_result(job_id, owner)
++            self._send_json(ack_status, payload, refreshed_headers)
++            return
+         if request.path == "/api/v1/capture/normalize":
+             access_status, owner, refreshed_headers = self._capture_access_owner()
+             if access_status != 200:
+diff --git a/tests/test_api.py b/tests/test_api.py
+index f1b8a2f..1accff9 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -11,7 +11,7 @@ from unittest.mock import patch
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "services/api"))
+-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result  # noqa: E402
++from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result, acknowledge_capture_normalization_result  # noqa: E402
+ import system_layer  # noqa: E402
+ 
+ 
+@@ -582,10 +582,22 @@ class ApiContractTests(unittest.TestCase):
+                 self.assertEqual(states, ["completed", "completed"])
+ 
+                 for payload in payloads:
+-                    result_status, body = consume_capture_normalization_result(payload["job_id"], "test-owner")
++                    job_id = payload["job_id"]
++                    result_status, body = consume_capture_normalization_result(job_id, "test-owner")
+                     self.assertEqual(result_status, 200)
+                     self.assertIsInstance(body, bytes)
+                     self.assertEqual(len(body), 2048)
++                    # V55 keeps the finished MP4 available until the browser confirms
++                    # that IndexedDB readback succeeded, so a transient client failure
++                    # can fetch the same result again instead of losing it.
++                    retry_status, retry_body = consume_capture_normalization_result(job_id, "test-owner")
++                    self.assertEqual(retry_status, 200)
++                    self.assertEqual(retry_body, body)
++                    ack_status, ack = acknowledge_capture_normalization_result(job_id, "test-owner")
++                    self.assertEqual(ack_status, 200)
++                    self.assertTrue(ack["acknowledged"])
++                    missing_status, _ = capture_normalization_status(job_id, "test-owner")
++                    self.assertEqual(missing_status, 404)
+         finally:
+             release_first.set()
+             for temporary in temporary_dirs:
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index 434ff0b..f1b542e 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -807,6 +807,32 @@ class RepositoryTests(unittest.TestCase):
+         self.assertNotIn("self._send_json(429", server[server.find('if request.path == "/api/v1/capture/normalize"'):server.find('if request.path == "/api/v1/integrations/google/youtube/upload"')])
+ 
+ 
++    def test_v55_capture_success_requires_media_gallery_readback(self):
++        media = (ROOT / "apps/para-home/src/screens/media.js").read_text(encoding="utf-8")
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++
++        for marker in [
++            "captureVersion: 6",
++            "verifyPersistedCapture",
++            "captureState: 'processing'",
++            "original recording kept in Media Gallery",
++            "Gameplay capture saved to Media Gallery",
++            "BroadcastChannel(CAPTURE_SYNC_CHANNEL)",
++            "/api/v1/capture/normalize/ack",
++            "acknowledge_capture_normalization_result",
++            "MP4 ready · saving to Media Gallery",
++        ]:
++            self.assertIn(marker, server)
++        self.assertIn("captureStateLabel", media)
++        self.assertIn("para-capture-library-v1", media)
++        self.assertIn("The original recording is already stored locally", media)
++
++        final_save = server.find("await verifyPersistedCapture(saved.id, blob, 'ready')")
++        success_toast = server.find("toast('Gameplay capture saved to Media Gallery')")
++        self.assertGreater(final_save, -1)
++        self.assertGreater(success_toast, final_save)
++
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

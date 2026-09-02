@@ -2174,3 +2174,13 @@ html[data-modal-owner] #para-app { overflow:hidden; }
 .friends-empty{width:min(560px,100%);text-align:center}.friends-empty__icon{width:76px;height:76px;margin:0 auto 20px;display:grid;place-items:center;border:1px solid rgba(195,139,255,.2);border-radius:22px;background:radial-gradient(circle at 50% 35%,rgba(143,72,230,.25),rgba(21,11,35,.78));color:#ce96ff;font-size:2rem;box-shadow:0 18px 50px rgba(82,31,145,.18)}
 .friends-empty h2{margin:0;color:#fff;font-size:1.55rem}.friends-empty p{max-width:520px;margin:10px auto 0;color:rgba(239,231,246,.58);font-size:.86rem;line-height:1.55}.friends-empty small{display:block;margin-top:14px;color:rgba(213,195,228,.4);font-size:.7rem;line-height:1.45}
 @media(max-width:720px){.friends-console__bar{align-items:flex-start;flex-direction:column}.friends-tabs{width:100%;overflow-x:auto}.friends-tabs button{flex:1}.friends-console__content{padding:34px 20px}}
+
+/* V55: capture truth-state UI. A video is only "ready" after MP4 verification and IndexedDB readback. */
+.capture-processing-banner{padding:12px 13px;border:1px solid rgba(190,145,255,.22);border-radius:14px;background:rgba(116,55,181,.09)}
+.capture-processing-banner strong,.capture-processing-banner span{display:block;max-width:100%;overflow-wrap:anywhere}
+.capture-processing-banner strong{color:#d3a7ff;font-size:.72rem;font-weight:900;letter-spacing:.04em}
+.capture-processing-banner span{margin-top:5px;color:rgba(244,239,249,.58);font-size:.72rem;line-height:1.45}
+.capture-processing-banner--failed{border-color:rgba(255,121,121,.28);background:rgba(183,55,66,.09)}
+.capture-processing-banner--failed strong{color:#ffabab}
+.capture-thumb--queued,.capture-thumb--processing,.capture-thumb--saving{border-color:rgba(188,128,255,.24)}
+.capture-thumb--failed{border-color:rgba(255,111,111,.24)}

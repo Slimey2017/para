@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api"))
-from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result  # noqa: E402
+from server import resolve, validate_bind, _store_build_storage_prefix, auth_sign_in, auth_sign_up, auth_update_user, auth_request_email_verification, auth_verify_email_code, auth_request_password_recovery, auth_complete_password_recovery, steam_openid_login_url, verify_steam_openid, connect_gaming_account, google_oauth_login_url, youtube_channel, connect_external_account, begin_youtube_resumable_upload, set_youtube_thumbnail, refresh_external_youtube_stats, achievement_progress_for_user, update_online_achievement, normalize_capture_file, enqueue_capture_normalization, capture_normalization_status, consume_capture_normalization_result, acknowledge_capture_normalization_result  # noqa: E402
 import system_layer  # noqa: E402
 
 
@@ -582,10 +582,22 @@ class ApiContractTests(unittest.TestCase):
                 self.assertEqual(states, ["completed", "completed"])
 
                 for payload in payloads:
-                    result_status, body = consume_capture_normalization_result(payload["job_id"], "test-owner")
+                    job_id = payload["job_id"]
+                    result_status, body = consume_capture_normalization_result(job_id, "test-owner")
                     self.assertEqual(result_status, 200)
                     self.assertIsInstance(body, bytes)
                     self.assertEqual(len(body), 2048)
+                    # V55 keeps the finished MP4 available until the browser confirms
+                    # that IndexedDB readback succeeded, so a transient client failure
+                    # can fetch the same result again instead of losing it.
+                    retry_status, retry_body = consume_capture_normalization_result(job_id, "test-owner")
+                    self.assertEqual(retry_status, 200)
+                    self.assertEqual(retry_body, body)
+                    ack_status, ack = acknowledge_capture_normalization_result(job_id, "test-owner")
+                    self.assertEqual(ack_status, 200)
+                    self.assertTrue(ack["acknowledged"])
+                    missing_status, _ = capture_normalization_status(job_id, "test-owner")
+                    self.assertEqual(missing_status, 404)
         finally:
             release_first.set()
             for temporary in temporary_dirs:
