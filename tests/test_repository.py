@@ -403,7 +403,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('captureCanvas.captureStream(30)', server)
         self.assertIn('new MediaRecorder(stream, runtimeRecorderOptions', server)
         self.assertIn("sourceMimeType: rawBlob.type", server)
-        self.assertIn("captureVersion: 8", server)
+        self.assertIn("captureVersion: 9", server)
         self.assertIn("normalized: false", server)
         self.assertNotIn('normalizeRuntimeCapture', server)
         self.assertNotIn('/api/v1/capture/normalize', server)
@@ -708,7 +708,7 @@ class RepositoryTests(unittest.TestCase):
             "captureVersion: 6",
         ]:
             self.assertNotIn(marker, server)
-        self.assertIn("captureVersion: 8", server)
+        self.assertIn("captureVersion: 9", server)
         self.assertIn("captureState: 'ready'", server)
         self.assertIn("verifyPersistedCapture(saved.id, rawBlob, 'ready')", server)
         self.assertIn("normalized: false", server)
@@ -823,7 +823,7 @@ class RepositoryTests(unittest.TestCase):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
 
         for marker in [
-            "captureVersion: 8",
+            "captureVersion: 9",
             "verifyPersistedCapture",
             "captureState: 'ready'",
             "Gameplay capture saved to Media Gallery",
@@ -850,7 +850,6 @@ class RepositoryTests(unittest.TestCase):
         self.assertGreater(final_save, -1)
         self.assertGreater(success_toast, final_save)
 
-
     def test_v58_para_home_csp_allows_blob_video_without_widening_fetch_policy(self):
         api_server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         gateway = (ROOT / "services/gateway/server.py").read_text(encoding="utf-8")
@@ -864,3 +863,25 @@ class RepositoryTests(unittest.TestCase):
             "img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self';",
             api_server,
         )
+
+    def test_v58_capture_fidelity_rejects_wrong_surface_and_distorted_output(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+
+        for marker in [
+            "captureVersion: 9",
+            "RUNTIME_CAPTURE_FPS = 60",
+            "runtimeVideoBitrate",
+            "viewportCoverage",
+            "aspectPenalty",
+            "expectedWidth",
+            "expectedHeight",
+            "distorted aspect ratio",
+            "unexpectedly dropped capture resolution",
+        ]:
+            self.assertIn(marker, server)
+        self.assertIn("element.captureStream(RUNTIME_CAPTURE_FPS)", server)
+        self.assertIn("captureCanvas.captureStream(RUNTIME_CAPTURE_FPS)", server)
+        self.assertIn("videoBitsPerSecond: runtimeVideoBitrate(stream)", server)
+        self.assertIn("videoBitsPerSecond: runtimeVideoBitrate(state.stream)", server)
+        self.assertNotIn("element.captureStream(30)", server)
+        self.assertNotIn("captureCanvas.captureStream(30)", server)

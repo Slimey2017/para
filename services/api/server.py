@@ -2549,7 +2549,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const item = {
       id: id || crypto.randomUUID?.() || `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type, blob: primaryBlob, mimeType: primaryBlob.type || recorderMimeType, width, height, durationMs, captureMode,
-      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 8,
+      createdAt: createdAt || Date.now(), updatedAt: Date.now(), source: 'PARA', captureVersion: 9,
       captureState,
       ...(type === 'clip' ? {
         playbackVerified: Boolean(playbackVerified),
@@ -2630,28 +2630,43 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const viewportArea = Math.max(1, (innerWidth || 1) * (innerHeight || 1));
     return captureVisualCandidates()
       .filter(({ element }) => typeof element.captureStream === 'function')
-      .map((candidate) => ({
-        ...candidate,
-        area: Math.max(0, candidate.rect.width * candidate.rect.height),
-        viewportCoverage: Math.max(0, candidate.rect.width * candidate.rect.height) / viewportArea,
-      }))
+      .map((candidate) => {
+        const area = Math.max(0, candidate.rect.width * candidate.rect.height);
+        const viewportCoverage = area / viewportArea;
+        const intrinsicWidth = Number(candidate.element.videoWidth || candidate.element.width || candidate.rect.width || 0);
+        const intrinsicHeight = Number(candidate.element.videoHeight || candidate.element.height || candidate.rect.height || 0);
+        const displayAspect = candidate.rect.width > 0 && candidate.rect.height > 0 ? candidate.rect.width / candidate.rect.height : 0;
+        const intrinsicAspect = intrinsicWidth > 0 && intrinsicHeight > 0 ? intrinsicWidth / intrinsicHeight : 0;
+        const aspectPenalty = displayAspect > 0 && intrinsicAspect > 0
+          ? Math.min(1, Math.abs(Math.log(intrinsicAspect / displayAspect)))
+          : 0;
+        return { ...candidate, area, viewportCoverage, intrinsicWidth, intrinsicHeight, aspectPenalty };
+      })
       .sort((a, b) => {
+        // Pick the surface the player is actually looking at. Older PARA builds
+        // always preferred any canvas over video, which could select a HUD/overlay
+        // canvas and produce a perfectly decodable but visually wrong recording.
+        const coverageDelta = b.viewportCoverage - a.viewportCoverage;
+        if (Math.abs(coverageDelta) > .08) return coverageDelta;
+        const aspectDelta = a.aspectPenalty - b.aspectPenalty;
+        if (Math.abs(aspectDelta) > .04) return aspectDelta;
+        const areaDelta = b.area - a.area;
+        if (Math.abs(areaDelta) > viewportArea * .04) return areaDelta;
         const canvasBiasA = a.element instanceof HTMLCanvasElement ? 1 : 0;
         const canvasBiasB = b.element instanceof HTMLCanvasElement ? 1 : 0;
-        if (canvasBiasA !== canvasBiasB) return canvasBiasB - canvasBiasA;
-        return b.area - a.area;
+        return canvasBiasB - canvasBiasA;
       });
   }
 
   async function requestDirectGameSurfaceStream(audio = false) {
     const candidates = directCaptureCandidates();
-    const candidate = candidates.find((item) => item.viewportCoverage >= .18) || candidates[0];
+    const candidate = candidates[0];
     if (!candidate) throw new Error('PARA found no game surface with a direct capture stream.');
 
     const { element, rect } = candidate;
     let rawStream;
     try {
-      rawStream = element instanceof HTMLCanvasElement ? element.captureStream(30) : element.captureStream();
+      rawStream = element instanceof HTMLCanvasElement ? element.captureStream(RUNTIME_CAPTURE_FPS) : element.captureStream();
     } catch (_) {
       throw new Error('The game surface refused direct stream capture.');
     }
@@ -2676,8 +2691,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
     const stream = new MediaStream(tracks);
     const settings = videoTrack.getSettings?.() || {};
-    stream.__paraCaptureWidth = Math.max(2, Number(settings.width || element.videoWidth || element.width || rect.width || innerWidth || 1280));
-    stream.__paraCaptureHeight = Math.max(2, Number(settings.height || element.videoHeight || element.height || rect.height || innerHeight || 720));
+    const captureWidth = Math.max(2, Number(settings.width || element.videoWidth || element.width || rect.width || innerWidth || 1280));
+    const captureHeight = Math.max(2, Number(settings.height || element.videoHeight || element.height || rect.height || innerHeight || 720));
+    const displayAspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 0;
+    const captureAspect = captureWidth / captureHeight;
+    const aspectError = displayAspect > 0 ? Math.abs(Math.log(captureAspect / displayAspect)) : 0;
+    if (aspectError > .18) {
+      rawStream?.getTracks?.().forEach((track) => { try { track.stop(); } catch (_) {} });
+      throw new Error('PARA rejected a game surface whose capture dimensions would distort the video.');
+    }
+    stream.__paraCaptureWidth = captureWidth;
+    stream.__paraCaptureHeight = captureHeight;
+    stream.__paraCaptureFps = Number(settings.frameRate || RUNTIME_CAPTURE_FPS) || RUNTIME_CAPTURE_FPS;
+    stream.__paraCaptureCoverage = Number(candidate.viewportCoverage || 0);
     stream.__paraCaptureMode = element instanceof HTMLCanvasElement ? 'direct-canvas-stream' : 'direct-video-stream';
     stream.__paraCleanup = () => {
       rawStream?.getTracks?.().forEach((track) => { try { track.stop(); } catch (_) {} });
@@ -2770,7 +2796,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
 
     let rawStream;
-    try { rawStream = captureCanvas.captureStream(30); }
+    try { rawStream = captureCanvas.captureStream(RUNTIME_CAPTURE_FPS); }
     catch (_) {
       stopped = true;
       cancelAnimationFrame(frameHandle);
@@ -2794,6 +2820,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const stream = new MediaStream(tracks);
     stream.__paraCaptureWidth = captureCanvas.width;
     stream.__paraCaptureHeight = captureCanvas.height;
+    stream.__paraCaptureFps = Number(videoTrack.getSettings?.().frameRate || RUNTIME_CAPTURE_FPS) || RUNTIME_CAPTURE_FPS;
+    stream.__paraCaptureCoverage = 1;
     stream.__paraCaptureMode = layers.length > 1 ? 'layer-compositor' : 'direct-game-surface';
     stream.__paraCleanup = () => {
       stopped = true;
@@ -2825,9 +2853,21 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     }
   }
 
-  const RUNTIME_CAPTURE_PROBE_MS = 800;
+  const RUNTIME_CAPTURE_PROBE_MS = 900;
+  const RUNTIME_CAPTURE_FPS = 60;
   const REPLAY_SEGMENT_MS = 15_000;
   const REPLAY_MAX_BUFFER_MS = 30 * 60 * 1000;
+
+  function runtimeVideoBitrate(stream, fallback = 8_000_000) {
+    const width = Math.max(2, Number(stream?.__paraCaptureWidth || stream?.getVideoTracks?.()[0]?.getSettings?.().width || 0));
+    const height = Math.max(2, Number(stream?.__paraCaptureHeight || stream?.getVideoTracks?.()[0]?.getSettings?.().height || 0));
+    const fps = Math.max(1, Number(stream?.__paraCaptureFps || stream?.getVideoTracks?.()[0]?.getSettings?.().frameRate || RUNTIME_CAPTURE_FPS));
+    const pixels = width * height;
+    if (pixels >= 1920 * 1080) return fps >= 50 ? 14_000_000 : 10_000_000;
+    if (pixels >= 1280 * 720) return fps >= 50 ? 10_000_000 : 7_000_000;
+    if (pixels >= 854 * 480) return fps >= 50 ? 7_000_000 : 5_000_000;
+    return Math.max(4_000_000, Number(fallback || 0));
+  }
 
   function runtimeRecorderMimeCandidates(hasAudio = false) {
     if (!globalThis.MediaRecorder) throw new Error('Gameplay recording is unavailable.');
@@ -2843,8 +2883,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return mimeType ? { mimeType, videoBitsPerSecond } : { videoBitsPerSecond };
   }
 
-  function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = 0, storeChunks = true, onChunk = null, videoBitsPerSecond = 8_000_000 } = {}) {
-    const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, videoBitsPerSecond));
+  function startRuntimeRecorderSession(stream, mimeType, { timesliceMs = 0, storeChunks = true, onChunk = null, videoBitsPerSecond = 0 } = {}) {
+    const targetBitrate = Math.max(1_000_000, Number(videoBitsPerSecond || runtimeVideoBitrate(stream)));
+    const recorder = new MediaRecorder(stream, runtimeRecorderOptions(mimeType, targetBitrate));
     const session = {
       recorder,
       mimeType: recorder.mimeType || mimeType || 'video/webm',
@@ -2893,7 +2934,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return blob;
   }
 
-  async function verifyPlayableVideoBlob(blob, { timeoutMs = 6000, expectedDurationMs = 0, minDurationRatio = 0 } = {}) {
+  async function verifyPlayableVideoBlob(blob, { timeoutMs = 6000, expectedDurationMs = 0, minDurationRatio = 0, expectedWidth = 0, expectedHeight = 0 } = {}) {
     if (!(blob instanceof Blob) || blob.size < 1024) throw new Error('The gameplay recording was empty.');
     const url = URL.createObjectURL(blob);
     const video = document.createElement('video');
@@ -2935,6 +2976,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) onReady();
       });
 
+      const decodedWidth = Number(video.videoWidth || 0);
+      const decodedHeight = Number(video.videoHeight || 0);
+      if (expectedWidth > 0 && expectedHeight > 0) {
+        const expectedAspect = expectedWidth / expectedHeight;
+        const decodedAspect = decodedWidth / decodedHeight;
+        const aspectError = Math.abs(Math.log(decodedAspect / expectedAspect));
+        if (aspectError > .08) throw new Error('PARA rejected a recording with a distorted aspect ratio.');
+        if (decodedWidth < expectedWidth * .72 || decodedHeight < expectedHeight * .72) {
+          throw new Error('PARA rejected a recording that unexpectedly dropped capture resolution.');
+        }
+      }
+
       const durationMs = Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : 0;
       if (expectedDurationMs > 0 && durationMs > 0 && minDurationRatio > 0 && durationMs < expectedDurationMs * minDurationRatio) {
         throw new Error('PARA detected an incomplete gameplay recording.');
@@ -2959,8 +3012,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       });
 
       return {
-        width: Number(video.videoWidth || 0),
-        height: Number(video.videoHeight || 0),
+        width: decodedWidth,
+        height: decodedHeight,
         durationMs,
         mimeType: String(blob.type || 'video/webm'),
       };
@@ -2970,10 +3023,17 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   }
 
   async function probeRuntimeRecorderMime(stream, mimeType) {
-    const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: 0, videoBitsPerSecond: 4_000_000 });
+    const probeBitrate = Math.max(4_000_000, Math.min(8_000_000, runtimeVideoBitrate(stream)));
+    const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: 0, videoBitsPerSecond: probeBitrate });
     await new Promise((resolve) => setTimeout(resolve, RUNTIME_CAPTURE_PROBE_MS));
     const blob = await finalizeRuntimeRecorderSession(session);
-    await verifyPlayableVideoBlob(blob, { timeoutMs: 4500, expectedDurationMs: RUNTIME_CAPTURE_PROBE_MS, minDurationRatio: .2 });
+    await verifyPlayableVideoBlob(blob, {
+      timeoutMs: 4500,
+      expectedDurationMs: RUNTIME_CAPTURE_PROBE_MS,
+      minDurationRatio: .2,
+      expectedWidth: stream.__paraCaptureWidth || 0,
+      expectedHeight: stream.__paraCaptureHeight || 0,
+    });
     return String(session.recorder.mimeType || blob.type || mimeType || 'video/webm');
   }
 
@@ -3291,7 +3351,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const { stream, mimeType } = prepared;
       // V57 records manual gameplay as one finalized MediaRecorder session.
       // No timeslice chunks are needed because the whole blob is saved at stop.
-      const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: 0, videoBitsPerSecond: 8_000_000 });
+      const session = startRuntimeRecorderSession(stream, mimeType, { timesliceMs: 0, videoBitsPerSecond: runtimeVideoBitrate(stream) });
       const startedAt = Date.now();
       session.recorder.addEventListener('error', () => toast('PARA recording encountered an encoder error'));
       manualRecording = {
@@ -3318,6 +3378,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const playback = await verifyPlayableVideoBlob(rawBlob, {
         expectedDurationMs: durationMs,
         minDurationRatio: .35,
+        expectedWidth: active.width || 0,
+        expectedHeight: active.height || 0,
       });
       const saved = await saveCapture({
         type: 'clip',
@@ -3352,7 +3414,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (!state || replay !== state || state.stopping || state.currentSegment) return;
     const session = startRuntimeRecorderSession(state.stream, state.mimeType, {
       timesliceMs: 0,
-      videoBitsPerSecond: 7_000_000,
+      videoBitsPerSecond: runtimeVideoBitrate(state.stream),
     });
     state.currentSegment = { session, startedAt: Date.now() };
     clearTimeout(state.segmentTimer);
@@ -3383,6 +3445,8 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const playback = await verifyPlayableVideoBlob(blob, {
         expectedDurationMs: durationMs,
         minDurationRatio: .25,
+        expectedWidth: state.width || 0,
+        expectedHeight: state.height || 0,
       });
       const segment = {
         blob,
