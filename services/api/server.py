@@ -1584,7 +1584,11 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   async function loadParaMusicTrack(id, { currentTime = 0, volume = null, attemptPlayback = true } = {}) {
     if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
-    const track = paraMusicQueue.find((item) => item.id === id);
+    let track = paraMusicQueue.find((item) => item.id === id);
+    if (!track?.blob) {
+      paraMusicQueue = await listParaMusicTracks();
+      track = paraMusicQueue.find((item) => item.id === id);
+    }
     if (!track?.blob) throw new Error('That local music file is no longer available.');
     const player = ensureParaMusicAudio();
     if (paraMusicTrack?.id !== track.id) {
@@ -1608,6 +1612,14 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return paraMusicState();
   }
 
+  function compensatedParaMusicTime(saved = {}) {
+    let value = Math.max(0, Number(saved.currentTime || 0));
+    if (saved.playbackState === 'playing' && Number(saved.updatedAt) > 0) {
+      value += Math.max(0, Math.min(4, (Date.now() - Number(saved.updatedAt)) / 1000));
+    }
+    return value;
+  }
+
   async function restoreParaMusicFromHandoff({ attemptPlayback = true, forceSync = false } = {}) {
     if (paraMusicRestorePromise && !forceSync) return paraMusicRestorePromise;
     const job = (async () => {
@@ -1617,7 +1629,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const sameTrack = paraMusicTrack?.id === saved.currentId;
       if (!sameTrack) {
         return loadParaMusicTrack(saved.currentId, {
-          currentTime: Number(saved.currentTime || 0),
+          currentTime: compensatedParaMusicTime(saved),
           volume: Number(saved.volume ?? 70),
           attemptPlayback: attemptPlayback && saved.playbackState === 'playing',
         });
@@ -1625,7 +1637,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const player = ensureParaMusicAudio();
       player.volume = Math.max(0, Math.min(1, Number(saved.volume ?? 70) / 100));
       if (forceSync && Number.isFinite(Number(saved.currentTime))) {
-        try { player.currentTime = Math.max(0, Math.min(Number(player.duration || saved.currentTime), Number(saved.currentTime))); } catch (_) {}
+        try { const target = compensatedParaMusicTime(saved); player.currentTime = Math.max(0, Math.min(Number(player.duration || target), target)); } catch (_) {}
       }
       if (saved.playbackState === 'playing' && attemptPlayback) {
         try { await player.play(); } catch (_) { paraMusicError = 'Press Play in PARA Control Center to continue.'; }
@@ -1667,6 +1679,81 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     writeParaMusicHandoff(true);
     return paraMusicState().volume;
   }
+
+  function setParaMusicVolumeAbsolute(percent) {
+    const player = ensureParaMusicAudio();
+    player.volume = Math.max(0, Math.min(1, Number(percent || 0) / 100));
+    writeParaMusicHandoff(true);
+    return paraMusicState().volume;
+  }
+
+  function seekParaMusic(seconds) {
+    const player = ensureParaMusicAudio();
+    const target = Math.max(0, Number(seconds || 0));
+    try { player.currentTime = Math.min(Number(player.duration || target), target); } catch (_) {}
+    writeParaMusicHandoff(true);
+    return paraMusicState();
+  }
+
+  async function playParaMusic() {
+    const saved = readParaMusicHandoff();
+    if (!paraMusicTrack && saved?.active) await restoreParaMusicFromHandoff({ attemptPlayback: false });
+    if (!paraMusicTrack) return paraMusicState();
+    const player = ensureParaMusicAudio();
+    if (player.paused) {
+      try { await player.play(); paraMusicError = ''; }
+      catch (_) { paraMusicError = 'Playback was blocked. Press Play again.'; }
+    }
+    writeParaMusicHandoff(true);
+    return paraMusicState();
+  }
+
+  function pauseParaMusic() {
+    if (paraMusicAudio && !paraMusicAudio.paused) paraMusicAudio.pause();
+    writeParaMusicHandoff(true);
+    return paraMusicState();
+  }
+
+  function stopParaMusic() {
+    if (paraMusicAudio) {
+      try { paraMusicAudio.pause(); paraMusicAudio.removeAttribute('src'); paraMusicAudio.load(); } catch (_) {}
+    }
+    revokeParaMusicUrl();
+    paraMusicTrack = null;
+    paraMusicError = '';
+    writeParaMusicHandoff(true);
+    return paraMusicState();
+  }
+
+  async function previousParaMusicTrack() {
+    const player = ensureParaMusicAudio();
+    if (paraMusicTrack && Number(player.currentTime || 0) > 4) {
+      player.currentTime = 0;
+      writeParaMusicHandoff(true);
+      return paraMusicState();
+    }
+    return nextParaMusicTrack(-1);
+  }
+
+  window.PARA = window.PARA && typeof window.PARA === 'object' ? window.PARA : {};
+  window.PARA.localMusicHost = Object.freeze({
+    state: () => ({ ...paraMusicState() }),
+    flush: () => { writeParaMusicHandoff(true); return { ...paraMusicState() }; },
+    playTrack: (id) => loadParaMusicTrack(String(id || ''), { currentTime: 0, volume: paraMusicState().volume, attemptPlayback: true }),
+    play: () => playParaMusic(),
+    pause: () => pauseParaMusic(),
+    toggle: () => toggleParaMusic(),
+    previous: () => previousParaMusicTrack(),
+    next: () => nextParaMusicTrack(1),
+    seek: (seconds) => seekParaMusic(seconds),
+    setVolume: (percent) => setParaMusicVolumeAbsolute(percent),
+    stop: () => stopParaMusic(),
+    refreshLibrary: async () => {
+      paraMusicQueue = await listParaMusicTracks();
+      if (paraMusicTrack && !paraMusicQueue.some((track) => track.id === paraMusicTrack.id)) stopParaMusic();
+      return paraMusicQueue.length;
+    },
+  });
 
   function paraMusicTimeLabel(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds || 0)));
@@ -1810,9 +1897,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     for (const media of document.querySelectorAll('audio,video')) {
       try {
         if (media === paraMusicAudio) {
-          paraMusicSuppressPausePersist = true;
-          if (!media.paused) media.pause();
-          paraMusicSuppressPausePersist = false;
+          // PARA Music belongs to the persistent game runtime while the suspended
+          // Home shell is open. Home controls this same player through the
+          // same-origin localMusicHost bridge instead of spawning a second copy.
           continue;
         }
         suspendedMediaState.set(media, { wasPlaying: !media.paused });
@@ -1835,9 +1922,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       try { if (state.wasPlaying) void media.play(); } catch (_) {}
     }
     suspendedMediaState.clear();
-    // The suspended PARA Home iframe owns the local song while Home is open.
-    // Pull its latest position/volume back into the game after the frame closes.
-    setTimeout(() => { void restoreParaMusicFromHandoff({ attemptPlayback: true, forceSync: true }); }, 40);
+    // PARA Music never left the persistent game runtime, so resuming the game
+    // does not stop/reload/reseek the user's song.
+    writeParaMusicHandoff(true);
     for (const [context, state] of suspendedAudioContextState) {
       try { if (state === 'running' && context.state === 'suspended') void context.resume?.(); } catch (_) {}
     }
@@ -1935,7 +2022,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
     const node = createGamePageTransition('Closing Game');
     node.classList.add('is-visible');
-    setTimeout(() => { location.href = destination; }, 430);
+    setTimeout(() => { writeParaMusicHandoff(true); location.href = destination; }, 430);
   }
 
   function switchSuspendedGame(storeId) {
@@ -1950,7 +2037,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
     const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
-    setTimeout(() => { location.href = next; }, 430);
+    setTimeout(() => { writeParaMusicHandoff(true); location.href = next; }, 430);
   }
 
   function leaveGame(destination = '/#/home') {

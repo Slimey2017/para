@@ -6,6 +6,17 @@ let fadeTimer = null;
 let unlocked = false;
 let suspended = false;
 
+function parentMusicOwnsBackground() {
+  if (typeof window === "undefined" || window.parent === window) return false;
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get("para_suspended_shell") !== "1") return false;
+    return Boolean(window.parent?.PARA?.localMusicHost?.state?.().active);
+  } catch {
+    return false;
+  }
+}
+
 function prefs() { return getProfilePreferences().sound; }
 function targetVolume() { return Math.max(0, Math.min(1, Number(prefs().menuMusicVolume ?? 22) / 100)); }
 function ensurePlayer() {
@@ -36,7 +47,7 @@ function fadeTo(value, ms = 650, pauseAfter = false) {
 export function syncMenuMusic({ gameRunning = false } = {}) {
   const audio = ensurePlayer();
   const sound = prefs();
-  if (suspended || gameRunning || sound.menuMusic === false) { fadeTo(0, 120, true); return; }
+  if (suspended || parentMusicOwnsBackground() || gameRunning || sound.menuMusic === false) { fadeTo(0, 120, true); return; }
   if (!unlocked) return;
   audio.play().then(() => fadeTo(targetVolume(), 700)).catch(() => {});
 }
@@ -54,7 +65,7 @@ export function toggleMenuMusic() {
 export function setMenuMusicVolume(value) {
   const volume = Math.max(0, Math.min(100, Number(value) || 0));
   setProfilePreferences({ sound: { menuMusicVolume: volume } });
-  if (!suspended && prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
+  if (!suspended && !parentMusicOwnsBackground() && prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
   return volume;
 }
 
@@ -66,14 +77,14 @@ export function suspendMenuMusic({ duration = 120 } = {}) {
 
 export function resumeMenuMusic({ duration = 650 } = {}) {
   suspended = false;
-  if (!unlocked || prefs().menuMusic === false) return;
+  if (!unlocked || parentMusicOwnsBackground() || prefs().menuMusic === false) return;
   const audio = ensurePlayer();
   audio.play().then(() => fadeTo(targetVolume(), duration)).catch(() => {});
 }
 
 let duckTimer = null;
 export function duckMenuMusic({ amount = 0.32, duration = 240 } = {}) {
-  if (suspended || !unlocked || prefs().menuMusic === false) return;
+  if (suspended || parentMusicOwnsBackground() || !unlocked || prefs().menuMusic === false) return;
   const normal = targetVolume();
   const ducked = Math.max(0, normal * (1 - Math.max(0, Math.min(.8, amount))));
   clearTimeout(duckTimer);

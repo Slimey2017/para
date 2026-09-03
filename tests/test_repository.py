@@ -929,8 +929,8 @@ class RepositoryTests(unittest.TestCase):
             'multiple accept="audio/*',
             'data-music-find-files',
             'data-music-drop-zone',
-            'Local files stay on this browser build of PARA.',
-            'Future PARA console: PARA Files and USB drives use this same player.',
+            'Files stay on this device.',
+            'ready for PARA Files + USB on console',
         ]:
             self.assertIn(marker, music)
 
@@ -1001,11 +1001,62 @@ class RepositoryTests(unittest.TestCase):
         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
 
         self.assertIn("let suspended = false", menu_music)
-        self.assertIn("if (suspended || gameRunning || sound.menuMusic === false)", menu_music)
+        self.assertIn("parentMusicOwnsBackground()", menu_music)
+        self.assertIn("if (suspended || parentMusicOwnsBackground() || gameRunning || sound.menuMusic === false)", menu_music)
         self.assertIn("suspended = true", menu_music)
         self.assertIn("suspended = false", menu_music)
-        self.assertIn("if (!suspended && prefs().menuMusic !== false && unlocked)", menu_music)
-        self.assertIn("if (suspended || !unlocked || prefs().menuMusic === false) return", menu_music)
+        self.assertIn("if (!suspended && !parentMusicOwnsBackground() && prefs().menuMusic !== false && unlocked)", menu_music)
+        self.assertIn("if (suspended || parentMusicOwnsBackground() || !unlocked || prefs().menuMusic === false) return", menu_music)
         self.assertIn('session.appId === "para:music"', media_session)
         self.assertIn("suspendMenuMusic({ duration: 100 })", media_session)
         self.assertIn("syncMenuMusic({ gameRunning:", app)
+
+    def test_v59_4_music_uses_single_parent_audio_host_and_living_player_ui(self):
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        music = (ROOT / "apps/para-home/src/screens/music.js").read_text(encoding="utf-8")
+        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
+        menu_music = (ROOT / "apps/para-home/src/services/menu-music.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        styles = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+
+        for marker in [
+            'IS_SUSPENDED_HOME',
+            'parentMusicHost',
+            'window.parent?.PARA?.localMusicHost',
+            'compensatedHandoffTime',
+            'prepareLocalMusicHandoff',
+            'metadataVersion: 1',
+            'id3Metadata',
+            'APIC',
+            'artworkBlob',
+        ]:
+            self.assertIn(marker, service)
+        self.assertIn('prepareLocalMusicHandoff();', app)
+        self.assertIn('parentMusicOwnsBackground()', menu_music)
+
+        for marker in [
+            'window.PARA.localMusicHost = Object.freeze',
+            'compensatedParaMusicTime',
+            'PARA Music belongs to the persistent game runtime',
+            'Home controls this same player through the',
+            'writeParaMusicHandoff(true); location.href = destination',
+        ]:
+            self.assertIn(marker, server)
+        self.assertNotIn("if (!media.paused) media.pause();\n          paraMusicSuppressPausePersist = false;\n          continue;", server)
+
+        for marker in [
+            'music-cover-shell',
+            'music-vinyl',
+            'music-equalizer',
+            'YOUR CRATE',
+            'Your soundtrack lives here',
+            'data-music-art-image',
+        ]:
+            self.assertIn(marker, music)
+        for marker in [
+            '@keyframes paraMusicSpin',
+            '@keyframes paraMusicEq',
+            '.music-cover__generated',
+            '.music-track__thumb',
+        ]:
+            self.assertIn(marker, styles)

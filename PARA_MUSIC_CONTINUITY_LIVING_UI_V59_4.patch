@@ -1,0 +1,1299 @@
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/PARA_MUSIC_CONTINUITY_LIVING_UI_V59_4.md /mnt/data/v594/work2/PARA_MUSIC_CONTINUITY_LIVING_UI_V59_4.md
+--- /mnt/data/v594/work/PARA_MUSIC_CONTINUITY_LIVING_UI_V59_4.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/v594/work2/PARA_MUSIC_CONTINUITY_LIVING_UI_V59_4.md	2026-09-03 16:10:00.334356995 +0000
+@@ -0,0 +1,69 @@
++# PARA V59.4 — Music Continuity + Living Player UI
++
++V59.4 fixes two problems reported after the first local Music builds: audio could hiccup when moving between a running WEB game and PARA Home, and the Music screen felt visually empty and generic.
++
++## 1. One music owner while a game is running
++
++The previous suspended-game flow paused the game's PARA Music `<audio>` element, restored a second local player inside the suspended PARA Home iframe, then destroyed that player and restored the game player again on resume. Even when the saved timestamp was correct, that architecture could create audible gaps, repeats, or double-start behavior.
++
++V59.4 changes the contract:
++
++- The running game runtime remains the **single PARA Music audio host** while its suspended Home shell is open.
++- `window.PARA.localMusicHost` exposes same-origin state and transport controls to the suspended Home shell.
++- Suspended PARA Home reads and controls that exact parent player instead of creating another `<audio>` element.
++- Opening Home over a game no longer pauses PARA Music.
++- Resuming the game no longer reloads or reseeks PARA Music.
++- PARA's own menu soundtrack sees the parent Music host and stays muted while that local session is active.
++- Gameplay recording still excludes the PARA Music element from the game's isolated audio capture path.
++
++## 2. Cleaner top-level WEB-game handoff
++
++A first launch from normal PARA Home into a WEB game still replaces the browser document, so a literal DOM audio node cannot survive that one boundary. V59.4 reduces the audible jump by:
++
++- forcing a Music handoff at the last moment before game navigation;
++- saving handoff state more frequently;
++- compensating the resume timestamp for elapsed transition/load time;
++- doing the same compensation when a new document restores the local song.
++
++This prevents the common "repeat the last half-second" effect. A short browser-navigation gap can still exist on the initial top-level launch because the old document is destroyed before the new one can create its audio element. The game ↔ suspended Home path no longer has that architectural gap.
++
++## 3. Music screen redesign
++
++The Music app now treats the current song as the hero instead of a small utility card:
++
++- large Now Playing presentation;
++- animated vinyl and equalizer while playing;
++- generated per-track visual identity when artwork is unavailable;
++- ambient background color derived from the current track;
++- stronger title/artist hierarchy and transport controls;
++- larger local-library rows with cover thumbnails;
++- a two-column library on wide displays;
++- cleaner local/offline messaging;
++- responsive TV/monitor/mobile layouts;
++- reduced-motion fallback.
++
++## 4. Embedded MP3 metadata and artwork
++
++PARA now reads common ID3v2 metadata locally from MP3 files:
++
++- title (`TIT2`)
++- artist (`TPE1`)
++- album (`TALB`)
++- embedded cover art (`APIC`)
++
++This parsing happens entirely in the browser. Existing V59 library entries are lazily upgraded the next time the library is read, so already-imported MP3s can gain metadata/artwork without being uploaded or re-added. Filename parsing remains the fallback.
++
++## Local-only guarantee
++
++`apps/para-home/src/services/local-music.js` still contains no `fetch()`, XMLHttpRequest, PARA API upload path, or online music service. Music bytes and embedded artwork stay in local IndexedDB.
++
++## Validation performed
++
++- Frontend JavaScript syntax checks: passed for V59.4-changed modules.
++- Python compile checks: passed for API, gateway, and repository tests.
++- Extracted injected game-runtime JavaScript: passed `node --check`.
++- Targeted V58/V59 regression group: **8 tests passed**.
++- V58 HUD-preservation, blob CSP, and capture-fidelity guards remain green.
++- V59 local-only, route, in-game handoff, menu-mute, and V59.4 single-host/UI guards remain green.
++
++No claim is made that the entire repository test suite was run for this patch.
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/apps/para-home/src/app.js /mnt/data/v594/work2/apps/para-home/src/app.js
+--- /mnt/data/v594/work/apps/para-home/src/app.js	2026-09-03 14:48:33.000000000 +0000
++++ /mnt/data/v594/work2/apps/para-home/src/app.js	2026-09-03 16:04:51.989580386 +0000
+@@ -47,6 +47,7 @@
+ import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
+ import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, suspendMenuMusic } from "./services/menu-music.js";
+ import { mediaSessionAction, setMediaVolume, setGameMediaBalance, mediaSessionState } from "./services/media-session.js";
++import { prepareLocalMusicHandoff } from "./services/local-music.js";
+ import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
+ import {
+   activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall, pauseDownload, resumeDownload, cancelDownload, markNotificationRead, markAllNotificationsRead,
+@@ -287,7 +288,10 @@
+   const reduced = getState().reducedMotion;
+   window.setTimeout(() => {
+     node.classList.add("is-committed");
+-    window.setTimeout(() => window.location.assign(destination), reduced ? 1 : 120);
++    window.setTimeout(() => {
++      prepareLocalMusicHandoff();
++      window.location.assign(destination);
++    }, reduced ? 1 : 120);
+   }, reduced ? 20 : 500);
+   return true;
+ }
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/apps/para-home/src/screens/music.js /mnt/data/v594/work2/apps/para-home/src/screens/music.js
+--- /mnt/data/v594/work/apps/para-home/src/screens/music.js	2026-09-03 14:48:17.000000000 +0000
++++ /mnt/data/v594/work2/apps/para-home/src/screens/music.js	2026-09-03 16:06:20.867222408 +0000
+@@ -29,41 +29,92 @@
+   return `${(value / (1024 * 1024)).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+ }
+ 
++function visualSeed(value = "PARA Music") {
++  const text = String(value || "PARA Music");
++  let hash = 2166136261;
++  for (let index = 0; index < text.length; index += 1) {
++    hash ^= text.charCodeAt(index);
++    hash = Math.imul(hash, 16777619);
++  }
++  const unsigned = hash >>> 0;
++  const hue = 248 + (unsigned % 52);
++  const hue2 = (hue + 42 + ((unsigned >>> 7) % 36)) % 360;
++  const hue3 = (hue + 310) % 360;
++  return { hue, hue2, hue3 };
++}
++
++function visualStyle(value) {
++  const seed = visualSeed(value);
++  return `--music-hue:${seed.hue};--music-hue2:${seed.hue2};--music-hue3:${seed.hue3}`;
++}
++
++function coverLetter(track = {}) {
++  const source = String(track.title || track.fileName || "♫").trim();
++  return (source.match(/[A-Za-z0-9]/)?.[0] || "♫").toUpperCase();
++}
++
++function equalizerMarkup(className = "music-equalizer") {
++  return `<span class="${className}" aria-hidden="true">${Array.from({ length: 9 }, (_, index) => `<i style="--bar:${index}"></i>`).join("")}</span>`;
++}
++
+ function nowPlayingMarkup(state) {
+   const active = Boolean(state.active);
+-  return `<section class="music-now-playing" data-music-now-playing>
+-    <div class="music-now-playing__art" aria-hidden="true"><span>♫</span></div>
+-    <div class="music-now-playing__copy">
+-      <span>NOW PLAYING</span>
+-      <h2 data-music-title>${escapeHtml(active ? state.title : "Nothing playing")}</h2>
+-      <p data-music-artist>${escapeHtml(active ? (state.artist || state.fileName || "Local file") : "Choose a song from your local library")}</p>
+-    </div>
+-    <div class="music-transport">
+-      <button type="button" data-music-previous aria-label="Previous track">◀◀</button>
+-      <button type="button" class="music-transport__primary" data-music-toggle aria-label="Play or pause">${state.playbackState === "playing" ? "Ⅱ" : "▶"}</button>
+-      <button type="button" data-music-next aria-label="Next track">▶▶</button>
++  return `<section class="music-now-playing" data-music-now-playing data-playing="${state.playbackState === "playing" ? "true" : "false"}" style="${visualStyle(state.currentId || state.title)}">
++    <div class="music-now-playing__visual" data-music-visual>
++      <div class="music-cover-shell">
++        <div class="music-cover" data-music-cover>
++          <img data-music-art-image alt="" hidden>
++          <div class="music-cover__generated" data-music-art-fallback>
++            <span class="music-cover__orbit"></span>
++            <span class="music-cover__letter" data-music-art-letter>${escapeHtml(active ? (state.title?.[0] || "♫") : "♫")}</span>
++            <span class="music-cover__label">PARA</span>
++          </div>
++        </div>
++        <div class="music-vinyl" aria-hidden="true"><i></i></div>
++      </div>
++      ${equalizerMarkup()}
+     </div>
+-    <div class="music-timeline">
+-      <span data-music-time-current>${durationLabel(state.currentTime)}</span>
+-      <input type="range" min="0" max="${Math.max(1, state.duration || 1)}" step="0.1" value="${Math.min(state.currentTime || 0, state.duration || 1)}" data-music-seek aria-label="Song position" ${active ? "" : "disabled"}>
+-      <span data-music-time-duration>${durationLabel(state.duration)}</span>
++    <div class="music-now-playing__content">
++      <div class="music-now-playing__kicker"><span>NOW PLAYING</span><em>LOCAL</em></div>
++      <div class="music-now-playing__copy">
++        <h2 data-music-title>${escapeHtml(active ? state.title : "Your soundtrack lives here")}</h2>
++        <p data-music-artist>${escapeHtml(active ? (state.artist || "Local file") : "Drop in a song and PARA will carry it with you.")}</p>
++        <small data-music-album>${escapeHtml(active ? (state.fileName || "Stored on this PARA") : "Offline · private · yours")}</small>
++      </div>
++      <div class="music-transport">
++        <button type="button" data-music-previous aria-label="Previous track"><span>‹</span><span>‹</span></button>
++        <button type="button" class="music-transport__primary" data-music-toggle aria-label="Play or pause">${state.playbackState === "playing" ? "Ⅱ" : "▶"}</button>
++        <button type="button" data-music-next aria-label="Next track"><span>›</span><span>›</span></button>
++      </div>
++      <div class="music-timeline">
++        <span data-music-time-current>${durationLabel(state.currentTime)}</span>
++        <input type="range" min="0" max="${Math.max(1, state.duration || 1)}" step="0.1" value="${Math.min(state.currentTime || 0, state.duration || 1)}" data-music-seek aria-label="Song position" ${active ? "" : "disabled"}>
++        <span data-music-time-duration>${durationLabel(state.duration)}</span>
++      </div>
++      <label class="music-volume"><span>VOLUME</span><input type="range" min="0" max="100" step="2" value="${state.volume}" data-music-volume aria-label="Music volume"><b data-music-volume-output>${state.volume}%</b></label>
++      <p class="music-player-error" data-music-error ${state.error ? "" : "hidden"}>${escapeHtml(state.error || "")}</p>
+     </div>
+-    <label class="music-volume"><span>VOLUME</span><input type="range" min="0" max="100" step="2" value="${state.volume}" data-music-volume aria-label="Music volume"><b data-music-volume-output>${state.volume}%</b></label>
+-    <p class="music-player-error" data-music-error ${state.error ? "" : "hidden"}>${escapeHtml(state.error || "")}</p>
+   </section>`;
+ }
+ 
+-function libraryMarkup(tracks, state) {
++function trackThumb(track, artworkUrl) {
++  const url = artworkUrl(track);
++  if (url) return `<span class="music-track__thumb"><img src="${escapeHtml(url)}" alt=""></span>`;
++  return `<span class="music-track__thumb music-track__thumb--generated" style="${visualStyle(track.id || track.title)}"><b>${escapeHtml(coverLetter(track))}</b></span>`;
++}
++
++function libraryMarkup(tracks, state, artworkUrl) {
+   if (!tracks.length) {
+-    return `<div class="music-library-empty" data-music-empty><span>♫</span><h2>No music yet</h2><p>Drag local audio files here or choose Find Files.</p></div>`;
++    return `<div class="music-library-empty" data-music-empty><span>♫</span><h2>Your crate is empty</h2><p>Drop audio anywhere on this screen or choose Add Music.</p></div>`;
+   }
+   return `<div class="music-track-list" data-music-track-list>${tracks.map((track, index) => {
+     const selected = state.currentId === track.id;
+-    const subtitle = [track.artist, track.fileName].filter(Boolean).join(" · ");
++    const subtitle = [track.artist, track.album || track.fileName].filter(Boolean).join(" · ");
+     return `<article class="music-track${selected ? " is-playing" : ""}" data-music-row="${escapeHtml(track.id)}">
+       <button type="button" class="music-track__main" data-music-track="${escapeHtml(track.id)}" ${index === 0 ? "data-autofocus='true'" : ""}>
+-        <span class="music-track__number">${selected && state.playbackState === "playing" ? "♫" : index + 1}</span>
++        ${trackThumb(track, artworkUrl)}
+         <span class="music-track__copy"><strong>${escapeHtml(track.title || track.fileName || "Local track")}</strong><small>${escapeHtml(subtitle || "Local file")}</small></span>
++        <span class="music-track__playing" aria-hidden="true">${equalizerMarkup("music-mini-equalizer")}</span>
+         <span class="music-track__size">${fileSizeLabel(track.size)}</span>
+       </button>
+       <button type="button" class="music-track__remove" data-music-remove="${escapeHtml(track.id)}" aria-label="Remove ${escapeHtml(track.title || track.fileName || "track")}">×</button>
+@@ -75,23 +126,21 @@
+   const state = localMusicState();
+   return page({
+     title: "Music",
+-    description: "Play local music files on PARA. Nothing is uploaded.",
++    description: "Your local soundtrack, everywhere you go in PARA.",
+     eyebrow: "Local player",
+     className: "music-page",
+     body: `<section class="music-app">
++      ${nowPlayingMarkup(state)}
+       <div class="music-import-zone" data-music-drop-zone>
+         <input type="file" multiple accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.oga,.opus,.webm" data-music-file-input hidden>
+-        <div><span class="music-import-zone__icon">＋</span><div><strong>Drop music files here</strong><small>Local files stay on this browser build of PARA.</small></div></div>
+-        <button type="button" class="action-button" data-music-find-files>Find Files</button>
+-      </div>
+-      <div class="music-layout">
+-        <section class="music-library-panel">
+-          <header><div><span>LOCAL LIBRARY</span><h2>Your music</h2></div><button type="button" class="music-clear-button" data-music-clear hidden>Clear Library</button></header>
+-          <div data-music-library><div class="library-loading"><span></span><strong>Reading local music…</strong></div></div>
+-        </section>
+-        ${nowPlayingMarkup(state)}
++        <div><span class="music-import-zone__icon">＋</span><div><strong>Add to this PARA</strong><small>Drop music here. Files stay on this device.</small></div></div>
++        <button type="button" class="action-button" data-music-find-files>Add Music</button>
+       </div>
+-      <footer class="music-local-note"><span>LOCAL ONLY</span><p>Browser build: drag & drop or Find Files. Future PARA console: PARA Files and USB drives use this same player.</p></footer>
++      <section class="music-library-panel">
++        <header><div><span>YOUR CRATE</span><h2>Local library</h2><small data-music-library-count>Reading your music…</small></div><button type="button" class="music-clear-button" data-music-clear hidden>Clear Library</button></header>
++        <div data-music-library><div class="library-loading"><span></span><strong>Reading local music…</strong></div></div>
++      </section>
++      <footer class="music-local-note"><span>LOCAL ONLY</span><p>Offline playback · no music uploads · ready for PARA Files + USB on console</p></footer>
+     </section>`,
+   });
+ }
+@@ -103,12 +152,35 @@
+   const dropZone = screen.querySelector("[data-music-drop-zone]");
+   const library = screen.querySelector("[data-music-library]");
+   const clearButton = screen.querySelector("[data-music-clear]");
++  const countNode = screen.querySelector("[data-music-library-count]");
++  const artworkUrls = new Map();
+   let tracks = [];
+   let disposed = false;
+ 
++  const artworkUrl = (track) => {
++    if (!(track?.artworkBlob instanceof Blob)) return "";
++    if (!artworkUrls.has(track.id)) artworkUrls.set(track.id, URL.createObjectURL(track.artworkBlob));
++    return artworkUrls.get(track.id) || "";
++  };
++
++  const pruneArtworkUrls = () => {
++    const keep = new Set(tracks.map((track) => track.id));
++    for (const [id, url] of artworkUrls) {
++      if (keep.has(id)) continue;
++      URL.revokeObjectURL(url);
++      artworkUrls.delete(id);
++    }
++  };
++
+   const updateNowPlaying = (state = localMusicState()) => {
++    const hero = screen.querySelector("[data-music-now-playing]");
++    const visual = screen.querySelector("[data-music-visual]");
+     const title = screen.querySelector("[data-music-title]");
+     const artist = screen.querySelector("[data-music-artist]");
++    const album = screen.querySelector("[data-music-album]");
++    const artImage = screen.querySelector("[data-music-art-image]");
++    const artFallback = screen.querySelector("[data-music-art-fallback]");
++    const artLetter = screen.querySelector("[data-music-art-letter]");
+     const toggle = screen.querySelector("[data-music-toggle]");
+     const seek = screen.querySelector("[data-music-seek]");
+     const current = screen.querySelector("[data-music-time-current]");
+@@ -116,8 +188,28 @@
+     const volume = screen.querySelector("[data-music-volume]");
+     const output = screen.querySelector("[data-music-volume-output]");
+     const error = screen.querySelector("[data-music-error]");
+-    if (title) title.textContent = state.active ? state.title : "Nothing playing";
+-    if (artist) artist.textContent = state.active ? (state.artist || state.fileName || "Local file") : "Choose a song from your local library";
++    const track = tracks.find((item) => item.id === state.currentId) || null;
++    const style = visualStyle(state.currentId || state.title || "PARA Music");
++    if (hero) {
++      hero.dataset.playing = state.playbackState === "playing" ? "true" : "false";
++      hero.style.cssText = style;
++    }
++    if (visual) visual.style.cssText = style;
++    if (title) title.textContent = state.active ? state.title : "Your soundtrack lives here";
++    if (artist) artist.textContent = state.active ? (state.artist || "Local file") : "Drop in a song and PARA will carry it with you.";
++    if (album) album.textContent = state.active ? (track?.album || state.fileName || "Stored on this PARA") : "Offline · private · yours";
++    if (artLetter) artLetter.textContent = track ? coverLetter(track) : (state.active ? coverLetter(state) : "♫");
++    const art = track ? artworkUrl(track) : "";
++    if (artImage) {
++      if (art) {
++        if (artImage.getAttribute("src") !== art) artImage.setAttribute("src", art);
++        artImage.hidden = false;
++      } else {
++        artImage.hidden = true;
++        artImage.removeAttribute("src");
++      }
++    }
++    if (artFallback) artFallback.hidden = Boolean(art);
+     if (toggle) toggle.textContent = state.playbackState === "playing" ? "Ⅱ" : "▶";
+     if (seek) {
+       seek.disabled = !state.active;
+@@ -135,17 +227,17 @@
+     screen.querySelectorAll("[data-music-row]").forEach((row) => {
+       const selected = row.dataset.musicRow === state.currentId;
+       row.classList.toggle("is-playing", selected);
+-      const number = row.querySelector(".music-track__number");
+-      if (number && selected) number.textContent = state.playbackState === "playing" ? "♫" : "▶";
+-      else if (number) number.textContent = String(tracks.findIndex((track) => track.id === row.dataset.musicRow) + 1);
++      row.dataset.playing = selected && state.playbackState === "playing" ? "true" : "false";
+     });
+   };
+ 
+   const renderLibrary = () => {
+     if (!library) return;
++    pruneArtworkUrls();
+     const state = localMusicState();
+-    library.innerHTML = libraryMarkup(tracks, state);
++    library.innerHTML = libraryMarkup(tracks, state, artworkUrl);
+     if (clearButton) clearButton.hidden = !tracks.length;
++    if (countNode) countNode.textContent = tracks.length ? `${tracks.length} ${tracks.length === 1 ? "track" : "tracks"} stored locally` : "No tracks yet";
+     updateNowPlaying(state);
+   };
+ 
+@@ -229,6 +321,8 @@
+     dropZone?.removeEventListener("dragleave", onDragLeave);
+     dropZone?.removeEventListener("drop", onDrop);
+     document.removeEventListener(MUSIC_EVENT, onMusicChange);
+-    // Intentionally do not stop playback. PARA Music is a background system service.
++    for (const url of artworkUrls.values()) URL.revokeObjectURL(url);
++    artworkUrls.clear();
++    // Playback is a PARA background service. Leaving this screen does not stop it.
+   };
+ }
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/apps/para-home/src/services/local-music.js /mnt/data/v594/work2/apps/para-home/src/services/local-music.js
+--- /mnt/data/v594/work/apps/para-home/src/services/local-music.js	2026-09-03 14:56:11.000000000 +0000
++++ /mnt/data/v594/work2/apps/para-home/src/services/local-music.js	2026-09-03 16:10:34.500347767 +0000
+@@ -1,5 +1,6 @@
+ import {
+   clearMediaSession,
++  mediaSessionState,
+   registerMediaSession,
+   updateMediaSession,
+ } from "./media-session.js";
+@@ -10,6 +11,8 @@
+ const MUSIC_EVENT = "para-local-music-change";
+ const HANDOFF_KEY = "para.music.handoff.v1";
+ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "webm"]);
++const SHELL_PARAMS = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
++const IS_SUSPENDED_HOME = SHELL_PARAMS.get("para_suspended_shell") === "1";
+ 
+ let dbPromise = null;
+ let audio = null;
+@@ -20,6 +23,87 @@
+ let nativeHandlersInstalled = false;
+ let restoringSession = null;
+ let lastHandoffWrite = 0;
++let bridgeTimer = null;
++let bridgeSignature = "";
++
++function parentMusicHost() {
++  if (!IS_SUSPENDED_HOME || typeof window === "undefined" || window.parent === window) return null;
++  try {
++    const host = window.parent?.PARA?.localMusicHost;
++    return host && typeof host.state === "function" ? host : null;
++  } catch {
++    return null;
++  }
++}
++
++function normalizedBridgeState(value = {}) {
++  return {
++    active: Boolean(value.active),
++    currentId: String(value.currentId || ""),
++    title: String(value.title || "Nothing playing"),
++    artist: String(value.artist || ""),
++    fileName: String(value.fileName || ""),
++    playbackState: value.active ? (value.playbackState === "playing" ? "playing" : "paused") : "none",
++    currentTime: Number.isFinite(Number(value.currentTime)) ? Number(value.currentTime) : 0,
++    duration: Number.isFinite(Number(value.duration)) ? Number(value.duration) : 0,
++    volume: Math.max(0, Math.min(100, Number(value.volume ?? 70) || 0)),
++    queueLength: queue.length,
++    error: String(value.error || ""),
++  };
++}
++
++function bridgeActions(host) {
++  return {
++    play: async () => { await host.play?.(); },
++    pause: async () => { await host.pause?.(); },
++    previous: async () => { await host.previous?.(); },
++    next: async () => { await host.next?.(); },
++    setVolume: (value) => { host.setVolume?.(Math.round(Number(value || 0) * 100)); },
++    stop: () => { host.pause?.(); },
++  };
++}
++
++function syncBridgeMediaSession() {
++  const host = parentMusicHost();
++  if (!host) return null;
++  const state = normalizedBridgeState(host.state());
++  const existing = mediaSessionState();
++  if (state.active) {
++    const signature = [state.currentId, state.title, state.artist, state.playbackState, state.volume].join("\u0000");
++    if (!existing.active || existing.appId !== "para:music" || bridgeSignature !== signature) {
++      if (!existing.active || existing.appId !== "para:music" || existing.title !== state.title || existing.artist !== state.artist) {
++        registerMediaSession({
++          appId: "para:music",
++          appName: "Music",
++          title: state.title,
++          artist: state.artist || state.fileName || "Local file",
++          album: "PARA Music",
++          artwork: "",
++          playbackState: state.playbackState,
++          volume: state.volume,
++        }, bridgeActions(host));
++      } else {
++        updateMediaSession({ playbackState: state.playbackState, volume: state.volume });
++      }
++      bridgeSignature = signature;
++    }
++  } else if (existing.active && existing.appId === "para:music") {
++    bridgeSignature = "";
++    clearMediaSession();
++  }
++  return state;
++}
++
++function startBridgeSync() {
++  if (bridgeTimer || !parentMusicHost()) return;
++  const tick = () => {
++    if (!parentMusicHost()) return;
++    syncBridgeMediaSession();
++    announce();
++  };
++  tick();
++  bridgeTimer = window.setInterval(tick, 300);
++}
+ 
+ function openDb() {
+   if (dbPromise) return dbPromise;
+@@ -76,18 +160,118 @@
+   return { artist: "", title: clean };
+ }
+ 
+-function recordForFile(file) {
+-  const metadata = fileNameMetadata(file.name);
++function synchsafe32(bytes, offset) {
++  return ((bytes[offset] & 0x7f) << 21) | ((bytes[offset + 1] & 0x7f) << 14) | ((bytes[offset + 2] & 0x7f) << 7) | (bytes[offset + 3] & 0x7f);
++}
++
++function uint32be(bytes, offset) {
++  return ((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3];
++}
++
++function decodeUtf16Be(bytes) {
++  const swapped = new Uint8Array(bytes.length);
++  for (let index = 0; index + 1 < bytes.length; index += 2) {
++    swapped[index] = bytes[index + 1];
++    swapped[index + 1] = bytes[index];
++  }
++  try { return new TextDecoder("utf-16le").decode(swapped); }
++  catch { return ""; }
++}
++
++function decodeId3Text(bytes, encoding = 3) {
++  if (!bytes?.length) return "";
++  let value = "";
++  try {
++    if (encoding === 0) value = new TextDecoder("iso-8859-1").decode(bytes);
++    else if (encoding === 3) value = new TextDecoder("utf-8").decode(bytes);
++    else if (encoding === 2) value = decodeUtf16Be(bytes);
++    else {
++      if (bytes[0] === 0xfe && bytes[1] === 0xff) value = decodeUtf16Be(bytes.subarray(2));
++      else value = new TextDecoder("utf-16le").decode(bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.subarray(2) : bytes);
++    }
++  } catch { value = ""; }
++  return value.replace(/\u0000/g, "").trim();
++}
++
++function terminatorEnd(bytes, start, encoding) {
++  if (encoding === 0 || encoding === 3) {
++    const index = bytes.indexOf(0, start);
++    return index < 0 ? bytes.length : index;
++  }
++  for (let index = start; index + 1 < bytes.length; index += 2) {
++    if (bytes[index] === 0 && bytes[index + 1] === 0) return index;
++  }
++  return bytes.length;
++}
++
++function parseApicFrame(frame) {
++  if (!frame?.length) return null;
++  const encoding = frame[0];
++  let cursor = 1;
++  const mimeEnd = frame.indexOf(0, cursor);
++  if (mimeEnd < 0) return null;
++  const mime = new TextDecoder("iso-8859-1").decode(frame.subarray(cursor, mimeEnd)).trim().toLowerCase();
++  cursor = mimeEnd + 1;
++  if (cursor >= frame.length) return null;
++  cursor += 1; // picture type
++  const descriptionEnd = terminatorEnd(frame, cursor, encoding);
++  cursor = Math.min(frame.length, descriptionEnd + (encoding === 0 || encoding === 3 ? 1 : 2));
++  if (!mime.startsWith("image/") || cursor >= frame.length) return null;
++  const image = new Uint8Array(frame.length - cursor);
++  image.set(frame.subarray(cursor));
++  return image.length ? new Blob([image], { type: mime }) : null;
++}
++
++async function id3Metadata(file, nameOverride = "") {
++  const extension = String(nameOverride || file.name || "").split(".").pop()?.toLowerCase();
++  if (extension !== "mp3" && !String(file.type || "").includes("mpeg")) return {};
++  try {
++    const header = new Uint8Array(await file.slice(0, 10).arrayBuffer());
++    if (header.length < 10 || String.fromCharCode(...header.subarray(0, 3)) !== "ID3") return {};
++    const version = header[3];
++    if (version < 3 || version > 4) return {};
++    const tagSize = synchsafe32(header, 6);
++    const total = Math.min(file.size, 10 + tagSize, 8 * 1024 * 1024);
++    const bytes = new Uint8Array(await file.slice(0, total).arrayBuffer());
++    const result = { title: "", artist: "", album: "", artworkBlob: null };
++    let cursor = 10;
++    while (cursor + 10 <= bytes.length) {
++      const id = String.fromCharCode(...bytes.subarray(cursor, cursor + 4));
++      if (!/^[A-Z0-9]{4}$/.test(id)) break;
++      const size = version === 4 ? synchsafe32(bytes, cursor + 4) : uint32be(bytes, cursor + 4);
++      if (!size || cursor + 10 + size > bytes.length) break;
++      const frame = bytes.subarray(cursor + 10, cursor + 10 + size);
++      if ((id === "TIT2" || id === "TPE1" || id === "TALB") && frame.length > 1) {
++        const text = decodeId3Text(frame.subarray(1), frame[0]);
++        if (id === "TIT2") result.title = text;
++        if (id === "TPE1") result.artist = text;
++        if (id === "TALB") result.album = text;
++      } else if (id === "APIC" && !result.artworkBlob) {
++        result.artworkBlob = parseApicFrame(frame);
++      }
++      cursor += 10 + size;
++    }
++    return result;
++  } catch {
++    return {};
++  }
++}
++
++async function recordForFile(file) {
++  const fallback = fileNameMetadata(file.name);
++  const embedded = await id3Metadata(file, file.name);
+   return {
+     id: stableTrackId(file),
+-    title: metadata.title,
+-    artist: metadata.artist,
+-    album: "",
+-    fileName: String(file.name || metadata.title),
++    title: embedded.title || fallback.title,
++    artist: embedded.artist || fallback.artist,
++    album: embedded.album || "",
++    fileName: String(file.name || embedded.title || fallback.title),
+     mimeType: String(file.type || ""),
+     size: Number(file.size || 0),
+     lastModified: Number(file.lastModified || 0),
+     addedAt: Date.now(),
++    artworkBlob: embedded.artworkBlob instanceof Blob ? embedded.artworkBlob : null,
++    metadataVersion: 1,
+     blob: file,
+   };
+ }
+@@ -97,8 +281,31 @@
+   return new Promise((resolve, reject) => {
+     const transaction = db.transaction(TRACK_STORE, "readonly");
+     const request = transaction.objectStore(TRACK_STORE).getAll();
+-    request.onsuccess = () => {
+-      const records = Array.isArray(request.result) ? request.result : [];
++    request.onsuccess = async () => {
++      let records = Array.isArray(request.result) ? request.result : [];
++      const stale = records.filter((record) => record?.blob instanceof Blob && Number(record.metadataVersion || 0) < 1);
++      if (stale.length) {
++        const upgraded = await Promise.all(stale.map(async (record) => {
++          const fallback = fileNameMetadata(record.fileName || record.title || "Local track");
++          const embedded = await id3Metadata(record.blob, record.fileName || "");
++          return {
++            ...record,
++            title: embedded.title || record.title || fallback.title,
++            artist: embedded.artist || record.artist || fallback.artist,
++            album: embedded.album || record.album || "",
++            artworkBlob: embedded.artworkBlob instanceof Blob ? embedded.artworkBlob : (record.artworkBlob || null),
++            metadataVersion: 1,
++          };
++        }));
++        try {
++          const write = db.transaction(TRACK_STORE, "readwrite");
++          const store = write.objectStore(TRACK_STORE);
++          upgraded.forEach((record) => store.put(record));
++          await transactionDone(write);
++          const byId = new Map(upgraded.map((record) => [record.id, record]));
++          records = records.map((record) => byId.get(record.id) || record);
++        } catch { /* Metadata enrichment is optional; playback still works. */ }
++      }
+       records.sort((a, b) => Number(a.addedAt || 0) - Number(b.addedAt || 0));
+       resolve(records);
+     };
+@@ -113,41 +320,44 @@
+   const existingTracks = await listLocalMusic();
+   const existingIds = new Set(existingTracks.map((track) => track.id));
+   const batchIds = new Set();
+-  const records = accepted.map(recordForFile).filter((record) => {
++  const candidates = (await Promise.all(accepted.map(recordForFile))).filter((record) => {
+     if (existingIds.has(record.id) || batchIds.has(record.id)) return false;
+     batchIds.add(record.id);
+     return true;
+   });
+-  if (records.length) {
++  if (candidates.length) {
+     const db = await openDb();
+     const transaction = db.transaction(TRACK_STORE, "readwrite");
+     const store = transaction.objectStore(TRACK_STORE);
+-    records.forEach((record) => store.put(record));
++    candidates.forEach((record) => store.put(record));
+     await transactionDone(transaction);
+   }
+   const tracks = await listLocalMusic();
+   setMusicQueue(tracks);
+-  return { imported: records.length, skipped: incoming.length - records.length, tracks };
++  try { await parentMusicHost()?.refreshLibrary?.(); } catch { /* Parent queue refresh is best effort. */ }
++  return { imported: candidates.length, skipped: incoming.length - candidates.length, tracks };
+ }
+ 
+ export async function removeLocalMusic(id) {
++  if (localMusicState().currentId === id) stopLocalMusic();
+   const db = await openDb();
+   const transaction = db.transaction(TRACK_STORE, "readwrite");
+   transaction.objectStore(TRACK_STORE).delete(String(id || ""));
+   await transactionDone(transaction);
+-  if (currentTrack?.id === id) stopLocalMusic();
+   const tracks = await listLocalMusic();
+   setMusicQueue(tracks);
++  try { await parentMusicHost()?.refreshLibrary?.(); } catch { /* Parent queue refresh is best effort. */ }
+   return tracks;
+ }
+ 
+ export async function clearLocalMusic() {
++  stopLocalMusic();
+   const db = await openDb();
+   const transaction = db.transaction(TRACK_STORE, "readwrite");
+   transaction.objectStore(TRACK_STORE).clear();
+   await transactionDone(transaction);
+-  stopLocalMusic();
+   queue = [];
++  try { await parentMusicHost()?.refreshLibrary?.(); } catch { /* Parent queue refresh is best effort. */ }
+   announce();
+   return [];
+ }
+@@ -156,7 +366,7 @@
+   if (audio) return audio;
+   audio = document.createElement("audio");
+   audio.id = "para-local-music-audio";
+-  audio.preload = "metadata";
++  audio.preload = "auto";
+   audio.volume = 0.7;
+   audio.style.display = "none";
+   document.body.appendChild(audio);
+@@ -189,6 +399,7 @@
+ }
+ 
+ function announce() {
++  if (typeof document === "undefined") return;
+   document.dispatchEvent(new CustomEvent(MUSIC_EVENT, { detail: localMusicState() }));
+ }
+ 
+@@ -229,14 +440,16 @@
+ function syncNativeMediaSession() {
+   if (!("mediaSession" in navigator)) return;
+   try {
+-    navigator.mediaSession.playbackState = !currentTrack ? "none" : audio && !audio.paused ? "playing" : "paused";
+-    if (currentTrack && globalThis.MediaMetadata) {
++    const state = localMusicState();
++    navigator.mediaSession.playbackState = !state.active ? "none" : state.playbackState;
++    const track = currentTrack;
++    if (state.active && globalThis.MediaMetadata) {
+       navigator.mediaSession.metadata = new MediaMetadata({
+-        title: currentTrack.title || currentTrack.fileName || "Local track",
+-        artist: currentTrack.artist || "Local file",
+-        album: currentTrack.album || "PARA Music",
++        title: state.title,
++        artist: state.artist || "Local file",
++        album: track?.album || "PARA Music",
+       });
+-    } else if (!currentTrack) {
++    } else if (!state.active) {
+       navigator.mediaSession.metadata = null;
+     }
+   } catch { /* Native media integration is best effort. */ }
+@@ -257,7 +470,6 @@
+   });
+ }
+ 
+-
+ function readMusicHandoff() {
+   try {
+     const value = JSON.parse(localStorage.getItem(HANDOFF_KEY) || "null");
+@@ -265,14 +477,28 @@
+   } catch { return null; }
+ }
+ 
++function compensatedHandoffTime(saved = {}) {
++  let value = Math.max(0, Number(saved.currentTime || 0));
++  if (saved.playbackState === "playing" && Number(saved.updatedAt) > 0) {
++    const elapsed = Math.max(0, Math.min(4, (Date.now() - Number(saved.updatedAt)) / 1000));
++    value += elapsed;
++  }
++  return value;
++}
++
+ function persistMusicHandoff(force = false) {
++  const host = parentMusicHost();
++  if (host) {
++    try { host.flush?.(); } catch { /* Parent runtime owns the state. */ }
++    return;
++  }
+   const now = Date.now();
+-  if (!force && now - lastHandoffWrite < 850) return;
++  if (!force && now - lastHandoffWrite < 500) return;
+   lastHandoffWrite = now;
+   try {
+     const state = localMusicState();
+     localStorage.setItem(HANDOFF_KEY, JSON.stringify({
+-      version: 1,
++      version: 2,
+       active: state.active,
+       currentId: state.currentId,
+       title: state.title,
+@@ -286,7 +512,12 @@
+   } catch { /* Local handoff is best effort. */ }
+ }
+ 
+-function waitForAudioMetadata(player, timeoutMs = 2600) {
++export function prepareLocalMusicHandoff() {
++  persistMusicHandoff(true);
++  return localMusicState();
++}
++
++function waitForAudioMetadata(player, timeoutMs = 2200) {
+   if (player.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+   return new Promise((resolve) => {
+     const finish = () => { clearTimeout(timer); player.removeEventListener("loadedmetadata", finish); resolve(); };
+@@ -296,6 +527,11 @@
+ }
+ 
+ export async function restoreLocalMusicSession({ attemptPlayback = true } = {}) {
++  const host = parentMusicHost();
++  if (host) {
++    startBridgeSync();
++    return syncBridgeMediaSession() || normalizedBridgeState(host.state());
++  }
+   if (currentTrack) return localMusicState();
+   if (restoringSession) return restoringSession;
+   restoringSession = (async () => {
+@@ -313,10 +549,11 @@
+     player.src = objectUrl;
+     player.volume = Math.max(0, Math.min(1, Number(saved.volume ?? 70) / 100));
+     player.load();
+-    registerCurrentSession(saved.playbackState === "playing" ? "paused" : "paused");
++    registerCurrentSession("paused");
+     await waitForAudioMetadata(player);
+-    if (Number.isFinite(Number(saved.currentTime))) {
+-      try { player.currentTime = Math.max(0, Math.min(Number(player.duration || saved.currentTime), Number(saved.currentTime))); } catch { /* Non-seekable audio. */ }
++    const targetTime = compensatedHandoffTime(saved);
++    if (Number.isFinite(targetTime)) {
++      try { player.currentTime = Math.max(0, Math.min(Number(player.duration || targetTime), targetTime)); } catch { /* Non-seekable audio. */ }
+     }
+     syncNativeMediaSession();
+     announce();
+@@ -340,6 +577,13 @@
+ }
+ 
+ export async function playLocalMusicTrack(id) {
++  const host = parentMusicHost();
++  if (host) {
++    const state = await host.playTrack?.(String(id || ""));
++    syncBridgeMediaSession();
++    announce();
++    return normalizedBridgeState(state || host.state());
++  }
+   if (!queue.length) setMusicQueue(await listLocalMusic());
+   const track = queue.find((item) => item.id === id);
+   if (!track || !(track.blob instanceof Blob)) throw new Error("That local music file is no longer available.");
+@@ -361,6 +605,18 @@
+ }
+ 
+ export async function playLocalMusic() {
++  const host = parentMusicHost();
++  if (host) {
++    const current = normalizedBridgeState(host.state());
++    if (current.active) await host.play?.();
++    else {
++      if (!queue.length) queue = await listLocalMusic();
++      if (queue[0]) await host.playTrack?.(queue[0].id);
++    }
++    syncBridgeMediaSession();
++    announce();
++    return localMusicState();
++  }
+   const player = ensureAudio();
+   if (!currentTrack) {
+     if (!queue.length) setMusicQueue(await listLocalMusic());
+@@ -372,17 +628,38 @@
+ }
+ 
+ export function pauseLocalMusic() {
++  const host = parentMusicHost();
++  if (host) {
++    void host.pause?.();
++    syncBridgeMediaSession();
++    announce();
++    return localMusicState();
++  }
+   if (audio) audio.pause();
+   return localMusicState();
+ }
+ 
+ export async function toggleLocalMusic() {
++  const host = parentMusicHost();
++  if (host) {
++    const state = await host.toggle?.();
++    syncBridgeMediaSession();
++    announce();
++    return normalizedBridgeState(state || host.state());
++  }
+   if (!currentTrack || audio?.paused) return playLocalMusic();
+   pauseLocalMusic();
+   return localMusicState();
+ }
+ 
+ export async function nextLocalMusic() {
++  const host = parentMusicHost();
++  if (host) {
++    const state = await host.next?.();
++    syncBridgeMediaSession();
++    announce();
++    return normalizedBridgeState(state || host.state());
++  }
+   if (!queue.length) return localMusicState();
+   const index = currentIndex();
+   const next = queue[index < 0 ? 0 : (index + 1) % queue.length];
+@@ -390,6 +667,13 @@
+ }
+ 
+ export async function previousLocalMusic() {
++  const host = parentMusicHost();
++  if (host) {
++    const state = await host.previous?.();
++    syncBridgeMediaSession();
++    announce();
++    return normalizedBridgeState(state || host.state());
++  }
+   if (!queue.length) return localMusicState();
+   const player = ensureAudio();
+   if (player.currentTime > 4) {
+@@ -403,6 +687,13 @@
+ }
+ 
+ export function seekLocalMusic(seconds) {
++  const host = parentMusicHost();
++  if (host) {
++    host.seek?.(Number(seconds || 0));
++    syncBridgeMediaSession();
++    announce();
++    return Number(seconds || 0);
++  }
+   const player = ensureAudio();
+   const duration = Number.isFinite(player.duration) ? player.duration : 0;
+   player.currentTime = Math.max(0, Math.min(duration || Number(seconds || 0), Number(seconds || 0)));
+@@ -412,6 +703,13 @@
+ }
+ 
+ export function setLocalMusicVolume(percent) {
++  const host = parentMusicHost();
++  if (host) {
++    host.setVolume?.(Number(percent || 0));
++    syncBridgeMediaSession();
++    announce();
++    return normalizedBridgeState(host.state()).volume;
++  }
+   const player = ensureAudio();
+   const value = Math.max(0, Math.min(100, Number(percent) || 0));
+   player.volume = value / 100;
+@@ -422,6 +720,14 @@
+ }
+ 
+ export function stopLocalMusic() {
++  const host = parentMusicHost();
++  if (host) {
++    host.stop?.();
++    bridgeSignature = "";
++    syncBridgeMediaSession();
++    announce();
++    return;
++  }
+   if (audio) {
+     audio.pause();
+     audio.removeAttribute("src");
+@@ -437,6 +743,11 @@
+ }
+ 
+ export function localMusicState() {
++  const host = parentMusicHost();
++  if (host) {
++    try { return normalizedBridgeState(host.state()); }
++    catch { /* Fall through to the local audio state. */ }
++  }
+   const duration = Number.isFinite(audio?.duration) ? audio.duration : 0;
+   return {
+     active: Boolean(currentTrack),
+@@ -454,8 +765,11 @@
+ }
+ 
+ if (typeof window !== "undefined") {
+-  window.addEventListener("pagehide", () => persistMusicHandoff(true));
+-  const restore = () => { void restoreLocalMusicSession().catch(() => {}); };
++  window.addEventListener("pagehide", () => prepareLocalMusicHandoff());
++  const restore = () => {
++    if (parentMusicHost()) startBridgeSync();
++    void restoreLocalMusicSession().catch(() => {});
++  };
+   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restore, { once: true });
+   else queueMicrotask(restore);
+ }
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/apps/para-home/src/services/menu-music.js /mnt/data/v594/work2/apps/para-home/src/services/menu-music.js
+--- /mnt/data/v594/work/apps/para-home/src/services/menu-music.js	2026-09-03 15:55:33.000000000 +0000
++++ /mnt/data/v594/work2/apps/para-home/src/services/menu-music.js	2026-09-03 16:04:59.002555077 +0000
+@@ -6,6 +6,17 @@
+ let unlocked = false;
+ let suspended = false;
+ 
++function parentMusicOwnsBackground() {
++  if (typeof window === "undefined" || window.parent === window) return false;
++  try {
++    const params = new URLSearchParams(location.search);
++    if (params.get("para_suspended_shell") !== "1") return false;
++    return Boolean(window.parent?.PARA?.localMusicHost?.state?.().active);
++  } catch {
++    return false;
++  }
++}
++
+ function prefs() { return getProfilePreferences().sound; }
+ function targetVolume() { return Math.max(0, Math.min(1, Number(prefs().menuMusicVolume ?? 22) / 100)); }
+ function ensurePlayer() {
+@@ -36,7 +47,7 @@
+ export function syncMenuMusic({ gameRunning = false } = {}) {
+   const audio = ensurePlayer();
+   const sound = prefs();
+-  if (suspended || gameRunning || sound.menuMusic === false) { fadeTo(0, 120, true); return; }
++  if (suspended || parentMusicOwnsBackground() || gameRunning || sound.menuMusic === false) { fadeTo(0, 120, true); return; }
+   if (!unlocked) return;
+   audio.play().then(() => fadeTo(targetVolume(), 700)).catch(() => {});
+ }
+@@ -54,7 +65,7 @@
+ export function setMenuMusicVolume(value) {
+   const volume = Math.max(0, Math.min(100, Number(value) || 0));
+   setProfilePreferences({ sound: { menuMusicVolume: volume } });
+-  if (!suspended && prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
++  if (!suspended && !parentMusicOwnsBackground() && prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
+   return volume;
+ }
+ 
+@@ -66,14 +77,14 @@
+ 
+ export function resumeMenuMusic({ duration = 650 } = {}) {
+   suspended = false;
+-  if (!unlocked || prefs().menuMusic === false) return;
++  if (!unlocked || parentMusicOwnsBackground() || prefs().menuMusic === false) return;
+   const audio = ensurePlayer();
+   audio.play().then(() => fadeTo(targetVolume(), duration)).catch(() => {});
+ }
+ 
+ let duckTimer = null;
+ export function duckMenuMusic({ amount = 0.32, duration = 240 } = {}) {
+-  if (suspended || !unlocked || prefs().menuMusic === false) return;
++  if (suspended || parentMusicOwnsBackground() || !unlocked || prefs().menuMusic === false) return;
+   const normal = targetVolume();
+   const ducked = Math.max(0, normal * (1 - Math.max(0, Math.min(.8, amount))));
+   clearTimeout(duckTimer);
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/apps/para-home/styles.css /mnt/data/v594/work2/apps/para-home/styles.css
+--- /mnt/data/v594/work/apps/para-home/styles.css	2026-09-03 14:46:50.000000000 +0000
++++ /mnt/data/v594/work2/apps/para-home/styles.css	2026-09-03 16:08:03.234905162 +0000
+@@ -2204,3 +2204,47 @@
+ .app-icon--music{background:radial-gradient(circle at 30% 20%,rgba(217,178,255,.55),rgba(120,48,206,.55) 48%,rgba(43,16,73,.95));color:#fff!important}
+ @media(max-width:920px){.music-layout{grid-template-columns:1fr}.music-now-playing{position:relative;top:auto;grid-template-columns:120px minmax(0,1fr);align-items:center}.music-now-playing__art{grid-row:1/4}.music-timeline,.music-volume,.music-player-error{grid-column:1/-1}}
+ @media(max-width:620px){.music-import-zone{align-items:stretch;flex-direction:column}.music-import-zone .action-button{width:100%}.music-now-playing{grid-template-columns:1fr}.music-now-playing__art{grid-row:auto;max-height:260px}.music-track__main{grid-template-columns:30px minmax(0,1fr)}.music-track__size{display:none}.music-local-note{align-items:flex-start;flex-direction:column}}
++
++/* V59.4 — PARA Music living-player redesign */
++.music-page .page__body{max-width:1180px;margin-inline:auto}
++.music-app{display:grid;gap:18px;min-width:0}
++.music-now-playing{--music-hue:266;top:auto;--music-hue2:302;--music-hue3:224;position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(260px,.78fr) minmax(0,1.22fr);align-items:center;gap:clamp(24px,4vw,54px);min-height:390px;padding:clamp(22px,3.2vw,38px);border:1px solid hsl(var(--music-hue) 80% 74% / .18);border-radius:28px;background:linear-gradient(135deg,rgba(9,5,16,.96),rgba(13,7,24,.9) 52%,rgba(6,4,12,.96));box-shadow:0 30px 100px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.05)}
++.music-now-playing::before{content:"";position:absolute;z-index:-2;inset:-38%;background:radial-gradient(circle at 24% 42%,hsl(var(--music-hue) 88% 62% / .23),transparent 28%),radial-gradient(circle at 78% 18%,hsl(var(--music-hue2) 88% 64% / .15),transparent 30%),radial-gradient(circle at 78% 84%,hsl(var(--music-hue3) 88% 58% / .11),transparent 30%);filter:blur(8px);transform:scale(1.02);transition:filter .4s ease,opacity .4s ease}
++.music-now-playing::after{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(112deg,transparent 0 42%,rgba(255,255,255,.018) 42.2% 42.5%,transparent 42.7% 100%),repeating-radial-gradient(circle at 17% 52%,transparent 0 54px,rgba(255,255,255,.018) 55px 56px);pointer-events:none}
++.music-now-playing[data-playing="true"]::before{filter:blur(2px) saturate(1.2);animation:paraMusicAmbient 9s ease-in-out infinite alternate}
++.music-now-playing__visual{position:relative;display:grid;place-items:center;align-content:center;gap:22px;min-width:0}
++.music-cover-shell{position:relative;width:min(100%,300px);aspect-ratio:1;display:grid;place-items:center}
++.music-cover{position:relative;z-index:2;width:82%;aspect-ratio:1;overflow:hidden;border-radius:24px;background:#10091d;box-shadow:0 24px 62px rgba(0,0,0,.46),0 0 0 1px rgba(255,255,255,.1),0 0 58px hsl(var(--music-hue) 88% 58% / .18);transform:translateX(-5%);transition:transform .35s ease,box-shadow .35s ease}
++.music-now-playing[data-playing="true"] .music-cover{transform:translateX(-7%) translateY(-2px);box-shadow:0 28px 70px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.12),0 0 74px hsl(var(--music-hue) 90% 62% / .25)}
++.music-cover>img{display:block;width:100%;height:100%;object-fit:cover}
++.music-cover__generated{position:absolute;inset:0;overflow:hidden;display:grid;place-items:center;background:linear-gradient(145deg,hsl(var(--music-hue) 62% 18%),hsl(var(--music-hue2) 70% 25%) 58%,hsl(var(--music-hue3) 64% 13%));}
++.music-cover__generated::before{content:"";position:absolute;width:125%;height:125%;border-radius:45%;background:conic-gradient(from 45deg,transparent,hsl(var(--music-hue2) 90% 75% / .32),transparent 28%,hsl(var(--music-hue) 95% 65% / .2),transparent 65%);filter:blur(8px);animation:paraMusicCoverDrift 14s linear infinite}
++.music-cover__generated::after{content:"";position:absolute;inset:10%;border:1px solid rgba(255,255,255,.12);border-radius:50%;box-shadow:0 0 0 24px rgba(255,255,255,.018),0 0 0 48px rgba(255,255,255,.014),0 0 0 72px rgba(255,255,255,.01)}
++.music-cover__orbit{position:absolute;inset:14%;border:1px solid hsl(var(--music-hue2) 90% 80% / .32);border-radius:46% 54% 61% 39% / 42% 36% 64% 58%;transform:rotate(24deg)}
++.music-cover__letter{position:relative;z-index:3;font-size:clamp(4rem,8vw,7.4rem);font-weight:950;line-height:1;color:#fff;text-shadow:0 10px 42px rgba(0,0,0,.34);letter-spacing:-.08em}
++.music-cover__label{position:absolute;z-index:3;left:15px;bottom:13px;padding:4px 7px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(5,3,10,.32);backdrop-filter:blur(8px);color:rgba(255,255,255,.78);font-size:.48rem;font-weight:900;letter-spacing:.18em}
++.music-vinyl{position:absolute;z-index:1;right:0;width:70%;aspect-ratio:1;border-radius:50%;background:repeating-radial-gradient(circle,#0a0810 0 5px,#17111f 6px 8px),conic-gradient(from 30deg,hsl(var(--music-hue) 70% 55% / .3),transparent 18% 56%,hsl(var(--music-hue2) 80% 60% / .25));box-shadow:0 20px 50px rgba(0,0,0,.4),inset 0 0 0 1px rgba(255,255,255,.06);opacity:.9;transform:translateX(8%)}
++.music-vinyl::after{content:"";position:absolute;inset:39%;border-radius:50%;background:radial-gradient(circle,#050309 0 18%,hsl(var(--music-hue) 75% 45%) 20% 64%,#09050f 66%);box-shadow:0 0 0 1px rgba(255,255,255,.1)}
++.music-vinyl i{position:absolute;inset:48%;z-index:2;border-radius:50%;background:#e8d9ff;box-shadow:0 0 12px rgba(255,255,255,.5)}
++.music-now-playing[data-playing="true"] .music-vinyl{animation:paraMusicSpin 7s linear infinite}
++.music-equalizer{height:34px;display:flex;align-items:end;justify-content:center;gap:4px;opacity:.55}
++.music-equalizer i{width:4px;height:24%;border-radius:4px;background:linear-gradient(to top,hsl(var(--music-hue) 90% 63%),hsl(var(--music-hue2) 92% 78%));transform-origin:bottom;animation:none}
++.music-now-playing[data-playing="true"] .music-equalizer{opacity:.9}
++.music-now-playing[data-playing="true"] .music-equalizer i{animation:paraMusicEq 860ms ease-in-out infinite alternate;animation-delay:calc(var(--bar) * -73ms)}
++.music-now-playing__content{min-width:0;display:grid;align-content:center;gap:18px;padding-right:clamp(0px,2vw,20px)}
++.music-now-playing__kicker{display:flex;align-items:center;gap:9px;color:hsl(var(--music-hue) 90% 78%);font-size:.62rem;font-weight:900;letter-spacing:.14em}.music-now-playing__kicker em{font-style:normal;padding:4px 7px;border:1px solid hsl(var(--music-hue) 78% 70% / .28);border-radius:999px;background:hsl(var(--music-hue) 70% 50% / .08);font-size:.48rem;letter-spacing:.12em}
++.music-now-playing__copy h2{margin:0;max-width:760px;font-size:clamp(2.2rem,5vw,4.7rem);line-height:.94;letter-spacing:-.055em;overflow-wrap:anywhere;text-wrap:balance}.music-now-playing__copy p{margin:12px 0 0;color:rgba(245,239,250,.72);font-size:clamp(.9rem,1.4vw,1.15rem);font-weight:650}.music-now-playing__copy small{display:block;margin-top:7px;color:rgba(245,239,250,.4);font-size:.68rem;overflow-wrap:anywhere}
++.music-transport{display:flex;align-items:center;justify-content:flex-start;gap:11px}.music-transport button{width:48px;height:48px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.13);border-radius:50%;background:rgba(255,255,255,.045);color:#fff;font-size:.82rem;font-weight:900;cursor:pointer;transition:transform .15s ease,border-color .15s ease,background .15s ease}.music-transport button>span{position:absolute}.music-transport button>span:first-child{transform:translateX(-3px)}.music-transport button>span:last-child{transform:translateX(3px)}.music-transport button:hover,.music-transport button:focus-visible{transform:translateY(-2px);border-color:hsl(var(--music-hue) 88% 76% / .7);background:hsl(var(--music-hue) 65% 45% / .2);outline:0}.music-transport .music-transport__primary{width:68px;height:68px;background:linear-gradient(145deg,hsl(var(--music-hue) 90% 68%),hsl(var(--music-hue2) 85% 60%));border-color:rgba(255,255,255,.3);font-size:1.2rem;box-shadow:0 14px 38px hsl(var(--music-hue) 90% 55% / .3)}
++.music-timeline{display:grid;grid-template-columns:36px minmax(0,1fr) 36px;align-items:center;gap:10px;max-width:680px;color:rgba(245,239,250,.42);font-size:.61rem}.music-timeline input,.music-volume input{width:100%;accent-color:hsl(var(--music-hue) 88% 65%)}.music-volume{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;max-width:520px;color:rgba(245,239,250,.46);font-size:.58rem;font-weight:900;letter-spacing:.1em}.music-volume b{color:rgba(255,255,255,.76);font-size:.61rem;letter-spacing:0}.music-player-error{margin:0;max-width:620px;padding:9px 11px;border:1px solid rgba(255,90,110,.22);border-radius:11px;background:rgba(120,20,40,.13);color:#ffb5be;font-size:.65rem;line-height:1.4}
++.music-import-zone{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 17px;border:1px dashed hsl(270 70% 72% / .28);border-radius:17px;background:linear-gradient(90deg,rgba(125,59,205,.08),rgba(255,255,255,.018));transition:border-color .18s ease,background .18s ease,transform .18s ease}.music-import-zone>div{display:flex;align-items:center;gap:13px;min-width:0}.music-import-zone>div>div{min-width:0}.music-import-zone strong,.music-import-zone small{display:block}.music-import-zone strong{font-size:.88rem}.music-import-zone small{margin-top:3px;color:rgba(245,239,250,.46);font-size:.64rem}.music-import-zone__icon{width:38px;height:38px;display:grid;place-items:center;flex:0 0 auto;border-radius:12px;background:rgba(168,92,255,.14);color:#c99eff;font-size:1.25rem}.music-import-zone.is-dragging{border-color:#c78fff;background:rgba(143,69,236,.18);transform:scale(1.004)}.music-import-zone.is-importing{opacity:.65;pointer-events:none}
++.music-library-panel{min-width:0;overflow:hidden;border:1px solid rgba(255,255,255,.075);border-radius:22px;background:rgba(7,4,12,.72);box-shadow:0 18px 70px rgba(0,0,0,.18)}.music-library-panel>header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 19px;border-bottom:1px solid rgba(255,255,255,.06)}.music-library-panel>header>div>span{display:block;color:#b980ff;font-size:.56rem;font-weight:900;letter-spacing:.14em}.music-library-panel>header h2{margin:3px 0 0;font-size:1.18rem}.music-library-panel>header small{display:block;margin-top:3px;color:rgba(245,239,250,.38);font-size:.58rem}.music-clear-button{border:0;background:transparent;color:rgba(245,239,250,.42);font-weight:750;font-size:.64rem;cursor:pointer}.music-clear-button:hover,.music-clear-button:focus-visible{color:#fff;outline:0}
++.music-track-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:rgba(255,255,255,.045)}.music-track{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;background:rgba(8,5,14,.98);min-width:0}.music-track.is-playing{background:linear-gradient(90deg,hsl(var(--music-hue,266) 62% 35% / .22),rgba(10,5,17,.96))}.music-track__main{display:grid;grid-template-columns:48px minmax(0,1fr) auto auto;align-items:center;gap:11px;min-width:0;padding:11px 12px;border:0;background:transparent;color:#fff;text-align:left;cursor:pointer}.music-track__main:hover,.music-track__main:focus-visible{background:rgba(255,255,255,.035);outline:0}.music-track__thumb{width:48px;height:48px;display:grid;place-items:center;overflow:hidden;border-radius:10px;background:#140b22;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}.music-track__thumb img{width:100%;height:100%;object-fit:cover}.music-track__thumb--generated{background:linear-gradient(145deg,hsl(var(--music-hue) 65% 24%),hsl(var(--music-hue2) 70% 18%))}.music-track__thumb--generated b{font-size:1.15rem;text-shadow:0 4px 18px rgba(0,0,0,.35)}.music-track__copy{min-width:0}.music-track__copy strong,.music-track__copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.music-track__copy strong{font-size:.76rem}.music-track__copy small{margin-top:4px;color:rgba(245,239,250,.4);font-size:.58rem}.music-track__size{color:rgba(245,239,250,.28);font-size:.56rem;white-space:nowrap}.music-track__playing{width:22px;display:grid;place-items:center;opacity:0}.music-track.is-playing .music-track__playing{opacity:1}.music-mini-equalizer{height:20px;display:flex;align-items:end;gap:2px}.music-mini-equalizer i{width:2px;height:24%;border-radius:2px;background:#b980ff}.music-track[data-playing="true"] .music-mini-equalizer i{animation:paraMusicEq 780ms ease-in-out infinite alternate;animation-delay:calc(var(--bar) * -62ms)}.music-track__remove{width:40px;border:0;background:transparent;color:rgba(245,239,250,.22);font-size:1rem;cursor:pointer}.music-track__remove:hover,.music-track__remove:focus-visible{background:rgba(255,82,82,.07);color:#ff8d95;outline:0}
++.music-library-empty{min-height:210px;display:grid;place-items:center;align-content:center;gap:8px;padding:28px;text-align:center;color:rgba(245,239,250,.5)}.music-library-empty>span{width:56px;height:56px;display:grid;place-items:center;border-radius:17px;background:rgba(168,92,255,.11);color:#b980ff;font-size:1.5rem}.music-library-empty h2{margin:4px 0 0;color:#fff}.music-library-empty p{margin:0;max-width:360px;font-size:.68rem;line-height:1.5}
++.music-local-note{display:flex;align-items:center;justify-content:center;gap:10px;padding:2px 4px;color:rgba(245,239,250,.32);font-size:.59rem}.music-local-note span{padding:4px 7px;border:1px solid rgba(169,99,255,.21);border-radius:999px;color:#be91f4;font-size:.49rem;font-weight:900;letter-spacing:.12em}.music-local-note p{margin:0}
++@keyframes paraMusicSpin{to{transform:translateX(8%) rotate(360deg)}}
++@keyframes paraMusicEq{0%{height:18%}45%{height:95%}100%{height:42%}}
++@keyframes paraMusicCoverDrift{to{transform:rotate(360deg)}}
++@keyframes paraMusicAmbient{0%{transform:translate3d(-2%,-1%,0) scale(1.02)}100%{transform:translate3d(2%,1%,0) scale(1.08)}}
++@media(max-width:980px){.music-now-playing{grid-template-columns:minmax(220px,.65fr) minmax(0,1.35fr);gap:24px}.music-track-list{grid-template-columns:1fr}}
++@media(max-width:720px){.music-now-playing{grid-template-columns:1fr;padding:20px}.music-cover-shell{width:min(78vw,280px)}.music-now-playing__content{text-align:center;padding:0}.music-now-playing__kicker,.music-transport{justify-content:center}.music-timeline,.music-volume{margin-inline:auto;width:100%}.music-import-zone{align-items:stretch;flex-direction:column}.music-import-zone .action-button{width:100%}.music-local-note{align-items:flex-start;flex-direction:column}.music-track__main{grid-template-columns:44px minmax(0,1fr) auto}.music-track__size{display:none}}
++@media(prefers-reduced-motion:reduce){.music-now-playing::before,.music-cover__generated::before,.music-vinyl,.music-equalizer i,.music-mini-equalizer i{animation:none!important}}
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/services/api/server.py /mnt/data/v594/work2/services/api/server.py
+--- /mnt/data/v594/work/services/api/server.py	2026-09-03 14:57:53.000000000 +0000
++++ /mnt/data/v594/work2/services/api/server.py	2026-09-03 16:10:35.134793772 +0000
+@@ -1584,7 +1584,11 @@
+ 
+   async function loadParaMusicTrack(id, { currentTime = 0, volume = null, attemptPlayback = true } = {}) {
+     if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
+-    const track = paraMusicQueue.find((item) => item.id === id);
++    let track = paraMusicQueue.find((item) => item.id === id);
++    if (!track?.blob) {
++      paraMusicQueue = await listParaMusicTracks();
++      track = paraMusicQueue.find((item) => item.id === id);
++    }
+     if (!track?.blob) throw new Error('That local music file is no longer available.');
+     const player = ensureParaMusicAudio();
+     if (paraMusicTrack?.id !== track.id) {
+@@ -1608,6 +1612,14 @@
+     return paraMusicState();
+   }
+ 
++  function compensatedParaMusicTime(saved = {}) {
++    let value = Math.max(0, Number(saved.currentTime || 0));
++    if (saved.playbackState === 'playing' && Number(saved.updatedAt) > 0) {
++      value += Math.max(0, Math.min(4, (Date.now() - Number(saved.updatedAt)) / 1000));
++    }
++    return value;
++  }
++
+   async function restoreParaMusicFromHandoff({ attemptPlayback = true, forceSync = false } = {}) {
+     if (paraMusicRestorePromise && !forceSync) return paraMusicRestorePromise;
+     const job = (async () => {
+@@ -1617,7 +1629,7 @@
+       const sameTrack = paraMusicTrack?.id === saved.currentId;
+       if (!sameTrack) {
+         return loadParaMusicTrack(saved.currentId, {
+-          currentTime: Number(saved.currentTime || 0),
++          currentTime: compensatedParaMusicTime(saved),
+           volume: Number(saved.volume ?? 70),
+           attemptPlayback: attemptPlayback && saved.playbackState === 'playing',
+         });
+@@ -1625,7 +1637,7 @@
+       const player = ensureParaMusicAudio();
+       player.volume = Math.max(0, Math.min(1, Number(saved.volume ?? 70) / 100));
+       if (forceSync && Number.isFinite(Number(saved.currentTime))) {
+-        try { player.currentTime = Math.max(0, Math.min(Number(player.duration || saved.currentTime), Number(saved.currentTime))); } catch (_) {}
++        try { const target = compensatedParaMusicTime(saved); player.currentTime = Math.max(0, Math.min(Number(player.duration || target), target)); } catch (_) {}
+       }
+       if (saved.playbackState === 'playing' && attemptPlayback) {
+         try { await player.play(); } catch (_) { paraMusicError = 'Press Play in PARA Control Center to continue.'; }
+@@ -1668,6 +1680,81 @@
+     return paraMusicState().volume;
+   }
+ 
++  function setParaMusicVolumeAbsolute(percent) {
++    const player = ensureParaMusicAudio();
++    player.volume = Math.max(0, Math.min(1, Number(percent || 0) / 100));
++    writeParaMusicHandoff(true);
++    return paraMusicState().volume;
++  }
++
++  function seekParaMusic(seconds) {
++    const player = ensureParaMusicAudio();
++    const target = Math.max(0, Number(seconds || 0));
++    try { player.currentTime = Math.min(Number(player.duration || target), target); } catch (_) {}
++    writeParaMusicHandoff(true);
++    return paraMusicState();
++  }
++
++  async function playParaMusic() {
++    const saved = readParaMusicHandoff();
++    if (!paraMusicTrack && saved?.active) await restoreParaMusicFromHandoff({ attemptPlayback: false });
++    if (!paraMusicTrack) return paraMusicState();
++    const player = ensureParaMusicAudio();
++    if (player.paused) {
++      try { await player.play(); paraMusicError = ''; }
++      catch (_) { paraMusicError = 'Playback was blocked. Press Play again.'; }
++    }
++    writeParaMusicHandoff(true);
++    return paraMusicState();
++  }
++
++  function pauseParaMusic() {
++    if (paraMusicAudio && !paraMusicAudio.paused) paraMusicAudio.pause();
++    writeParaMusicHandoff(true);
++    return paraMusicState();
++  }
++
++  function stopParaMusic() {
++    if (paraMusicAudio) {
++      try { paraMusicAudio.pause(); paraMusicAudio.removeAttribute('src'); paraMusicAudio.load(); } catch (_) {}
++    }
++    revokeParaMusicUrl();
++    paraMusicTrack = null;
++    paraMusicError = '';
++    writeParaMusicHandoff(true);
++    return paraMusicState();
++  }
++
++  async function previousParaMusicTrack() {
++    const player = ensureParaMusicAudio();
++    if (paraMusicTrack && Number(player.currentTime || 0) > 4) {
++      player.currentTime = 0;
++      writeParaMusicHandoff(true);
++      return paraMusicState();
++    }
++    return nextParaMusicTrack(-1);
++  }
++
++  window.PARA = window.PARA && typeof window.PARA === 'object' ? window.PARA : {};
++  window.PARA.localMusicHost = Object.freeze({
++    state: () => ({ ...paraMusicState() }),
++    flush: () => { writeParaMusicHandoff(true); return { ...paraMusicState() }; },
++    playTrack: (id) => loadParaMusicTrack(String(id || ''), { currentTime: 0, volume: paraMusicState().volume, attemptPlayback: true }),
++    play: () => playParaMusic(),
++    pause: () => pauseParaMusic(),
++    toggle: () => toggleParaMusic(),
++    previous: () => previousParaMusicTrack(),
++    next: () => nextParaMusicTrack(1),
++    seek: (seconds) => seekParaMusic(seconds),
++    setVolume: (percent) => setParaMusicVolumeAbsolute(percent),
++    stop: () => stopParaMusic(),
++    refreshLibrary: async () => {
++      paraMusicQueue = await listParaMusicTracks();
++      if (paraMusicTrack && !paraMusicQueue.some((track) => track.id === paraMusicTrack.id)) stopParaMusic();
++      return paraMusicQueue.length;
++    },
++  });
++
+   function paraMusicTimeLabel(seconds) {
+     const total = Math.max(0, Math.floor(Number(seconds || 0)));
+     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+@@ -1810,9 +1897,9 @@
+     for (const media of document.querySelectorAll('audio,video')) {
+       try {
+         if (media === paraMusicAudio) {
+-          paraMusicSuppressPausePersist = true;
+-          if (!media.paused) media.pause();
+-          paraMusicSuppressPausePersist = false;
++          // PARA Music belongs to the persistent game runtime while the suspended
++          // Home shell is open. Home controls this same player through the
++          // same-origin localMusicHost bridge instead of spawning a second copy.
+           continue;
+         }
+         suspendedMediaState.set(media, { wasPlaying: !media.paused });
+@@ -1835,9 +1922,9 @@
+       try { if (state.wasPlaying) void media.play(); } catch (_) {}
+     }
+     suspendedMediaState.clear();
+-    // The suspended PARA Home iframe owns the local song while Home is open.
+-    // Pull its latest position/volume back into the game after the frame closes.
+-    setTimeout(() => { void restoreParaMusicFromHandoff({ attemptPlayback: true, forceSync: true }); }, 40);
++    // PARA Music never left the persistent game runtime, so resuming the game
++    // does not stop/reload/reseek the user's song.
++    writeParaMusicHandoff(true);
+     for (const [context, state] of suspendedAudioContextState) {
+       try { if (state === 'running' && context.state === 'suspended') void context.resume?.(); } catch (_) {}
+     }
+@@ -1935,7 +2022,7 @@
+     try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
+     const node = createGamePageTransition('Closing Game');
+     node.classList.add('is-visible');
+-    setTimeout(() => { location.href = destination; }, 430);
++    setTimeout(() => { writeParaMusicHandoff(true); location.href = destination; }, 430);
+   }
+ 
+   function switchSuspendedGame(storeId) {
+@@ -1950,7 +2037,7 @@
+     const node = createGamePageTransition('Switching Games');
+     node.classList.add('is-visible');
+     const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
+-    setTimeout(() => { location.href = next; }, 430);
++    setTimeout(() => { writeParaMusicHandoff(true); location.href = next; }, 430);
+   }
+ 
+   function leaveGame(destination = '/#/home') {
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' /mnt/data/v594/work/tests/test_repository.py /mnt/data/v594/work2/tests/test_repository.py
+--- /mnt/data/v594/work/tests/test_repository.py	2026-09-03 15:56:03.000000000 +0000
++++ /mnt/data/v594/work2/tests/test_repository.py	2026-09-03 16:09:10.315581480 +0000
+@@ -929,8 +929,8 @@
+             'multiple accept="audio/*',
+             'data-music-find-files',
+             'data-music-drop-zone',
+-            'Local files stay on this browser build of PARA.',
+-            'Future PARA console: PARA Files and USB drives use this same player.',
++            'Files stay on this device.',
++            'ready for PARA Files + USB on console',
+         ]:
+             self.assertIn(marker, music)
+ 
+@@ -1001,11 +1001,62 @@
+         app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+ 
+         self.assertIn("let suspended = false", menu_music)
+-        self.assertIn("if (suspended || gameRunning || sound.menuMusic === false)", menu_music)
++        self.assertIn("parentMusicOwnsBackground()", menu_music)
++        self.assertIn("if (suspended || parentMusicOwnsBackground() || gameRunning || sound.menuMusic === false)", menu_music)
+         self.assertIn("suspended = true", menu_music)
+         self.assertIn("suspended = false", menu_music)
+-        self.assertIn("if (!suspended && prefs().menuMusic !== false && unlocked)", menu_music)
+-        self.assertIn("if (suspended || !unlocked || prefs().menuMusic === false) return", menu_music)
++        self.assertIn("if (!suspended && !parentMusicOwnsBackground() && prefs().menuMusic !== false && unlocked)", menu_music)
++        self.assertIn("if (suspended || parentMusicOwnsBackground() || !unlocked || prefs().menuMusic === false) return", menu_music)
+         self.assertIn('session.appId === "para:music"', media_session)
+         self.assertIn("suspendMenuMusic({ duration: 100 })", media_session)
+         self.assertIn("syncMenuMusic({ gameRunning:", app)
++
++    def test_v59_4_music_uses_single_parent_audio_host_and_living_player_ui(self):
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        music = (ROOT / "apps/para-home/src/screens/music.js").read_text(encoding="utf-8")
++        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
++        menu_music = (ROOT / "apps/para-home/src/services/menu-music.js").read_text(encoding="utf-8")
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++        styles = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
++
++        for marker in [
++            'IS_SUSPENDED_HOME',
++            'parentMusicHost',
++            'window.parent?.PARA?.localMusicHost',
++            'compensatedHandoffTime',
++            'prepareLocalMusicHandoff',
++            'metadataVersion: 1',
++            'id3Metadata',
++            'APIC',
++            'artworkBlob',
++        ]:
++            self.assertIn(marker, service)
++        self.assertIn('prepareLocalMusicHandoff();', app)
++        self.assertIn('parentMusicOwnsBackground()', menu_music)
++
++        for marker in [
++            'window.PARA.localMusicHost = Object.freeze',
++            'compensatedParaMusicTime',
++            'PARA Music belongs to the persistent game runtime',
++            'Home controls this same player through the',
++            'writeParaMusicHandoff(true); location.href = destination',
++        ]:
++            self.assertIn(marker, server)
++        self.assertNotIn("if (!media.paused) media.pause();\n          paraMusicSuppressPausePersist = false;\n          continue;", server)
++
++        for marker in [
++            'music-cover-shell',
++            'music-vinyl',
++            'music-equalizer',
++            'YOUR CRATE',
++            'Your soundtrack lives here',
++            'data-music-art-image',
++        ]:
++            self.assertIn(marker, music)
++        for marker in [
++            '@keyframes paraMusicSpin',
++            '@keyframes paraMusicEq',
++            '.music-cover__generated',
++            '.music-track__thumb',
++        ]:
++            self.assertIn(marker, styles)

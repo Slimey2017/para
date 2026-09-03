@@ -47,6 +47,7 @@ import { knownParaAccount, markParaAccountConnected, markParaAccountDisconnected
 import { mountLiveClock, updateLiveClocks } from "./services/live-clock.js";
 import { setMenuMusicVolume, syncMenuMusic, toggleMenuMusic, unlockMenuMusic, suspendMenuMusic } from "./services/menu-music.js";
 import { mediaSessionAction, setMediaVolume, setGameMediaBalance, mediaSessionState } from "./services/media-session.js";
+import { prepareLocalMusicHandoff } from "./services/local-music.js";
 import { applyBrowserBackground, clearProfileAssets } from "./services/profile-assets.js";
 import {
   activeDownloads, closeExperience, favoriteExperience, recordExperience, refreshDemoDownloads, removeDemo, runningExperiences, startDemoInstall, pauseDownload, resumeDownload, cancelDownload, markNotificationRead, markAllNotificationsRead,
@@ -287,7 +288,10 @@ function transitionIntoGame(destination, title = "PARA Game", artwork = []) {
   const reduced = getState().reducedMotion;
   window.setTimeout(() => {
     node.classList.add("is-committed");
-    window.setTimeout(() => window.location.assign(destination), reduced ? 1 : 120);
+    window.setTimeout(() => {
+      prepareLocalMusicHandoff();
+      window.location.assign(destination);
+    }, reduced ? 1 : 120);
   }, reduced ? 20 : 500);
   return true;
 }
