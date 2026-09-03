@@ -1459,6 +1459,220 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   let suspendShellHost = null;
   let paraGameDocumentTitle = GAME_TITLE;
 
+  const PARA_MUSIC_DB_NAME = 'para-music-library-v1';
+  const PARA_MUSIC_TRACK_STORE = 'tracks';
+  const PARA_MUSIC_HANDOFF_KEY = 'para.music.handoff.v1';
+  let paraMusicDbPromise = null;
+  let paraMusicAudio = null;
+  let paraMusicObjectUrl = '';
+  let paraMusicQueue = [];
+  let paraMusicTrack = null;
+  let paraMusicError = '';
+  let paraMusicSuppressPausePersist = false;
+  let paraMusicLastWrite = 0;
+  let paraMusicRestorePromise = null;
+
+  function readParaMusicHandoff() {
+    try {
+      const value = JSON.parse(localStorage.getItem(PARA_MUSIC_HANDOFF_KEY) || 'null');
+      return value && typeof value === 'object' ? value : null;
+    } catch (_) { return null; }
+  }
+
+  function paraMusicState() {
+    return {
+      active: Boolean(paraMusicTrack),
+      currentId: paraMusicTrack?.id || '',
+      title: paraMusicTrack?.title || paraMusicTrack?.fileName || 'Nothing playing',
+      artist: paraMusicTrack?.artist || '',
+      fileName: paraMusicTrack?.fileName || '',
+      playbackState: paraMusicTrack ? (paraMusicAudio && !paraMusicAudio.paused ? 'playing' : 'paused') : 'none',
+      currentTime: Number.isFinite(paraMusicAudio?.currentTime) ? paraMusicAudio.currentTime : 0,
+      duration: Number.isFinite(paraMusicAudio?.duration) ? paraMusicAudio.duration : 0,
+      volume: Math.round((paraMusicAudio?.volume ?? .7) * 100),
+      error: paraMusicError,
+    };
+  }
+
+  function writeParaMusicHandoff(force = false, playbackStateOverride = '') {
+    const now = Date.now();
+    if (!force && now - paraMusicLastWrite < 850) return;
+    paraMusicLastWrite = now;
+    const state = paraMusicState();
+    try {
+      localStorage.setItem(PARA_MUSIC_HANDOFF_KEY, JSON.stringify({
+        version: 1,
+        active: state.active,
+        currentId: state.currentId,
+        title: state.title,
+        artist: state.artist,
+        fileName: state.fileName,
+        playbackState: playbackStateOverride || state.playbackState,
+        currentTime: state.currentTime,
+        volume: state.volume,
+        updatedAt: now,
+      }));
+    } catch (_) {}
+  }
+
+  function openParaMusicDb() {
+    if (paraMusicDbPromise) return paraMusicDbPromise;
+    if (!globalThis.indexedDB) return Promise.reject(new Error('Local music storage is unavailable.'));
+    paraMusicDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(PARA_MUSIC_DB_NAME, 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('PARA Music storage could not open.'));
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(PARA_MUSIC_TRACK_STORE)) {
+          const store = db.createObjectStore(PARA_MUSIC_TRACK_STORE, { keyPath: 'id' });
+          store.createIndex('addedAt', 'addedAt', { unique: false });
+        }
+      };
+    });
+    return paraMusicDbPromise;
+  }
+
+  async function listParaMusicTracks() {
+    const db = await openParaMusicDb();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(PARA_MUSIC_TRACK_STORE, 'readonly');
+      const request = transaction.objectStore(PARA_MUSIC_TRACK_STORE).getAll();
+      request.onsuccess = () => {
+        const tracks = Array.isArray(request.result) ? request.result : [];
+        tracks.sort((a, b) => Number(a.addedAt || 0) - Number(b.addedAt || 0));
+        resolve(tracks);
+      };
+      request.onerror = () => reject(request.error || new Error('PARA Music could not read the local library.'));
+    });
+  }
+
+  function revokeParaMusicUrl() {
+    if (paraMusicObjectUrl) URL.revokeObjectURL(paraMusicObjectUrl);
+    paraMusicObjectUrl = '';
+  }
+
+  function ensureParaMusicAudio() {
+    if (paraMusicAudio) return paraMusicAudio;
+    paraMusicAudio = document.createElement('audio');
+    paraMusicAudio.id = 'para-game-local-music-audio';
+    paraMusicAudio.dataset.paraLocalMusic = 'true';
+    paraMusicAudio.preload = 'metadata';
+    paraMusicAudio.volume = .7;
+    paraMusicAudio.style.display = 'none';
+    (document.body || document.documentElement).append(paraMusicAudio);
+    paraMusicAudio.addEventListener('play', () => { paraMusicError = ''; writeParaMusicHandoff(true); if (contextName === 'music') showContext('music'); });
+    paraMusicAudio.addEventListener('pause', () => { if (!paraMusicSuppressPausePersist) writeParaMusicHandoff(true); if (contextName === 'music') showContext('music'); });
+    paraMusicAudio.addEventListener('timeupdate', () => writeParaMusicHandoff(false));
+    paraMusicAudio.addEventListener('ended', () => { void nextParaMusicTrack(); });
+    paraMusicAudio.addEventListener('error', () => {
+      paraMusicError = 'This browser could not decode that local audio file.';
+      writeParaMusicHandoff(true);
+      if (contextName === 'music') showContext('music');
+    });
+    return paraMusicAudio;
+  }
+
+  function waitForParaMusicMetadata(player, timeoutMs = 2600) {
+    if (player.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+    return new Promise((resolve) => {
+      const finish = () => { clearTimeout(timer); player.removeEventListener('loadedmetadata', finish); resolve(); };
+      const timer = setTimeout(finish, timeoutMs);
+      player.addEventListener('loadedmetadata', finish, { once: true });
+    });
+  }
+
+  async function loadParaMusicTrack(id, { currentTime = 0, volume = null, attemptPlayback = true } = {}) {
+    if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
+    const track = paraMusicQueue.find((item) => item.id === id);
+    if (!track?.blob) throw new Error('That local music file is no longer available.');
+    const player = ensureParaMusicAudio();
+    if (paraMusicTrack?.id !== track.id) {
+      revokeParaMusicUrl();
+      paraMusicTrack = track;
+      paraMusicError = '';
+      paraMusicObjectUrl = URL.createObjectURL(track.blob);
+      player.src = paraMusicObjectUrl;
+      player.load();
+      await waitForParaMusicMetadata(player);
+    }
+    if (volume != null) player.volume = Math.max(0, Math.min(1, Number(volume) / 100));
+    if (Number.isFinite(Number(currentTime))) {
+      try { player.currentTime = Math.max(0, Math.min(Number(player.duration || currentTime), Number(currentTime))); } catch (_) {}
+    }
+    if (attemptPlayback) {
+      try { await player.play(); }
+      catch (_) { paraMusicError = 'Press Play in PARA Control Center to continue.'; }
+    }
+    writeParaMusicHandoff(true);
+    return paraMusicState();
+  }
+
+  async function restoreParaMusicFromHandoff({ attemptPlayback = true, forceSync = false } = {}) {
+    if (paraMusicRestorePromise && !forceSync) return paraMusicRestorePromise;
+    const job = (async () => {
+      const saved = readParaMusicHandoff();
+      if (!saved?.active || !saved.currentId) return paraMusicState();
+      if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
+      const sameTrack = paraMusicTrack?.id === saved.currentId;
+      if (!sameTrack) {
+        return loadParaMusicTrack(saved.currentId, {
+          currentTime: Number(saved.currentTime || 0),
+          volume: Number(saved.volume ?? 70),
+          attemptPlayback: attemptPlayback && saved.playbackState === 'playing',
+        });
+      }
+      const player = ensureParaMusicAudio();
+      player.volume = Math.max(0, Math.min(1, Number(saved.volume ?? 70) / 100));
+      if (forceSync && Number.isFinite(Number(saved.currentTime))) {
+        try { player.currentTime = Math.max(0, Math.min(Number(player.duration || saved.currentTime), Number(saved.currentTime))); } catch (_) {}
+      }
+      if (saved.playbackState === 'playing' && attemptPlayback) {
+        try { await player.play(); } catch (_) { paraMusicError = 'Press Play in PARA Control Center to continue.'; }
+      } else if (saved.playbackState !== 'playing' && !player.paused) {
+        player.pause();
+      }
+      writeParaMusicHandoff(true);
+      return paraMusicState();
+    })();
+    paraMusicRestorePromise = job;
+    try { return await job; }
+    finally { if (paraMusicRestorePromise === job) paraMusicRestorePromise = null; }
+  }
+
+  async function toggleParaMusic() {
+    const saved = readParaMusicHandoff();
+    if (!paraMusicTrack && saved?.active) await restoreParaMusicFromHandoff({ attemptPlayback: false });
+    const player = ensureParaMusicAudio();
+    if (!paraMusicTrack) return paraMusicState();
+    if (player.paused) {
+      try { await player.play(); paraMusicError = ''; }
+      catch (_) { paraMusicError = 'Playback was blocked. Press Play again.'; }
+    } else player.pause();
+    writeParaMusicHandoff(true);
+    return paraMusicState();
+  }
+
+  async function nextParaMusicTrack(direction = 1) {
+    if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
+    if (!paraMusicQueue.length) return paraMusicState();
+    const index = paraMusicTrack ? paraMusicQueue.findIndex((track) => track.id === paraMusicTrack.id) : -1;
+    const nextIndex = index < 0 ? 0 : (index + direction + paraMusicQueue.length) % paraMusicQueue.length;
+    return loadParaMusicTrack(paraMusicQueue[nextIndex].id, { currentTime: 0, volume: paraMusicState().volume, attemptPlayback: true });
+  }
+
+  function setParaMusicVolume(delta) {
+    const player = ensureParaMusicAudio();
+    player.volume = Math.max(0, Math.min(1, player.volume + Number(delta || 0) / 100));
+    writeParaMusicHandoff(true);
+    return paraMusicState().volume;
+  }
+
+  function paraMusicTimeLabel(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds || 0)));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  }
+
   function rememberGameDocumentTitle() {
     const current = String(document.title || '').trim();
     if (current && current !== 'PARA Home') paraGameDocumentTitle = current;
@@ -1591,11 +1805,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   function pauseGameMedia() {
     suspendedMediaState.clear();
+    const musicWasPlaying = Boolean(paraMusicTrack && paraMusicAudio && !paraMusicAudio.paused);
+    if (paraMusicTrack) writeParaMusicHandoff(true, musicWasPlaying ? 'playing' : 'paused');
     for (const media of document.querySelectorAll('audio,video')) {
       try {
+        if (media === paraMusicAudio) {
+          paraMusicSuppressPausePersist = true;
+          if (!media.paused) media.pause();
+          paraMusicSuppressPausePersist = false;
+          continue;
+        }
         suspendedMediaState.set(media, { wasPlaying: !media.paused });
         if (!media.paused) media.pause();
-      } catch (_) {}
+      } catch (_) { paraMusicSuppressPausePersist = false; }
     }
     suspendedAudioContextState.clear();
     try {
@@ -1613,6 +1835,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       try { if (state.wasPlaying) void media.play(); } catch (_) {}
     }
     suspendedMediaState.clear();
+    // The suspended PARA Home iframe owns the local song while Home is open.
+    // Pull its latest position/volume back into the game after the frame closes.
+    setTimeout(() => { void restoreParaMusicFromHandoff({ attemptPlayback: true, forceSync: true }); }, 40);
     for (const [context, state] of suspendedAudioContextState) {
       try { if (state === 'running' && context.state === 'suspended') void context.resume?.(); } catch (_) {}
     }
@@ -1765,8 +1990,14 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (data.command === 'launch') return switchSuspendedGame(data.storeId);
   });
 
-  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', () => { rememberGameDocumentTitle(); revealGameAfterLaunch(); }, { once: true });
-  else { rememberGameDocumentTitle(); revealGameAfterLaunch(); }
+  const bootParaGameRuntime = () => {
+    rememberGameDocumentTitle();
+    revealGameAfterLaunch();
+    void restoreParaMusicFromHandoff({ attemptPlayback: true });
+  };
+  addEventListener('pagehide', () => writeParaMusicHandoff(true));
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', bootParaGameRuntime, { once: true });
+  else bootParaGameRuntime();
 
   const map = (value) => {
     if (typeof value !== 'string') return value;
@@ -2618,6 +2849,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       for (const track of destination.stream?.getAudioTracks?.() || []) tracks.push(track);
     }
     for (const media of document.querySelectorAll('audio,video')) {
+      if (media === paraMusicAudio || media?.dataset?.paraLocalMusic === 'true') continue;
       try {
         const stream = media.captureStream?.();
         for (const track of stream?.getAudioTracks?.() || []) tracks.push(track);
@@ -2941,9 +3173,13 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       if (audio) {
         const displayAudio = display.getAudioTracks?.().find((track) => track.readyState !== 'ended');
         const gameAudio = capturedGameAudioTracks().find((track) => track.readyState !== 'ended');
-        const audioTrack = displayAudio || gameAudio;
+        // User-selected PARA Music is a separate background lane and must not be
+        // baked into gameplay recordings. Prefer isolated game audio; if the
+        // browser only exposes a mixed tab-audio track while PARA Music is active,
+        // save video-only rather than recording the user's song.
+        const audioTrack = gameAudio || (!paraMusicTrack ? displayAudio : null);
         if (audioTrack) {
-          try { tracks.push(displayAudio ? audioTrack : audioTrack.clone()); } catch (_) {}
+          try { tracks.push(audioTrack === displayAudio ? audioTrack : audioTrack.clone()); } catch (_) {}
         }
       }
 
@@ -3417,7 +3653,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
           ${replayActive ? '<button data-context-action="save-replay" data-ms="30000">Last 30s</button><button data-context-action="save-replay" data-ms="60000">Last 1m</button><button data-context-action="save-replay" data-ms="300000">Last 5m</button>' : '<button data-context-action="start-replay">Start Replay</button>'}
         </div>`;
     } else if (name === 'sound') {
-      const media = [...document.querySelectorAll('audio,video')];
+      const media = [...document.querySelectorAll('audio,video')].filter((el) => el !== paraMusicAudio);
       const muted = media.length && media.every((el) => el.muted);
       context.innerHTML = `<div class="contextCopy"><span>Sound</span><strong>${muted ? 'Muted' : 'Playing'}</strong><small>${media.length ? 'Game audio output' : 'No HTML media output detected'}</small></div><div class="contextActions"><button data-context-action="toggle-mute">${muted ? 'Unmute' : 'Mute'}</button></div>`;
     } else if (name === 'controller') {
@@ -3468,7 +3704,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
         if (contextFocusActive) syncFocus(focusedIndex, { refreshContext: false });
       });
     } else if (name === 'music') {
-      context.innerHTML = `<div class="contextCopy"><span>Now Playing</span><strong>No separate media session</strong><small>Game audio remains under Sound.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
+      const music = paraMusicState();
+      const saved = readParaMusicHandoff();
+      if (!music.active && saved?.active) {
+        context.innerHTML = `<div class="contextCopy"><span>PARA Music</span><strong>${escapeMarkup(saved.title || saved.fileName || 'Local track')}</strong><small>Loading local music…</small></div>`;
+        void restoreParaMusicFromHandoff({ attemptPlayback: saved.playbackState === 'playing' }).then(() => { if (contextName === 'music') showContext('music'); });
+      } else if (music.active) {
+        const status = music.playbackState === 'playing' ? 'Playing' : 'Paused';
+        const detail = [music.artist || music.fileName || 'Local file', `${paraMusicTimeLabel(music.currentTime)} / ${paraMusicTimeLabel(music.duration)}`, `Vol ${music.volume}%`].filter(Boolean).join(' · ');
+        context.innerHTML = `<div class="contextCopy"><span>PARA Music · ${status}</span><strong>${escapeMarkup(music.title)}</strong><small>${escapeMarkup(detail)}${music.error ? ` · ${escapeMarkup(music.error)}` : ''}</small></div><div class="contextActions"><button data-context-action="music-previous">Previous</button><button data-context-action="music-toggle">${music.playbackState === 'playing' ? 'Pause' : 'Play'}</button><button data-context-action="music-next">Next</button><button data-context-action="music-volume-down">Vol −</button><button data-context-action="music-volume-up">Vol +</button></div>`;
+      } else {
+        context.innerHTML = `<div class="contextCopy"><span>PARA Music</span><strong>No local song selected</strong><small>Choose music from your local PARA Music library.</small></div><div class="contextActions"><button data-context-action="music-open">Open Music</button></div>`;
+      }
     } else if (name === 'microphone') {
       context.innerHTML = `<div class="contextCopy"><span>Microphone</span><strong>Open microphone controls</strong><small>PARA does not invent microphone state when host data is unavailable.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
     } else if (name === 'power') {
@@ -3717,6 +3964,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (contextAction === 'downloads-open') return leaveGame('/#/downloads');
     if (contextAction === 'network-settings') return leaveGame('/#/network');
     if (contextAction === 'audio-settings') return leaveGame('/#/audio-settings');
+    if (contextAction === 'music-open') return leaveGame('/#/music');
+    if (contextAction === 'music-toggle') { await toggleParaMusic(); return showContext('music', true); }
+    if (contextAction === 'music-previous') { await nextParaMusicTrack(-1); return showContext('music', true); }
+    if (contextAction === 'music-next') { await nextParaMusicTrack(1); return showContext('music', true); }
+    if (contextAction === 'music-volume-down') { setParaMusicVolume(-10); return showContext('music', true); }
+    if (contextAction === 'music-volume-up') { setParaMusicVolume(10); return showContext('music', true); }
     if (contextAction === 'para-input-toggle') {
       const status = window.PARA?.input?.status?.() || {};
       if (status.requested) window.PARA?.input?.disableForThisGame?.();
@@ -3747,7 +4000,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     if (contextAction === 'start-replay') return startReplay();
     if (contextAction === 'save-replay') { closeShell(); return saveReplay(Number(button.dataset.ms || 30000)); }
     if (contextAction === 'toggle-mute') {
-      const media = [...document.querySelectorAll('audio,video')];
+      const media = [...document.querySelectorAll('audio,video')].filter((el) => el !== paraMusicAudio);
       const shouldMute = !media.length || !media.every((el) => el.muted);
       media.forEach((el) => { el.muted = shouldMute; });
       showContext('sound');

@@ -7,7 +7,7 @@ function applicationCard(application, index) {
   const route = application.launch?.kind === "route" ? `data-route="${escapeHtml(application.launch.route)}"` : `data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
   const iconKind = application.iconType || application.icon || "";
   const systemIcons = {
-    friends: "✦", achievements: "◇", media: "▣", files: "", store: "P", settings: "⚙",
+    friends: "✦", achievements: "◇", media: "▣", music: "♫", files: "", store: "P", settings: "⚙",
   };
   const icon = application.icon && String(application.icon).includes("/")
     ? `<img src="${application.icon}" alt="" />`

@@ -1,0 +1,648 @@
+diff --git a/PARA_LOCAL_MUSIC_PLAYER_V59.md b/PARA_LOCAL_MUSIC_PLAYER_V59.md
+index c6b17dd..7b64405 100644
+--- a/PARA_LOCAL_MUSIC_PLAYER_V59.md
++++ b/PARA_LOCAL_MUSIC_PLAYER_V59.md
+@@ -41,9 +41,15 @@ The UI intentionally separates **file acquisition** from **playback**. On the re
+ 
+ No streaming accounts, discovery feeds, social music layer, or online catalog were added.
+ 
+-## Current browser boundary
++## V59.1 browser game handoff
+ 
+-PARA's current published WEB-game launch still performs a top-level page navigation into the game document. A browser `<audio>` element cannot survive that document replacement. V59 therefore guarantees background playback across PARA Home/system-app navigation, but **not yet across the current top-level WEB-game navigation boundary**. That should be solved separately by the persistent console shell or a later browser-runtime handoff, rather than risking the newly stabilized recorder.
++V59.1 adds a same-origin local playback handoff for published WEB games. Before PARA Home leaves for a game, the Music service writes only playback state (track id, position, play/pause state, and volume) to local storage. The injected PARA game runtime reads the same IndexedDB music library and resumes the local track inside the game document.
++
++- In-game Control Center now shows the real PARA Music track and provides Previous, Play/Pause, Next, and volume controls.
++- Suspending a game to PARA Home hands the current song position to the suspended Home shell, then syncs it back when the game resumes.
++- The normal PARA menu soundtrack remains silent whenever PARA Music owns the background-music lane, including while the local track is paused.
++- PARA Music is explicitly excluded from isolated gameplay audio capture. If the browser only offers a mixed tab-audio track while local music is active, PARA prefers video-only capture rather than baking the user's song into the recording.
++- Browser autoplay policy can still refuse an automatic resume after a full document navigation. In that case, the in-game Music panel shows Play and one user press resumes the already-selected local song.
+ 
+ ## Files added
+ 
+@@ -69,4 +75,5 @@ The cumulative ZIP also retains the V58 capture/CSP files from the latest hotfix
+ - V58 blob-media CSP regression passed.
+ - V58 capture-fidelity regression passed.
+ - V59 local-only Music regression passed.
++- V59.1 in-game Music handoff regression passed.
+ - V59 local-music service contains no network request path.
+diff --git a/PARA_MUSIC_IN_GAME_V59_1.md b/PARA_MUSIC_IN_GAME_V59_1.md
+new file mode 100644
+index 0000000..49052ec
+--- /dev/null
++++ b/PARA_MUSIC_IN_GAME_V59_1.md
+@@ -0,0 +1,33 @@
++# PARA V59.1 — Music In Game
++
++V59.1 extends the local-only PARA Music player into published WEB games without reopening the gameplay-recorder architecture.
++
++## Behavior
++
++- Start a local song in PARA Music, then launch a WEB game.
++- PARA stores only local playback state in `localStorage` and keeps the audio bytes in the existing `para-music-library-v1` IndexedDB database.
++- The same-origin injected game runtime reopens that local track and resumes at the saved position.
++- In-game PARA Control Center → Music shows the actual track with Previous, Play/Pause, Next, Volume Down, and Volume Up.
++- Returning to PARA Home restores the same track and position.
++- Suspending/resuming a game also hands the song between the game runtime and suspended Home shell.
++- PARA's own menu soundtrack stays muted whenever the local Music session is active, even when the local track is paused. It returns only when the local Music session is stopped/cleared.
++
++## Recorder protection
++
++PARA Music is kept out of the game's isolated HTML/WebAudio capture path. When a browser provides only mixed tab audio while local music is active, PARA avoids that mixed track rather than recording the user's song into the gameplay video.
++
++## Browser limitation
++
++A full page navigation destroys the previous document's `<audio>` element, so the browser build performs a local state handoff rather than literally preserving the same audio node. Usually playback resumes automatically. If browser autoplay policy blocks that resume, opening Control Center → Music and pressing Play resumes the selected track.
++
++## Validation
++
++- Home local-music JS syntax: passed.
++- Media-session JS syntax: passed.
++- Python API compile: passed.
++- Injected game-runtime JS extraction + `node --check`: passed.
++- V58 HUD recorder regression: passed.
++- V58 CSP regression: passed.
++- V58 capture-fidelity regression: passed.
++- V59 local-only Music regression: passed.
++- V59.1 in-game Music/recorder-isolation regression: passed.
+diff --git a/apps/para-home/src/services/local-music.js b/apps/para-home/src/services/local-music.js
+index 00e35bc..73622b5 100644
+--- a/apps/para-home/src/services/local-music.js
++++ b/apps/para-home/src/services/local-music.js
+@@ -8,6 +8,7 @@ const DB_NAME = "para-music-library-v1";
+ const DB_VERSION = 1;
+ const TRACK_STORE = "tracks";
+ const MUSIC_EVENT = "para-local-music-change";
++const HANDOFF_KEY = "para.music.handoff.v1";
+ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "webm"]);
+ 
+ let dbPromise = null;
+@@ -17,6 +18,8 @@ let queue = [];
+ let currentTrack = null;
+ let lastError = "";
+ let nativeHandlersInstalled = false;
++let restoringSession = null;
++let lastHandoffWrite = 0;
+ 
+ function openDb() {
+   if (dbPromise) return dbPromise;
+@@ -162,20 +165,23 @@ function ensureAudio() {
+     lastError = "";
+     updateMediaSession({ playbackState: "playing" });
+     syncNativeMediaSession();
++    persistMusicHandoff(true);
+     announce();
+   });
+   audio.addEventListener("pause", () => {
+     if (currentTrack) updateMediaSession({ playbackState: "paused" });
+     syncNativeMediaSession();
++    persistMusicHandoff(true);
+     announce();
+   });
+-  audio.addEventListener("timeupdate", announce);
++  audio.addEventListener("timeupdate", () => { persistMusicHandoff(false); announce(); });
+   audio.addEventListener("durationchange", announce);
+   audio.addEventListener("loadedmetadata", announce);
+   audio.addEventListener("ended", () => { void nextLocalMusic(); });
+   audio.addEventListener("error", () => {
+     lastError = "This browser could not decode that local audio file.";
+     updateMediaSession({ playbackState: "paused" });
++    persistMusicHandoff(true);
+     announce();
+   });
+   installNativeHandlers();
+@@ -251,6 +257,82 @@ function installNativeHandlers() {
+   });
+ }
+ 
++
++function readMusicHandoff() {
++  try {
++    const value = JSON.parse(localStorage.getItem(HANDOFF_KEY) || "null");
++    return value && typeof value === "object" ? value : null;
++  } catch { return null; }
++}
++
++function persistMusicHandoff(force = false) {
++  const now = Date.now();
++  if (!force && now - lastHandoffWrite < 850) return;
++  lastHandoffWrite = now;
++  try {
++    const state = localMusicState();
++    localStorage.setItem(HANDOFF_KEY, JSON.stringify({
++      version: 1,
++      active: state.active,
++      currentId: state.currentId,
++      title: state.title,
++      artist: state.artist,
++      fileName: state.fileName,
++      playbackState: state.playbackState,
++      currentTime: state.currentTime,
++      volume: state.volume,
++      updatedAt: now,
++    }));
++  } catch { /* Local handoff is best effort. */ }
++}
++
++function waitForAudioMetadata(player, timeoutMs = 2600) {
++  if (player.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
++  return new Promise((resolve) => {
++    const finish = () => { clearTimeout(timer); player.removeEventListener("loadedmetadata", finish); resolve(); };
++    const timer = setTimeout(finish, timeoutMs);
++    player.addEventListener("loadedmetadata", finish, { once: true });
++  });
++}
++
++export async function restoreLocalMusicSession({ attemptPlayback = true } = {}) {
++  if (currentTrack) return localMusicState();
++  if (restoringSession) return restoringSession;
++  restoringSession = (async () => {
++    const saved = readMusicHandoff();
++    if (!saved?.active || !saved.currentId) return localMusicState();
++    const tracks = await listLocalMusic();
++    queue = [...tracks];
++    const track = queue.find((item) => item.id === saved.currentId);
++    if (!track?.blob) return localMusicState();
++    const player = ensureAudio();
++    currentTrack = track;
++    lastError = "";
++    revokeTrackUrl();
++    objectUrl = URL.createObjectURL(track.blob);
++    player.src = objectUrl;
++    player.volume = Math.max(0, Math.min(1, Number(saved.volume ?? 70) / 100));
++    player.load();
++    registerCurrentSession(saved.playbackState === "playing" ? "paused" : "paused");
++    await waitForAudioMetadata(player);
++    if (Number.isFinite(Number(saved.currentTime))) {
++      try { player.currentTime = Math.max(0, Math.min(Number(player.duration || saved.currentTime), Number(saved.currentTime))); } catch { /* Non-seekable audio. */ }
++    }
++    syncNativeMediaSession();
++    announce();
++    if (attemptPlayback && saved.playbackState === "playing") {
++      try { await player.play(); }
++      catch {
++        lastError = "Press Play to continue this local song.";
++        announce();
++      }
++    }
++    persistMusicHandoff(true);
++    return localMusicState();
++  })().finally(() => { restoringSession = null; });
++  return restoringSession;
++}
++
+ export function setMusicQueue(tracks = []) {
+   queue = Array.isArray(tracks) ? [...tracks] : [];
+   announce();
+@@ -271,6 +353,7 @@ export async function playLocalMusicTrack(id) {
+     player.load();
+     registerCurrentSession("paused");
+     syncNativeMediaSession();
++    persistMusicHandoff(true);
+     announce();
+   }
+   await player.play();
+@@ -323,6 +406,7 @@ export function seekLocalMusic(seconds) {
+   const player = ensureAudio();
+   const duration = Number.isFinite(player.duration) ? player.duration : 0;
+   player.currentTime = Math.max(0, Math.min(duration || Number(seconds || 0), Number(seconds || 0)));
++  persistMusicHandoff(true);
+   announce();
+   return player.currentTime;
+ }
+@@ -332,6 +416,7 @@ export function setLocalMusicVolume(percent) {
+   const value = Math.max(0, Math.min(100, Number(percent) || 0));
+   player.volume = value / 100;
+   if (currentTrack) updateMediaSession({ volume: value });
++  persistMusicHandoff(true);
+   announce();
+   return value;
+ }
+@@ -347,6 +432,7 @@ export function stopLocalMusic() {
+   lastError = "";
+   clearMediaSession();
+   syncNativeMediaSession();
++  persistMusicHandoff(true);
+   announce();
+ }
+ 
+@@ -367,4 +453,11 @@ export function localMusicState() {
+   };
+ }
+ 
+-export { MUSIC_EVENT };
++if (typeof window !== "undefined") {
++  window.addEventListener("pagehide", () => persistMusicHandoff(true));
++  const restore = () => { void restoreLocalMusicSession().catch(() => {}); };
++  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restore, { once: true });
++  else queueMicrotask(restore);
++}
++
++export { MUSIC_EVENT, HANDOFF_KEY };
+diff --git a/apps/para-home/src/services/media-session.js b/apps/para-home/src/services/media-session.js
+index 3ba5d81..ac857c5 100644
+--- a/apps/para-home/src/services/media-session.js
++++ b/apps/para-home/src/services/media-session.js
+@@ -28,7 +28,10 @@ function announce() {
+ }
+ 
+ function syncHomeMusic() {
+-  if (session.active && session.playbackState === "playing") suspendMenuMusic({ duration: 420 });
++  // PARA Music owns the background-music lane even while paused. Do not let
++  // the normal PARA menu soundtrack start underneath a user's local library.
++  const localMusicOwnsBackground = session.active && session.appId === "para:music";
++  if (localMusicOwnsBackground || (session.active && session.playbackState === "playing")) suspendMenuMusic({ duration: 420 });
+   else resumeMenuMusic({ duration: 520 });
+ }
+ 
+diff --git a/services/api/server.py b/services/api/server.py
+index ceb1e64..083d533 100644
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -1459,6 +1459,220 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+   let suspendShellHost = null;
+   let paraGameDocumentTitle = GAME_TITLE;
+ 
++  const PARA_MUSIC_DB_NAME = 'para-music-library-v1';
++  const PARA_MUSIC_TRACK_STORE = 'tracks';
++  const PARA_MUSIC_HANDOFF_KEY = 'para.music.handoff.v1';
++  let paraMusicDbPromise = null;
++  let paraMusicAudio = null;
++  let paraMusicObjectUrl = '';
++  let paraMusicQueue = [];
++  let paraMusicTrack = null;
++  let paraMusicError = '';
++  let paraMusicSuppressPausePersist = false;
++  let paraMusicLastWrite = 0;
++  let paraMusicRestorePromise = null;
++
++  function readParaMusicHandoff() {
++    try {
++      const value = JSON.parse(localStorage.getItem(PARA_MUSIC_HANDOFF_KEY) || 'null');
++      return value && typeof value === 'object' ? value : null;
++    } catch (_) { return null; }
++  }
++
++  function paraMusicState() {
++    return {
++      active: Boolean(paraMusicTrack),
++      currentId: paraMusicTrack?.id || '',
++      title: paraMusicTrack?.title || paraMusicTrack?.fileName || 'Nothing playing',
++      artist: paraMusicTrack?.artist || '',
++      fileName: paraMusicTrack?.fileName || '',
++      playbackState: paraMusicTrack ? (paraMusicAudio && !paraMusicAudio.paused ? 'playing' : 'paused') : 'none',
++      currentTime: Number.isFinite(paraMusicAudio?.currentTime) ? paraMusicAudio.currentTime : 0,
++      duration: Number.isFinite(paraMusicAudio?.duration) ? paraMusicAudio.duration : 0,
++      volume: Math.round((paraMusicAudio?.volume ?? .7) * 100),
++      error: paraMusicError,
++    };
++  }
++
++  function writeParaMusicHandoff(force = false, playbackStateOverride = '') {
++    const now = Date.now();
++    if (!force && now - paraMusicLastWrite < 850) return;
++    paraMusicLastWrite = now;
++    const state = paraMusicState();
++    try {
++      localStorage.setItem(PARA_MUSIC_HANDOFF_KEY, JSON.stringify({
++        version: 1,
++        active: state.active,
++        currentId: state.currentId,
++        title: state.title,
++        artist: state.artist,
++        fileName: state.fileName,
++        playbackState: playbackStateOverride || state.playbackState,
++        currentTime: state.currentTime,
++        volume: state.volume,
++        updatedAt: now,
++      }));
++    } catch (_) {}
++  }
++
++  function openParaMusicDb() {
++    if (paraMusicDbPromise) return paraMusicDbPromise;
++    if (!globalThis.indexedDB) return Promise.reject(new Error('Local music storage is unavailable.'));
++    paraMusicDbPromise = new Promise((resolve, reject) => {
++      const request = indexedDB.open(PARA_MUSIC_DB_NAME, 1);
++      request.onsuccess = () => resolve(request.result);
++      request.onerror = () => reject(request.error || new Error('PARA Music storage could not open.'));
++      request.onupgradeneeded = () => {
++        const db = request.result;
++        if (!db.objectStoreNames.contains(PARA_MUSIC_TRACK_STORE)) {
++          const store = db.createObjectStore(PARA_MUSIC_TRACK_STORE, { keyPath: 'id' });
++          store.createIndex('addedAt', 'addedAt', { unique: false });
++        }
++      };
++    });
++    return paraMusicDbPromise;
++  }
++
++  async function listParaMusicTracks() {
++    const db = await openParaMusicDb();
++    return new Promise((resolve, reject) => {
++      const transaction = db.transaction(PARA_MUSIC_TRACK_STORE, 'readonly');
++      const request = transaction.objectStore(PARA_MUSIC_TRACK_STORE).getAll();
++      request.onsuccess = () => {
++        const tracks = Array.isArray(request.result) ? request.result : [];
++        tracks.sort((a, b) => Number(a.addedAt || 0) - Number(b.addedAt || 0));
++        resolve(tracks);
++      };
++      request.onerror = () => reject(request.error || new Error('PARA Music could not read the local library.'));
++    });
++  }
++
++  function revokeParaMusicUrl() {
++    if (paraMusicObjectUrl) URL.revokeObjectURL(paraMusicObjectUrl);
++    paraMusicObjectUrl = '';
++  }
++
++  function ensureParaMusicAudio() {
++    if (paraMusicAudio) return paraMusicAudio;
++    paraMusicAudio = document.createElement('audio');
++    paraMusicAudio.id = 'para-game-local-music-audio';
++    paraMusicAudio.dataset.paraLocalMusic = 'true';
++    paraMusicAudio.preload = 'metadata';
++    paraMusicAudio.volume = .7;
++    paraMusicAudio.style.display = 'none';
++    (document.body || document.documentElement).append(paraMusicAudio);
++    paraMusicAudio.addEventListener('play', () => { paraMusicError = ''; writeParaMusicHandoff(true); if (contextName === 'music') showContext('music'); });
++    paraMusicAudio.addEventListener('pause', () => { if (!paraMusicSuppressPausePersist) writeParaMusicHandoff(true); if (contextName === 'music') showContext('music'); });
++    paraMusicAudio.addEventListener('timeupdate', () => writeParaMusicHandoff(false));
++    paraMusicAudio.addEventListener('ended', () => { void nextParaMusicTrack(); });
++    paraMusicAudio.addEventListener('error', () => {
++      paraMusicError = 'This browser could not decode that local audio file.';
++      writeParaMusicHandoff(true);
++      if (contextName === 'music') showContext('music');
++    });
++    return paraMusicAudio;
++  }
++
++  function waitForParaMusicMetadata(player, timeoutMs = 2600) {
++    if (player.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
++    return new Promise((resolve) => {
++      const finish = () => { clearTimeout(timer); player.removeEventListener('loadedmetadata', finish); resolve(); };
++      const timer = setTimeout(finish, timeoutMs);
++      player.addEventListener('loadedmetadata', finish, { once: true });
++    });
++  }
++
++  async function loadParaMusicTrack(id, { currentTime = 0, volume = null, attemptPlayback = true } = {}) {
++    if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
++    const track = paraMusicQueue.find((item) => item.id === id);
++    if (!track?.blob) throw new Error('That local music file is no longer available.');
++    const player = ensureParaMusicAudio();
++    if (paraMusicTrack?.id !== track.id) {
++      revokeParaMusicUrl();
++      paraMusicTrack = track;
++      paraMusicError = '';
++      paraMusicObjectUrl = URL.createObjectURL(track.blob);
++      player.src = paraMusicObjectUrl;
++      player.load();
++      await waitForParaMusicMetadata(player);
++    }
++    if (volume != null) player.volume = Math.max(0, Math.min(1, Number(volume) / 100));
++    if (Number.isFinite(Number(currentTime))) {
++      try { player.currentTime = Math.max(0, Math.min(Number(player.duration || currentTime), Number(currentTime))); } catch (_) {}
++    }
++    if (attemptPlayback) {
++      try { await player.play(); }
++      catch (_) { paraMusicError = 'Press Play in PARA Control Center to continue.'; }
++    }
++    writeParaMusicHandoff(true);
++    return paraMusicState();
++  }
++
++  async function restoreParaMusicFromHandoff({ attemptPlayback = true, forceSync = false } = {}) {
++    if (paraMusicRestorePromise && !forceSync) return paraMusicRestorePromise;
++    const job = (async () => {
++      const saved = readParaMusicHandoff();
++      if (!saved?.active || !saved.currentId) return paraMusicState();
++      if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
++      const sameTrack = paraMusicTrack?.id === saved.currentId;
++      if (!sameTrack) {
++        return loadParaMusicTrack(saved.currentId, {
++          currentTime: Number(saved.currentTime || 0),
++          volume: Number(saved.volume ?? 70),
++          attemptPlayback: attemptPlayback && saved.playbackState === 'playing',
++        });
++      }
++      const player = ensureParaMusicAudio();
++      player.volume = Math.max(0, Math.min(1, Number(saved.volume ?? 70) / 100));
++      if (forceSync && Number.isFinite(Number(saved.currentTime))) {
++        try { player.currentTime = Math.max(0, Math.min(Number(player.duration || saved.currentTime), Number(saved.currentTime))); } catch (_) {}
++      }
++      if (saved.playbackState === 'playing' && attemptPlayback) {
++        try { await player.play(); } catch (_) { paraMusicError = 'Press Play in PARA Control Center to continue.'; }
++      } else if (saved.playbackState !== 'playing' && !player.paused) {
++        player.pause();
++      }
++      writeParaMusicHandoff(true);
++      return paraMusicState();
++    })();
++    paraMusicRestorePromise = job;
++    try { return await job; }
++    finally { if (paraMusicRestorePromise === job) paraMusicRestorePromise = null; }
++  }
++
++  async function toggleParaMusic() {
++    const saved = readParaMusicHandoff();
++    if (!paraMusicTrack && saved?.active) await restoreParaMusicFromHandoff({ attemptPlayback: false });
++    const player = ensureParaMusicAudio();
++    if (!paraMusicTrack) return paraMusicState();
++    if (player.paused) {
++      try { await player.play(); paraMusicError = ''; }
++      catch (_) { paraMusicError = 'Playback was blocked. Press Play again.'; }
++    } else player.pause();
++    writeParaMusicHandoff(true);
++    return paraMusicState();
++  }
++
++  async function nextParaMusicTrack(direction = 1) {
++    if (!paraMusicQueue.length) paraMusicQueue = await listParaMusicTracks();
++    if (!paraMusicQueue.length) return paraMusicState();
++    const index = paraMusicTrack ? paraMusicQueue.findIndex((track) => track.id === paraMusicTrack.id) : -1;
++    const nextIndex = index < 0 ? 0 : (index + direction + paraMusicQueue.length) % paraMusicQueue.length;
++    return loadParaMusicTrack(paraMusicQueue[nextIndex].id, { currentTime: 0, volume: paraMusicState().volume, attemptPlayback: true });
++  }
++
++  function setParaMusicVolume(delta) {
++    const player = ensureParaMusicAudio();
++    player.volume = Math.max(0, Math.min(1, player.volume + Number(delta || 0) / 100));
++    writeParaMusicHandoff(true);
++    return paraMusicState().volume;
++  }
++
++  function paraMusicTimeLabel(seconds) {
++    const total = Math.max(0, Math.floor(Number(seconds || 0)));
++    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
++  }
++
+   function rememberGameDocumentTitle() {
+     const current = String(document.title || '').trim();
+     if (current && current !== 'PARA Home') paraGameDocumentTitle = current;
+@@ -1591,11 +1805,19 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+ 
+   function pauseGameMedia() {
+     suspendedMediaState.clear();
++    const musicWasPlaying = Boolean(paraMusicTrack && paraMusicAudio && !paraMusicAudio.paused);
++    if (paraMusicTrack) writeParaMusicHandoff(true, musicWasPlaying ? 'playing' : 'paused');
+     for (const media of document.querySelectorAll('audio,video')) {
+       try {
++        if (media === paraMusicAudio) {
++          paraMusicSuppressPausePersist = true;
++          if (!media.paused) media.pause();
++          paraMusicSuppressPausePersist = false;
++          continue;
++        }
+         suspendedMediaState.set(media, { wasPlaying: !media.paused });
+         if (!media.paused) media.pause();
+-      } catch (_) {}
++      } catch (_) { paraMusicSuppressPausePersist = false; }
+     }
+     suspendedAudioContextState.clear();
+     try {
+@@ -1613,6 +1835,9 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       try { if (state.wasPlaying) void media.play(); } catch (_) {}
+     }
+     suspendedMediaState.clear();
++    // The suspended PARA Home iframe owns the local song while Home is open.
++    // Pull its latest position/volume back into the game after the frame closes.
++    setTimeout(() => { void restoreParaMusicFromHandoff({ attemptPlayback: true, forceSync: true }); }, 40);
+     for (const [context, state] of suspendedAudioContextState) {
+       try { if (state === 'running' && context.state === 'suspended') void context.resume?.(); } catch (_) {}
+     }
+@@ -1765,8 +1990,14 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     if (data.command === 'launch') return switchSuspendedGame(data.storeId);
+   });
+ 
+-  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', () => { rememberGameDocumentTitle(); revealGameAfterLaunch(); }, { once: true });
+-  else { rememberGameDocumentTitle(); revealGameAfterLaunch(); }
++  const bootParaGameRuntime = () => {
++    rememberGameDocumentTitle();
++    revealGameAfterLaunch();
++    void restoreParaMusicFromHandoff({ attemptPlayback: true });
++  };
++  addEventListener('pagehide', () => writeParaMusicHandoff(true));
++  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', bootParaGameRuntime, { once: true });
++  else bootParaGameRuntime();
+ 
+   const map = (value) => {
+     if (typeof value !== 'string') return value;
+@@ -2618,6 +2849,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       for (const track of destination.stream?.getAudioTracks?.() || []) tracks.push(track);
+     }
+     for (const media of document.querySelectorAll('audio,video')) {
++      if (media === paraMusicAudio || media?.dataset?.paraLocalMusic === 'true') continue;
+       try {
+         const stream = media.captureStream?.();
+         for (const track of stream?.getAudioTracks?.() || []) tracks.push(track);
+@@ -2941,9 +3173,13 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+       if (audio) {
+         const displayAudio = display.getAudioTracks?.().find((track) => track.readyState !== 'ended');
+         const gameAudio = capturedGameAudioTracks().find((track) => track.readyState !== 'ended');
+-        const audioTrack = displayAudio || gameAudio;
++        // User-selected PARA Music is a separate background lane and must not be
++        // baked into gameplay recordings. Prefer isolated game audio; if the
++        // browser only exposes a mixed tab-audio track while PARA Music is active,
++        // save video-only rather than recording the user's song.
++        const audioTrack = gameAudio || (!paraMusicTrack ? displayAudio : null);
+         if (audioTrack) {
+-          try { tracks.push(displayAudio ? audioTrack : audioTrack.clone()); } catch (_) {}
++          try { tracks.push(audioTrack === displayAudio ? audioTrack : audioTrack.clone()); } catch (_) {}
+         }
+       }
+ 
+@@ -3417,7 +3653,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+           ${replayActive ? '<button data-context-action="save-replay" data-ms="30000">Last 30s</button><button data-context-action="save-replay" data-ms="60000">Last 1m</button><button data-context-action="save-replay" data-ms="300000">Last 5m</button>' : '<button data-context-action="start-replay">Start Replay</button>'}
+         </div>`;
+     } else if (name === 'sound') {
+-      const media = [...document.querySelectorAll('audio,video')];
++      const media = [...document.querySelectorAll('audio,video')].filter((el) => el !== paraMusicAudio);
+       const muted = media.length && media.every((el) => el.muted);
+       context.innerHTML = `<div class="contextCopy"><span>Sound</span><strong>${muted ? 'Muted' : 'Playing'}</strong><small>${media.length ? 'Game audio output' : 'No HTML media output detected'}</small></div><div class="contextActions"><button data-context-action="toggle-mute">${muted ? 'Unmute' : 'Mute'}</button></div>`;
+     } else if (name === 'controller') {
+@@ -3468,7 +3704,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+         if (contextFocusActive) syncFocus(focusedIndex, { refreshContext: false });
+       });
+     } else if (name === 'music') {
+-      context.innerHTML = `<div class="contextCopy"><span>Now Playing</span><strong>No separate media session</strong><small>Game audio remains under Sound.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
++      const music = paraMusicState();
++      const saved = readParaMusicHandoff();
++      if (!music.active && saved?.active) {
++        context.innerHTML = `<div class="contextCopy"><span>PARA Music</span><strong>${escapeMarkup(saved.title || saved.fileName || 'Local track')}</strong><small>Loading local music…</small></div>`;
++        void restoreParaMusicFromHandoff({ attemptPlayback: saved.playbackState === 'playing' }).then(() => { if (contextName === 'music') showContext('music'); });
++      } else if (music.active) {
++        const status = music.playbackState === 'playing' ? 'Playing' : 'Paused';
++        const detail = [music.artist || music.fileName || 'Local file', `${paraMusicTimeLabel(music.currentTime)} / ${paraMusicTimeLabel(music.duration)}`, `Vol ${music.volume}%`].filter(Boolean).join(' · ');
++        context.innerHTML = `<div class="contextCopy"><span>PARA Music · ${status}</span><strong>${escapeMarkup(music.title)}</strong><small>${escapeMarkup(detail)}${music.error ? ` · ${escapeMarkup(music.error)}` : ''}</small></div><div class="contextActions"><button data-context-action="music-previous">Previous</button><button data-context-action="music-toggle">${music.playbackState === 'playing' ? 'Pause' : 'Play'}</button><button data-context-action="music-next">Next</button><button data-context-action="music-volume-down">Vol −</button><button data-context-action="music-volume-up">Vol +</button></div>`;
++      } else {
++        context.innerHTML = `<div class="contextCopy"><span>PARA Music</span><strong>No local song selected</strong><small>Choose music from your local PARA Music library.</small></div><div class="contextActions"><button data-context-action="music-open">Open Music</button></div>`;
++      }
+     } else if (name === 'microphone') {
+       context.innerHTML = `<div class="contextCopy"><span>Microphone</span><strong>Open microphone controls</strong><small>PARA does not invent microphone state when host data is unavailable.</small></div><div class="contextActions"><button data-context-action="audio-settings">Audio Settings</button></div>`;
+     } else if (name === 'power') {
+@@ -3717,6 +3964,12 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     if (contextAction === 'downloads-open') return leaveGame('/#/downloads');
+     if (contextAction === 'network-settings') return leaveGame('/#/network');
+     if (contextAction === 'audio-settings') return leaveGame('/#/audio-settings');
++    if (contextAction === 'music-open') return leaveGame('/#/music');
++    if (contextAction === 'music-toggle') { await toggleParaMusic(); return showContext('music', true); }
++    if (contextAction === 'music-previous') { await nextParaMusicTrack(-1); return showContext('music', true); }
++    if (contextAction === 'music-next') { await nextParaMusicTrack(1); return showContext('music', true); }
++    if (contextAction === 'music-volume-down') { setParaMusicVolume(-10); return showContext('music', true); }
++    if (contextAction === 'music-volume-up') { setParaMusicVolume(10); return showContext('music', true); }
+     if (contextAction === 'para-input-toggle') {
+       const status = window.PARA?.input?.status?.() || {};
+       if (status.requested) window.PARA?.input?.disableForThisGame?.();
+@@ -3747,7 +4000,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
+     if (contextAction === 'start-replay') return startReplay();
+     if (contextAction === 'save-replay') { closeShell(); return saveReplay(Number(button.dataset.ms || 30000)); }
+     if (contextAction === 'toggle-mute') {
+-      const media = [...document.querySelectorAll('audio,video')];
++      const media = [...document.querySelectorAll('audio,video')].filter((el) => el !== paraMusicAudio);
+       const shouldMute = !media.length || !media.every((el) => el.muted);
+       media.forEach((el) => { el.muted = shouldMute; });
+       showContext('sound');
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index 7270662..f07d523 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -950,3 +950,38 @@ class RepositoryTests(unittest.TestCase):
+         self.assertNotIn('/api/', service)
+         self.assertIn('.music-import-zone', styles)
+         self.assertIn('.music-now-playing', styles)
++
++    def test_v59_1_music_handoff_plays_in_web_games_and_stays_out_of_recordings(self):
++        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
++        media_session = (ROOT / "apps/para-home/src/services/media-session.js").read_text(encoding="utf-8")
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++
++        for marker in [
++            'para.music.handoff.v1',
++            'persistMusicHandoff',
++            'restoreLocalMusicSession',
++            'window.addEventListener("pagehide"',
++        ]:
++            self.assertIn(marker, service)
++
++        self.assertIn('session.appId === "para:music"', media_session)
++        self.assertIn('localMusicOwnsBackground', media_session)
++
++        for marker in [
++            "PARA_MUSIC_DB_NAME = 'para-music-library-v1'",
++            "PARA_MUSIC_HANDOFF_KEY = 'para.music.handoff.v1'",
++            "restoreParaMusicFromHandoff",
++            "para-game-local-music-audio",
++            'data-context-action="music-previous"',
++            'data-context-action="music-toggle"',
++            'data-context-action="music-next"',
++            'data-context-action="music-volume-down"',
++            'data-context-action="music-volume-up"',
++            "media === paraMusicAudio",
++            "media?.dataset?.paraLocalMusic === 'true'",
++            "const audioTrack = gameAudio || (!paraMusicTrack ? displayAudio : null);",
++        ]:
++            self.assertIn(marker, server)
++
++        self.assertNotIn("No separate media session", server)
++

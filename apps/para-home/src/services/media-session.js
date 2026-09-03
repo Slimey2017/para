@@ -28,7 +28,10 @@ function announce() {
 }
 
 function syncHomeMusic() {
-  if (session.active && session.playbackState === "playing") suspendMenuMusic({ duration: 420 });
+  // PARA Music owns the background-music lane even while paused. Do not let
+  // the normal PARA menu soundtrack start underneath a user's local library.
+  const localMusicOwnsBackground = session.active && session.appId === "para:music";
+  if (localMusicOwnsBackground || (session.active && session.playbackState === "playing")) suspendMenuMusic({ duration: 420 });
   else resumeMenuMusic({ duration: 520 });
 }
 

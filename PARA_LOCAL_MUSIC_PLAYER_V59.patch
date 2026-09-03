@@ -1,0 +1,753 @@
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/src/app.js b/apps/para-home/src/app.js
+--- a/apps/para-home/src/app.js	2026-09-03 14:20:30.000000000 +0000
++++ b/apps/para-home/src/app.js	2026-09-03 14:48:33.675323009 +0000
+@@ -17,6 +17,7 @@
+ } from "./screens/libraries.js";
+ import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
+ import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
++import { musicScreen, activateMusic } from "./screens/music.js";
+ import { capturePlaybackBlob, capturePlaybackMime, capturePlaybackSegments, isSegmentedCapture, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
+ import {
+   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
+@@ -90,6 +91,7 @@
+   browser: browserScreen,
+   games: gamesScreen,
+   "media-gallery": mediaGalleryScreen,
++  music: musicScreen,
+   achievements: achievementsScreen,
+   demos: demosScreen,
+   parastore: paraStoreScreen,
+@@ -464,6 +466,8 @@
+     });
+   } else if (route === "media-gallery") {
+     void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
++  } else if (route === "music") {
++    cleanupScreen = activateMusic({ focus });
+   } else if (route === "achievements") {
+     void activateAchievements({ focus }).then((cleanup) => { if (router.current() === "achievements") cleanupScreen = cleanup; });
+   } else if (route === "storage") {
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/src/screens/libraries.js b/apps/para-home/src/screens/libraries.js
+--- a/apps/para-home/src/screens/libraries.js	2026-09-03 14:48:58.424763244 +0000
++++ b/apps/para-home/src/screens/libraries.js	2026-09-03 14:46:50.735565957 +0000
+@@ -7,7 +7,7 @@
+   const route = application.launch?.kind === "route" ? `data-route="${escapeHtml(application.launch.route)}"` : `data-action="launch-system-app" data-app-id="${escapeHtml(application.id)}" data-app-name="${name}"`;
+   const iconKind = application.iconType || application.icon || "";
+   const systemIcons = {
+-    friends: "✦", achievements: "◇", media: "▣", files: "", store: "P", settings: "⚙",
++    friends: "✦", achievements: "◇", media: "▣", music: "♫", files: "", store: "P", settings: "⚙",
+   };
+   const icon = application.icon && String(application.icon).includes("/")
+     ? `<img src="${application.icon}" alt="" />`
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/src/screens/music.js b/apps/para-home/src/screens/music.js
+--- a/apps/para-home/src/screens/music.js	1970-01-01 00:00:00.000000000 +0000
++++ b/apps/para-home/src/screens/music.js	2026-09-03 14:48:17.368116374 +0000
+@@ -0,0 +1,234 @@
++import { escapeHtml } from "../services/para-api.js";
++import { page } from "../ui/components.js";
++import {
++  MUSIC_EVENT,
++  clearLocalMusic,
++  importLocalMusic,
++  listLocalMusic,
++  localMusicState,
++  nextLocalMusic,
++  playLocalMusicTrack,
++  previousLocalMusic,
++  removeLocalMusic,
++  seekLocalMusic,
++  setLocalMusicVolume,
++  setMusicQueue,
++  toggleLocalMusic,
++} from "../services/local-music.js";
++
++function durationLabel(seconds = 0) {
++  const value = Math.max(0, Number(seconds) || 0);
++  const minutes = Math.floor(value / 60);
++  const remainder = Math.floor(value % 60).toString().padStart(2, "0");
++  return `${minutes}:${remainder}`;
++}
++
++function fileSizeLabel(bytes = 0) {
++  const value = Math.max(0, Number(bytes) || 0);
++  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
++  return `${(value / (1024 * 1024)).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
++}
++
++function nowPlayingMarkup(state) {
++  const active = Boolean(state.active);
++  return `<section class="music-now-playing" data-music-now-playing>
++    <div class="music-now-playing__art" aria-hidden="true"><span>♫</span></div>
++    <div class="music-now-playing__copy">
++      <span>NOW PLAYING</span>
++      <h2 data-music-title>${escapeHtml(active ? state.title : "Nothing playing")}</h2>
++      <p data-music-artist>${escapeHtml(active ? (state.artist || state.fileName || "Local file") : "Choose a song from your local library")}</p>
++    </div>
++    <div class="music-transport">
++      <button type="button" data-music-previous aria-label="Previous track">◀◀</button>
++      <button type="button" class="music-transport__primary" data-music-toggle aria-label="Play or pause">${state.playbackState === "playing" ? "Ⅱ" : "▶"}</button>
++      <button type="button" data-music-next aria-label="Next track">▶▶</button>
++    </div>
++    <div class="music-timeline">
++      <span data-music-time-current>${durationLabel(state.currentTime)}</span>
++      <input type="range" min="0" max="${Math.max(1, state.duration || 1)}" step="0.1" value="${Math.min(state.currentTime || 0, state.duration || 1)}" data-music-seek aria-label="Song position" ${active ? "" : "disabled"}>
++      <span data-music-time-duration>${durationLabel(state.duration)}</span>
++    </div>
++    <label class="music-volume"><span>VOLUME</span><input type="range" min="0" max="100" step="2" value="${state.volume}" data-music-volume aria-label="Music volume"><b data-music-volume-output>${state.volume}%</b></label>
++    <p class="music-player-error" data-music-error ${state.error ? "" : "hidden"}>${escapeHtml(state.error || "")}</p>
++  </section>`;
++}
++
++function libraryMarkup(tracks, state) {
++  if (!tracks.length) {
++    return `<div class="music-library-empty" data-music-empty><span>♫</span><h2>No music yet</h2><p>Drag local audio files here or choose Find Files.</p></div>`;
++  }
++  return `<div class="music-track-list" data-music-track-list>${tracks.map((track, index) => {
++    const selected = state.currentId === track.id;
++    const subtitle = [track.artist, track.fileName].filter(Boolean).join(" · ");
++    return `<article class="music-track${selected ? " is-playing" : ""}" data-music-row="${escapeHtml(track.id)}">
++      <button type="button" class="music-track__main" data-music-track="${escapeHtml(track.id)}" ${index === 0 ? "data-autofocus='true'" : ""}>
++        <span class="music-track__number">${selected && state.playbackState === "playing" ? "♫" : index + 1}</span>
++        <span class="music-track__copy"><strong>${escapeHtml(track.title || track.fileName || "Local track")}</strong><small>${escapeHtml(subtitle || "Local file")}</small></span>
++        <span class="music-track__size">${fileSizeLabel(track.size)}</span>
++      </button>
++      <button type="button" class="music-track__remove" data-music-remove="${escapeHtml(track.id)}" aria-label="Remove ${escapeHtml(track.title || track.fileName || "track")}">×</button>
++    </article>`;
++  }).join("")}</div>`;
++}
++
++export function musicScreen() {
++  const state = localMusicState();
++  return page({
++    title: "Music",
++    description: "Play local music files on PARA. Nothing is uploaded.",
++    eyebrow: "Local player",
++    className: "music-page",
++    body: `<section class="music-app">
++      <div class="music-import-zone" data-music-drop-zone>
++        <input type="file" multiple accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.oga,.opus,.webm" data-music-file-input hidden>
++        <div><span class="music-import-zone__icon">＋</span><div><strong>Drop music files here</strong><small>Local files stay on this browser build of PARA.</small></div></div>
++        <button type="button" class="action-button" data-music-find-files>Find Files</button>
++      </div>
++      <div class="music-layout">
++        <section class="music-library-panel">
++          <header><div><span>LOCAL LIBRARY</span><h2>Your music</h2></div><button type="button" class="music-clear-button" data-music-clear hidden>Clear Library</button></header>
++          <div data-music-library><div class="library-loading"><span></span><strong>Reading local music…</strong></div></div>
++        </section>
++        ${nowPlayingMarkup(state)}
++      </div>
++      <footer class="music-local-note"><span>LOCAL ONLY</span><p>Browser build: drag & drop or Find Files. Future PARA console: PARA Files and USB drives use this same player.</p></footer>
++    </section>`,
++  });
++}
++
++export function activateMusic({ focus } = {}) {
++  const screen = document.querySelector(".music-page");
++  if (!screen) return () => {};
++  const input = screen.querySelector("[data-music-file-input]");
++  const dropZone = screen.querySelector("[data-music-drop-zone]");
++  const library = screen.querySelector("[data-music-library]");
++  const clearButton = screen.querySelector("[data-music-clear]");
++  let tracks = [];
++  let disposed = false;
++
++  const updateNowPlaying = (state = localMusicState()) => {
++    const title = screen.querySelector("[data-music-title]");
++    const artist = screen.querySelector("[data-music-artist]");
++    const toggle = screen.querySelector("[data-music-toggle]");
++    const seek = screen.querySelector("[data-music-seek]");
++    const current = screen.querySelector("[data-music-time-current]");
++    const duration = screen.querySelector("[data-music-time-duration]");
++    const volume = screen.querySelector("[data-music-volume]");
++    const output = screen.querySelector("[data-music-volume-output]");
++    const error = screen.querySelector("[data-music-error]");
++    if (title) title.textContent = state.active ? state.title : "Nothing playing";
++    if (artist) artist.textContent = state.active ? (state.artist || state.fileName || "Local file") : "Choose a song from your local library";
++    if (toggle) toggle.textContent = state.playbackState === "playing" ? "Ⅱ" : "▶";
++    if (seek) {
++      seek.disabled = !state.active;
++      seek.max = String(Math.max(1, state.duration || 1));
++      if (!seek.matches(":active")) seek.value = String(Math.min(state.currentTime || 0, state.duration || 1));
++    }
++    if (current) current.textContent = durationLabel(state.currentTime);
++    if (duration) duration.textContent = durationLabel(state.duration);
++    if (volume && !volume.matches(":active")) volume.value = String(state.volume);
++    if (output) output.textContent = `${state.volume}%`;
++    if (error) {
++      error.hidden = !state.error;
++      error.textContent = state.error || "";
++    }
++    screen.querySelectorAll("[data-music-row]").forEach((row) => {
++      const selected = row.dataset.musicRow === state.currentId;
++      row.classList.toggle("is-playing", selected);
++      const number = row.querySelector(".music-track__number");
++      if (number && selected) number.textContent = state.playbackState === "playing" ? "♫" : "▶";
++      else if (number) number.textContent = String(tracks.findIndex((track) => track.id === row.dataset.musicRow) + 1);
++    });
++  };
++
++  const renderLibrary = () => {
++    if (!library) return;
++    const state = localMusicState();
++    library.innerHTML = libraryMarkup(tracks, state);
++    if (clearButton) clearButton.hidden = !tracks.length;
++    updateNowPlaying(state);
++  };
++
++  const refresh = async ({ focusFirst = false } = {}) => {
++    try {
++      tracks = await listLocalMusic();
++      setMusicQueue(tracks);
++      if (disposed) return;
++      renderLibrary();
++      if (focusFirst) focus?.focusFirst?.();
++    } catch (error) {
++      if (disposed || !library) return;
++      library.innerHTML = `<div class="music-library-empty"><span>!</span><h2>Local library unavailable</h2><p>${escapeHtml(error?.message || "PARA Music could not open browser storage.")}</p></div>`;
++    }
++  };
++
++  const importFiles = async (files) => {
++    dropZone?.classList.add("is-importing");
++    try {
++      const result = await importLocalMusic(files);
++      tracks = result.tracks;
++      if (!disposed) renderLibrary();
++    } finally {
++      dropZone?.classList.remove("is-importing");
++      if (input) input.value = "";
++    }
++  };
++
++  const onClick = (event) => {
++    const find = event.target.closest("[data-music-find-files]");
++    if (find) { input?.click(); return; }
++    const track = event.target.closest("[data-music-track]");
++    if (track) { void playLocalMusicTrack(track.dataset.musicTrack).catch(() => updateNowPlaying()); return; }
++    const remove = event.target.closest("[data-music-remove]");
++    if (remove) { void removeLocalMusic(remove.dataset.musicRemove).then((next) => { tracks = next; renderLibrary(); }); return; }
++    if (event.target.closest("[data-music-toggle]")) { void toggleLocalMusic(); return; }
++    if (event.target.closest("[data-music-previous]")) { void previousLocalMusic(); return; }
++    if (event.target.closest("[data-music-next]")) { void nextLocalMusic(); return; }
++    if (event.target.closest("[data-music-clear]")) { void clearLocalMusic().then((next) => { tracks = next; renderLibrary(); }); }
++  };
++
++  const onInput = (event) => {
++    if (event.target.matches("[data-music-seek]")) seekLocalMusic(Number(event.target.value || 0));
++    if (event.target.matches("[data-music-volume]")) setLocalMusicVolume(Number(event.target.value || 0));
++  };
++
++  const onChange = (event) => {
++    if (event.target.matches("[data-music-file-input]")) void importFiles(event.target.files || []);
++  };
++
++  const dragGuard = (event) => {
++    event.preventDefault();
++    event.stopPropagation();
++  };
++  const onDragEnter = (event) => { dragGuard(event); dropZone?.classList.add("is-dragging"); };
++  const onDragLeave = (event) => { dragGuard(event); if (!dropZone?.contains(event.relatedTarget)) dropZone?.classList.remove("is-dragging"); };
++  const onDrop = (event) => {
++    dragGuard(event);
++    dropZone?.classList.remove("is-dragging");
++    void importFiles(event.dataTransfer?.files || []);
++  };
++  const onMusicChange = (event) => updateNowPlaying(event.detail || localMusicState());
++
++  screen.addEventListener("click", onClick);
++  screen.addEventListener("input", onInput);
++  screen.addEventListener("change", onChange);
++  dropZone?.addEventListener("dragenter", onDragEnter);
++  dropZone?.addEventListener("dragover", dragGuard);
++  dropZone?.addEventListener("dragleave", onDragLeave);
++  dropZone?.addEventListener("drop", onDrop);
++  document.addEventListener(MUSIC_EVENT, onMusicChange);
++  void refresh({ focusFirst: true });
++
++  return () => {
++    disposed = true;
++    screen.removeEventListener("click", onClick);
++    screen.removeEventListener("input", onInput);
++    screen.removeEventListener("change", onChange);
++    dropZone?.removeEventListener("dragenter", onDragEnter);
++    dropZone?.removeEventListener("dragover", dragGuard);
++    dropZone?.removeEventListener("dragleave", onDragLeave);
++    dropZone?.removeEventListener("drop", onDrop);
++    document.removeEventListener(MUSIC_EVENT, onMusicChange);
++    // Intentionally do not stop playback. PARA Music is a background system service.
++  };
++}
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/src/services/local-music.js b/apps/para-home/src/services/local-music.js
+--- a/apps/para-home/src/services/local-music.js	1970-01-01 00:00:00.000000000 +0000
++++ b/apps/para-home/src/services/local-music.js	2026-09-03 14:48:17.368259809 +0000
+@@ -0,0 +1,370 @@
++import {
++  clearMediaSession,
++  registerMediaSession,
++  updateMediaSession,
++} from "./media-session.js";
++
++const DB_NAME = "para-music-library-v1";
++const DB_VERSION = 1;
++const TRACK_STORE = "tracks";
++const MUSIC_EVENT = "para-local-music-change";
++const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "webm"]);
++
++let dbPromise = null;
++let audio = null;
++let objectUrl = "";
++let queue = [];
++let currentTrack = null;
++let lastError = "";
++let nativeHandlersInstalled = false;
++
++function openDb() {
++  if (dbPromise) return dbPromise;
++  if (!globalThis.indexedDB) return Promise.reject(new Error("This browser does not provide local music storage."));
++  dbPromise = new Promise((resolve, reject) => {
++    const request = indexedDB.open(DB_NAME, DB_VERSION);
++    request.onupgradeneeded = () => {
++      const db = request.result;
++      if (!db.objectStoreNames.contains(TRACK_STORE)) {
++        const store = db.createObjectStore(TRACK_STORE, { keyPath: "id" });
++        store.createIndex("addedAt", "addedAt", { unique: false });
++      }
++    };
++    request.onsuccess = () => resolve(request.result);
++    request.onerror = () => reject(request.error || new Error("PARA Music could not open local storage."));
++  });
++  return dbPromise;
++}
++
++function transactionDone(transaction) {
++  return new Promise((resolve, reject) => {
++    transaction.oncomplete = () => resolve();
++    transaction.onerror = () => reject(transaction.error || new Error("PARA Music storage failed."));
++    transaction.onabort = () => reject(transaction.error || new Error("PARA Music storage was interrupted."));
++  });
++}
++
++function supportedAudioFile(file) {
++  if (!(file instanceof Blob)) return false;
++  const name = String(file.name || "");
++  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
++  return String(file.type || "").startsWith("audio/") || AUDIO_EXTENSIONS.has(extension);
++}
++
++function stableTrackId(file) {
++  const source = `${file.name || "track"}\u0000${file.size || 0}\u0000${file.lastModified || 0}`;
++  let hash = 2166136261;
++  for (let index = 0; index < source.length; index += 1) {
++    hash ^= source.charCodeAt(index);
++    hash = Math.imul(hash, 16777619);
++  }
++  return `local-${(hash >>> 0).toString(16).padStart(8, "0")}`;
++}
++
++function fileNameMetadata(name = "") {
++  const clean = String(name || "Local track").replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim() || "Local track";
++  const divider = clean.indexOf(" - ");
++  if (divider > 0 && divider < clean.length - 3) {
++    return {
++      artist: clean.slice(0, divider).trim(),
++      title: clean.slice(divider + 3).trim(),
++    };
++  }
++  return { artist: "", title: clean };
++}
++
++function recordForFile(file) {
++  const metadata = fileNameMetadata(file.name);
++  return {
++    id: stableTrackId(file),
++    title: metadata.title,
++    artist: metadata.artist,
++    album: "",
++    fileName: String(file.name || metadata.title),
++    mimeType: String(file.type || ""),
++    size: Number(file.size || 0),
++    lastModified: Number(file.lastModified || 0),
++    addedAt: Date.now(),
++    blob: file,
++  };
++}
++
++export async function listLocalMusic() {
++  const db = await openDb();
++  return new Promise((resolve, reject) => {
++    const transaction = db.transaction(TRACK_STORE, "readonly");
++    const request = transaction.objectStore(TRACK_STORE).getAll();
++    request.onsuccess = () => {
++      const records = Array.isArray(request.result) ? request.result : [];
++      records.sort((a, b) => Number(a.addedAt || 0) - Number(b.addedAt || 0));
++      resolve(records);
++    };
++    request.onerror = () => reject(request.error || new Error("PARA Music could not read the local library."));
++  });
++}
++
++export async function importLocalMusic(files = []) {
++  const incoming = Array.from(files || []);
++  const accepted = incoming.filter(supportedAudioFile);
++  if (!accepted.length) return { imported: 0, skipped: incoming.length, tracks: await listLocalMusic() };
++  const existingTracks = await listLocalMusic();
++  const existingIds = new Set(existingTracks.map((track) => track.id));
++  const batchIds = new Set();
++  const records = accepted.map(recordForFile).filter((record) => {
++    if (existingIds.has(record.id) || batchIds.has(record.id)) return false;
++    batchIds.add(record.id);
++    return true;
++  });
++  if (records.length) {
++    const db = await openDb();
++    const transaction = db.transaction(TRACK_STORE, "readwrite");
++    const store = transaction.objectStore(TRACK_STORE);
++    records.forEach((record) => store.put(record));
++    await transactionDone(transaction);
++  }
++  const tracks = await listLocalMusic();
++  setMusicQueue(tracks);
++  return { imported: records.length, skipped: incoming.length - records.length, tracks };
++}
++
++export async function removeLocalMusic(id) {
++  const db = await openDb();
++  const transaction = db.transaction(TRACK_STORE, "readwrite");
++  transaction.objectStore(TRACK_STORE).delete(String(id || ""));
++  await transactionDone(transaction);
++  if (currentTrack?.id === id) stopLocalMusic();
++  const tracks = await listLocalMusic();
++  setMusicQueue(tracks);
++  return tracks;
++}
++
++export async function clearLocalMusic() {
++  const db = await openDb();
++  const transaction = db.transaction(TRACK_STORE, "readwrite");
++  transaction.objectStore(TRACK_STORE).clear();
++  await transactionDone(transaction);
++  stopLocalMusic();
++  queue = [];
++  announce();
++  return [];
++}
++
++function ensureAudio() {
++  if (audio) return audio;
++  audio = document.createElement("audio");
++  audio.id = "para-local-music-audio";
++  audio.preload = "metadata";
++  audio.volume = 0.7;
++  audio.style.display = "none";
++  document.body.appendChild(audio);
++
++  audio.addEventListener("play", () => {
++    lastError = "";
++    updateMediaSession({ playbackState: "playing" });
++    syncNativeMediaSession();
++    announce();
++  });
++  audio.addEventListener("pause", () => {
++    if (currentTrack) updateMediaSession({ playbackState: "paused" });
++    syncNativeMediaSession();
++    announce();
++  });
++  audio.addEventListener("timeupdate", announce);
++  audio.addEventListener("durationchange", announce);
++  audio.addEventListener("loadedmetadata", announce);
++  audio.addEventListener("ended", () => { void nextLocalMusic(); });
++  audio.addEventListener("error", () => {
++    lastError = "This browser could not decode that local audio file.";
++    updateMediaSession({ playbackState: "paused" });
++    announce();
++  });
++  installNativeHandlers();
++  return audio;
++}
++
++function announce() {
++  document.dispatchEvent(new CustomEvent(MUSIC_EVENT, { detail: localMusicState() }));
++}
++
++function currentIndex() {
++  return currentTrack ? queue.findIndex((track) => track.id === currentTrack.id) : -1;
++}
++
++function revokeTrackUrl() {
++  if (objectUrl) URL.revokeObjectURL(objectUrl);
++  objectUrl = "";
++}
++
++function mediaActions() {
++  return {
++    play: async () => { await playLocalMusic(); },
++    pause: async () => { pauseLocalMusic(); },
++    previous: async () => { await previousLocalMusic(); },
++    next: async () => { await nextLocalMusic(); },
++    setVolume: (value) => { setLocalMusicVolume(Number(value || 0) * 100); },
++    stop: () => { pauseLocalMusic(); },
++  };
++}
++
++function registerCurrentSession(playbackState = "paused") {
++  if (!currentTrack) return;
++  registerMediaSession({
++    appId: "para:music",
++    appName: "Music",
++    title: currentTrack.title || currentTrack.fileName || "Local track",
++    artist: currentTrack.artist || "Local file",
++    album: currentTrack.album || "",
++    artwork: "",
++    playbackState,
++    volume: Math.round((audio?.volume ?? 0.7) * 100),
++  }, mediaActions());
++}
++
++function syncNativeMediaSession() {
++  if (!("mediaSession" in navigator)) return;
++  try {
++    navigator.mediaSession.playbackState = !currentTrack ? "none" : audio && !audio.paused ? "playing" : "paused";
++    if (currentTrack && globalThis.MediaMetadata) {
++      navigator.mediaSession.metadata = new MediaMetadata({
++        title: currentTrack.title || currentTrack.fileName || "Local track",
++        artist: currentTrack.artist || "Local file",
++        album: currentTrack.album || "PARA Music",
++      });
++    } else if (!currentTrack) {
++      navigator.mediaSession.metadata = null;
++    }
++  } catch { /* Native media integration is best effort. */ }
++}
++
++function installNativeHandlers() {
++  if (nativeHandlersInstalled || !("mediaSession" in navigator)) return;
++  nativeHandlersInstalled = true;
++  const assign = (action, handler) => {
++    try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* Unsupported action. */ }
++  };
++  assign("play", () => { void playLocalMusic(); });
++  assign("pause", () => pauseLocalMusic());
++  assign("previoustrack", () => { void previousLocalMusic(); });
++  assign("nexttrack", () => { void nextLocalMusic(); });
++  assign("seekto", (details) => {
++    if (Number.isFinite(details?.seekTime)) seekLocalMusic(details.seekTime);
++  });
++}
++
++export function setMusicQueue(tracks = []) {
++  queue = Array.isArray(tracks) ? [...tracks] : [];
++  announce();
++  return queue.length;
++}
++
++export async function playLocalMusicTrack(id) {
++  if (!queue.length) setMusicQueue(await listLocalMusic());
++  const track = queue.find((item) => item.id === id);
++  if (!track || !(track.blob instanceof Blob)) throw new Error("That local music file is no longer available.");
++  const player = ensureAudio();
++  if (currentTrack?.id !== track.id) {
++    revokeTrackUrl();
++    currentTrack = track;
++    lastError = "";
++    objectUrl = URL.createObjectURL(track.blob);
++    player.src = objectUrl;
++    player.load();
++    registerCurrentSession("paused");
++    syncNativeMediaSession();
++    announce();
++  }
++  await player.play();
++  return localMusicState();
++}
++
++export async function playLocalMusic() {
++  const player = ensureAudio();
++  if (!currentTrack) {
++    if (!queue.length) setMusicQueue(await listLocalMusic());
++    if (!queue.length) return localMusicState();
++    return playLocalMusicTrack(queue[0].id);
++  }
++  await player.play();
++  return localMusicState();
++}
++
++export function pauseLocalMusic() {
++  if (audio) audio.pause();
++  return localMusicState();
++}
++
++export async function toggleLocalMusic() {
++  if (!currentTrack || audio?.paused) return playLocalMusic();
++  pauseLocalMusic();
++  return localMusicState();
++}
++
++export async function nextLocalMusic() {
++  if (!queue.length) return localMusicState();
++  const index = currentIndex();
++  const next = queue[index < 0 ? 0 : (index + 1) % queue.length];
++  return playLocalMusicTrack(next.id);
++}
++
++export async function previousLocalMusic() {
++  if (!queue.length) return localMusicState();
++  const player = ensureAudio();
++  if (player.currentTime > 4) {
++    player.currentTime = 0;
++    announce();
++    return localMusicState();
++  }
++  const index = currentIndex();
++  const previous = queue[index < 0 ? 0 : (index - 1 + queue.length) % queue.length];
++  return playLocalMusicTrack(previous.id);
++}
++
++export function seekLocalMusic(seconds) {
++  const player = ensureAudio();
++  const duration = Number.isFinite(player.duration) ? player.duration : 0;
++  player.currentTime = Math.max(0, Math.min(duration || Number(seconds || 0), Number(seconds || 0)));
++  announce();
++  return player.currentTime;
++}
++
++export function setLocalMusicVolume(percent) {
++  const player = ensureAudio();
++  const value = Math.max(0, Math.min(100, Number(percent) || 0));
++  player.volume = value / 100;
++  if (currentTrack) updateMediaSession({ volume: value });
++  announce();
++  return value;
++}
++
++export function stopLocalMusic() {
++  if (audio) {
++    audio.pause();
++    audio.removeAttribute("src");
++    audio.load();
++  }
++  revokeTrackUrl();
++  currentTrack = null;
++  lastError = "";
++  clearMediaSession();
++  syncNativeMediaSession();
++  announce();
++}
++
++export function localMusicState() {
++  const duration = Number.isFinite(audio?.duration) ? audio.duration : 0;
++  return {
++    active: Boolean(currentTrack),
++    currentId: currentTrack?.id || "",
++    title: currentTrack?.title || "Nothing playing",
++    artist: currentTrack?.artist || "",
++    fileName: currentTrack?.fileName || "",
++    playbackState: currentTrack ? (audio && !audio.paused ? "playing" : "paused") : "none",
++    currentTime: Number.isFinite(audio?.currentTime) ? audio.currentTime : 0,
++    duration,
++    volume: Math.round((audio?.volume ?? 0.7) * 100),
++    queueLength: queue.length,
++    error: lastError,
++  };
++}
++
++export { MUSIC_EVENT };
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/src/services/system-app-registry.js b/apps/para-home/src/services/system-app-registry.js
+--- a/apps/para-home/src/services/system-app-registry.js	2026-09-03 14:48:58.426144364 +0000
++++ b/apps/para-home/src/services/system-app-registry.js	2026-09-03 14:46:50.735498896 +0000
+@@ -2,6 +2,7 @@
+   { id: "para:friends", name: "Friends", category: "Social", route: "friends", icon: "friends", description: "Friends, chat, presence, and parties" },
+   { id: "para:achievements", name: "Achievements", category: "Games", route: "achievements", icon: "achievements", description: "Game trophies and progress" },
+   { id: "para:media-gallery", name: "Media Gallery", category: "Media", route: "media-gallery", icon: "media", description: "Screenshots and gameplay videos" },
++  { id: "para:music", name: "Music", category: "Media", route: "music", icon: "music", description: "Play local music files" },
+   { id: "para:files", name: "Files", category: "Tools", route: "files", icon: "files", description: "PARA files and storage" },
+   { id: "para:parastore", name: "ParaStore", category: "Store", route: "parastore", icon: "store", description: "Discover games and apps" },
+   { id: "para:settings", name: "Settings", category: "System", route: "settings", icon: "settings", description: "System, account, and accessibility" },
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/src/ui/control-center.js b/apps/para-home/src/ui/control-center.js
+--- a/apps/para-home/src/ui/control-center.js	2026-09-03 14:48:58.427167208 +0000
++++ b/apps/para-home/src/ui/control-center.js	2026-09-03 14:46:50.735640569 +0000
+@@ -99,7 +99,7 @@
+   }
+   if (id === "music") {
+     const media = currentData.media || mediaSessionState();
+-    if (!media.active) return `<div class="control-center-context__copy"><span>Now Playing</span><strong>No media session</strong><small>Open a compatible music or podcast app.</small></div>${actionButton("Audio Settings", `data-route="audio-settings"`, true)}`;
++    if (!media.active) return `<div class="control-center-context__copy"><span>Now Playing</span><strong>Nothing playing</strong><small>Open PARA Music and choose a local file.</small></div><div class="control-center-media-actions">${actionButton("Open Music", `data-route="music"`, true)}${actionButton("Audio Settings", `data-route="audio-settings"`)}</div>`;
+     const subtitle = [media.artist, media.appName].filter(Boolean).map(escapeHtml).join(" · ");
+     return `<div class="control-center-now-playing">${media.artwork ? `<img src="${escapeHtml(media.artwork)}" alt="">` : `<span class="control-center-now-playing__art">♫</span>`}<div class="control-center-context__copy"><span>Now Playing</span><strong>${escapeHtml(media.title)}</strong><small>${subtitle}</small></div></div><div class="control-center-media-actions">${media.canPrevious ? actionButton("Previous", `data-action="media-previous"`) : ""}${actionButton(media.playbackState === "playing" ? "Pause" : "Play", `data-action="media-toggle"`, true)}${media.canNext ? actionButton("Next", `data-action="media-next"`) : ""}</div><label class="control-center-volume"><span>Music</span><input type="range" min="0" max="100" step="2" value="${media.volume}" aria-label="Music volume" data-media-volume /></label><label class="control-center-volume"><span>Game</span><input type="range" min="0" max="100" step="2" value="${media.gameVolume}" aria-label="Game volume" data-game-media-volume /></label>`;
+   }
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/apps/para-home/styles.css b/apps/para-home/styles.css
+--- a/apps/para-home/styles.css	2026-09-03 14:48:58.428201905 +0000
++++ b/apps/para-home/styles.css	2026-09-03 14:46:50.867848744 +0000
+@@ -2184,3 +2184,23 @@
+ .capture-processing-banner--failed strong{color:#ffabab}
+ .capture-thumb--queued,.capture-thumb--processing,.capture-thumb--saving{border-color:rgba(188,128,255,.24)}
+ .capture-thumb--failed{border-color:rgba(255,111,111,.24)}
++
++/* v59: PARA Music local-only system player. */
++.music-page .page__body{min-width:0}
++.music-app{display:grid;gap:18px;min-width:0}
++.music-import-zone{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 20px;border:1px dashed rgba(194,145,255,.38);border-radius:18px;background:linear-gradient(135deg,rgba(132,63,223,.12),rgba(255,255,255,.025));transition:border-color .18s ease,background .18s ease,transform .18s ease}
++.music-import-zone>div{display:flex;align-items:center;gap:14px;min-width:0}.music-import-zone>div>div{min-width:0}.music-import-zone strong,.music-import-zone small{display:block}.music-import-zone strong{font-size:1rem;color:#fff}.music-import-zone small{margin-top:3px;color:rgba(244,239,249,.56);font-size:.7rem;overflow-wrap:anywhere}
++.music-import-zone__icon{width:42px;height:42px;display:grid;place-items:center;flex:0 0 auto;border-radius:13px;background:rgba(168,92,255,.18);color:#cfa6ff;font-size:1.45rem;font-weight:500}
++.music-import-zone.is-dragging{border-color:#c78fff;background:rgba(143,69,236,.2);transform:scale(1.005)}.music-import-zone.is-importing{opacity:.68;pointer-events:none}
++.music-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:18px;align-items:start;min-width:0}
++.music-library-panel,.music-now-playing{min-width:0;border:1px solid rgba(255,255,255,.08);border-radius:20px;background:rgba(8,5,14,.68);box-shadow:0 20px 70px rgba(0,0,0,.22)}
++.music-library-panel{overflow:hidden}.music-library-panel>header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid rgba(255,255,255,.07)}.music-library-panel>header span,.music-now-playing__copy>span{display:block;color:#b980ff;font-size:.62rem;font-weight:850;letter-spacing:.12em}.music-library-panel>header h2{margin:4px 0 0;font-size:1.28rem}.music-clear-button{border:0;background:transparent;color:rgba(244,239,249,.52);font-weight:750;font-size:.67rem;cursor:pointer}.music-clear-button:hover,.music-clear-button:focus-visible{color:#fff}
++.music-track-list{display:grid;max-height:min(54vh,620px);overflow:auto}.music-track{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;border-bottom:1px solid rgba(255,255,255,.055)}.music-track:last-child{border-bottom:0}.music-track.is-playing{background:linear-gradient(90deg,rgba(142,68,236,.18),rgba(142,68,236,.035))}.music-track__main{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:11px;min-width:0;padding:12px 14px;border:0;background:transparent;color:#fff;text-align:left;cursor:pointer}.music-track__main:hover,.music-track__main:focus-visible{background:rgba(255,255,255,.04);outline:0}.music-track__number{width:30px;height:30px;display:grid;place-items:center;border-radius:9px;background:rgba(255,255,255,.055);color:#b98bff;font-size:.72rem;font-weight:850}.music-track__copy{min-width:0}.music-track__copy strong,.music-track__copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.music-track__copy strong{font-size:.78rem}.music-track__copy small{margin-top:3px;color:rgba(244,239,249,.45);font-size:.62rem}.music-track__size{color:rgba(244,239,249,.38);font-size:.6rem;white-space:nowrap}.music-track__remove{width:44px;border:0;background:transparent;color:rgba(244,239,249,.3);font-size:1.1rem;cursor:pointer}.music-track__remove:hover,.music-track__remove:focus-visible{background:rgba(255,82,82,.08);color:#ff8b92;outline:0}
++.music-library-empty{min-height:300px;display:grid;place-items:center;align-content:center;gap:8px;padding:28px;text-align:center;color:rgba(244,239,249,.55)}.music-library-empty>span{width:62px;height:62px;display:grid;place-items:center;border-radius:18px;background:rgba(168,92,255,.12);color:#b980ff;font-size:1.7rem}.music-library-empty h2{margin:4px 0 0;color:#fff}.music-library-empty p{margin:0;max-width:360px;font-size:.72rem;line-height:1.5}
++.music-now-playing{position:sticky;top:16px;display:grid;gap:15px;padding:18px}.music-now-playing__art{aspect-ratio:1;display:grid;place-items:center;overflow:hidden;border-radius:18px;background:radial-gradient(circle at 30% 25%,rgba(203,150,255,.42),rgba(121,42,202,.18) 38%,rgba(7,4,13,.92) 75%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}.music-now-playing__art span{font-size:clamp(3rem,8vw,6.8rem);color:rgba(233,210,255,.82);text-shadow:0 16px 50px rgba(168,92,255,.4)}.music-now-playing__copy h2{margin:5px 0 0;font-size:1.28rem;line-height:1.15;overflow-wrap:anywhere}.music-now-playing__copy p{margin:5px 0 0;color:rgba(244,239,249,.5);font-size:.7rem;overflow-wrap:anywhere}
++.music-transport{display:flex;align-items:center;justify-content:center;gap:10px}.music-transport button{width:44px;height:44px;border:1px solid rgba(255,255,255,.12);border-radius:50%;background:rgba(255,255,255,.045);color:#fff;font-size:.75rem;font-weight:800;cursor:pointer}.music-transport button:hover,.music-transport button:focus-visible{border-color:rgba(190,130,255,.72);background:rgba(143,69,236,.22);outline:0}.music-transport .music-transport__primary{width:58px;height:58px;background:#a85cff;border-color:#c995ff;color:#fff;font-size:1.1rem;box-shadow:0 12px 34px rgba(132,55,223,.3)}
++.music-timeline{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;color:rgba(244,239,249,.45);font-size:.6rem}.music-timeline input,.music-volume input{width:100%;accent-color:#a85cff}.music-volume{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;color:rgba(244,239,249,.52);font-size:.61rem;font-weight:800;letter-spacing:.07em}.music-volume b{color:#fff;font-size:.62rem;letter-spacing:0}.music-player-error{margin:0;padding:9px 10px;border:1px solid rgba(255,90,110,.2);border-radius:10px;background:rgba(120,20,40,.12);color:#ffb2bc;font-size:.65rem;line-height:1.4}
++.music-local-note{display:flex;align-items:center;gap:12px;padding:0 4px;color:rgba(244,239,249,.42);font-size:.65rem}.music-local-note span{padding:5px 8px;border:1px solid rgba(169,99,255,.25);border-radius:999px;color:#c69aff;font-size:.55rem;font-weight:900;letter-spacing:.1em;white-space:nowrap}.music-local-note p{margin:0;line-height:1.45}
++.app-icon--music{background:radial-gradient(circle at 30% 20%,rgba(217,178,255,.55),rgba(120,48,206,.55) 48%,rgba(43,16,73,.95));color:#fff!important}
++@media(max-width:920px){.music-layout{grid-template-columns:1fr}.music-now-playing{position:relative;top:auto;grid-template-columns:120px minmax(0,1fr);align-items:center}.music-now-playing__art{grid-row:1/4}.music-timeline,.music-volume,.music-player-error{grid-column:1/-1}}
++@media(max-width:620px){.music-import-zone{align-items:stretch;flex-direction:column}.music-import-zone .action-button{width:100%}.music-now-playing{grid-template-columns:1fr}.music-now-playing__art{grid-row:auto;max-height:260px}.music-track__main{grid-template-columns:30px minmax(0,1fr)}.music-track__size{display:none}.music-local-note{align-items:flex-start;flex-direction:column}}
+Binary files a/tests/__pycache__/test_repository.cpython-313.pyc and b/tests/__pycache__/test_repository.cpython-313.pyc differ
+diff -ruN '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.md' '--exclude=PARA_LOCAL_MUSIC_PLAYER_V59.patch' a/tests/test_repository.py b/tests/test_repository.py
+--- a/tests/test_repository.py	2026-09-03 14:20:30.000000000 +0000
++++ b/tests/test_repository.py	2026-09-03 14:47:20.956312547 +0000
+@@ -907,3 +907,46 @@
+         self.assertIn("videoBitsPerSecond: runtimeVideoBitrate(state.stream)", server)
+         self.assertNotIn("element.captureStream(30)", server)
+         self.assertNotIn("captureCanvas.captureStream(30)", server)
++
++    def test_v59_music_player_is_local_only_and_integrated_with_para_media_session(self):
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        music = (ROOT / "apps/para-home/src/screens/music.js").read_text(encoding="utf-8")
++        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
++        registry = (ROOT / "apps/para-home/src/services/system-app-registry.js").read_text(encoding="utf-8")
++        control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
++        styles = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
++
++        self.assertIn('import { musicScreen, activateMusic } from "./screens/music.js";', app)
++        self.assertIn('music: musicScreen', app)
++        self.assertIn('route === "music"', app)
++        self.assertIn('id: "para:music"', registry)
++        self.assertIn('route: "music"', registry)
++        self.assertIn('icon: "music"', registry)
++        self.assertIn('data-route="music"', control)
++
++        for marker in [
++            'type="file"',
++            'multiple accept="audio/*',
++            'data-music-find-files',
++            'data-music-drop-zone',
++            'Local files stay on this browser build of PARA.',
++            'Future PARA console: PARA Files and USB drives use this same player.',
++        ]:
++            self.assertIn(marker, music)
++
++        for marker in [
++            'para-music-library-v1',
++            'indexedDB.open',
++            'createObjectStore(TRACK_STORE',
++            'registerMediaSession',
++            'appId: "para:music"',
++            'new MediaMetadata',
++            'URL.createObjectURL(track.blob)',
++        ]:
++            self.assertIn(marker, service)
++
++        self.assertNotIn('fetch(', service)
++        self.assertNotIn('XMLHttpRequest', service)
++        self.assertNotIn('/api/', service)
++        self.assertIn('.music-import-zone', styles)
++        self.assertIn('.music-now-playing', styles)

@@ -17,6 +17,7 @@ import {
 } from "./screens/libraries.js";
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
+import { musicScreen, activateMusic } from "./screens/music.js";
 import { capturePlaybackBlob, capturePlaybackMime, capturePlaybackSegments, isSegmentedCapture, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
@@ -90,6 +91,7 @@ const renderers = {
   browser: browserScreen,
   games: gamesScreen,
   "media-gallery": mediaGalleryScreen,
+  music: musicScreen,
   achievements: achievementsScreen,
   demos: demosScreen,
   parastore: paraStoreScreen,
@@ -464,6 +466,8 @@ function render(route) {
     });
   } else if (route === "media-gallery") {
     void activateMediaGallery().then((cleanup) => { if (router.current() === "media-gallery") cleanupScreen = cleanup; });
+  } else if (route === "music") {
+    cleanupScreen = activateMusic({ focus });
   } else if (route === "achievements") {
     void activateAchievements({ focus }).then((cleanup) => { if (router.current() === "achievements") cleanupScreen = cleanup; });
   } else if (route === "storage") {

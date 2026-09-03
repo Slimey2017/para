@@ -907,3 +907,81 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("videoBitsPerSecond: runtimeVideoBitrate(state.stream)", server)
         self.assertNotIn("element.captureStream(30)", server)
         self.assertNotIn("captureCanvas.captureStream(30)", server)
+
+    def test_v59_music_player_is_local_only_and_integrated_with_para_media_session(self):
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        music = (ROOT / "apps/para-home/src/screens/music.js").read_text(encoding="utf-8")
+        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
+        registry = (ROOT / "apps/para-home/src/services/system-app-registry.js").read_text(encoding="utf-8")
+        control = (ROOT / "apps/para-home/src/ui/control-center.js").read_text(encoding="utf-8")
+        styles = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('import { musicScreen, activateMusic } from "./screens/music.js";', app)
+        self.assertIn('music: musicScreen', app)
+        self.assertIn('route === "music"', app)
+        self.assertIn('id: "para:music"', registry)
+        self.assertIn('route: "music"', registry)
+        self.assertIn('icon: "music"', registry)
+        self.assertIn('data-route="music"', control)
+
+        for marker in [
+            'type="file"',
+            'multiple accept="audio/*',
+            'data-music-find-files',
+            'data-music-drop-zone',
+            'Local files stay on this browser build of PARA.',
+            'Future PARA console: PARA Files and USB drives use this same player.',
+        ]:
+            self.assertIn(marker, music)
+
+        for marker in [
+            'para-music-library-v1',
+            'indexedDB.open',
+            'createObjectStore(TRACK_STORE',
+            'registerMediaSession',
+            'appId: "para:music"',
+            'new MediaMetadata',
+            'URL.createObjectURL(track.blob)',
+        ]:
+            self.assertIn(marker, service)
+
+        self.assertNotIn('fetch(', service)
+        self.assertNotIn('XMLHttpRequest', service)
+        self.assertNotIn('/api/', service)
+        self.assertIn('.music-import-zone', styles)
+        self.assertIn('.music-now-playing', styles)
+
+    def test_v59_1_music_handoff_plays_in_web_games_and_stays_out_of_recordings(self):
+        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
+        media_session = (ROOT / "apps/para-home/src/services/media-session.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+
+        for marker in [
+            'para.music.handoff.v1',
+            'persistMusicHandoff',
+            'restoreLocalMusicSession',
+            'window.addEventListener("pagehide"',
+        ]:
+            self.assertIn(marker, service)
+
+        self.assertIn('session.appId === "para:music"', media_session)
+        self.assertIn('localMusicOwnsBackground', media_session)
+
+        for marker in [
+            "PARA_MUSIC_DB_NAME = 'para-music-library-v1'",
+            "PARA_MUSIC_HANDOFF_KEY = 'para.music.handoff.v1'",
+            "restoreParaMusicFromHandoff",
+            "para-game-local-music-audio",
+            'data-context-action="music-previous"',
+            'data-context-action="music-toggle"',
+            'data-context-action="music-next"',
+            'data-context-action="music-volume-down"',
+            'data-context-action="music-volume-up"',
+            "media === paraMusicAudio",
+            "media?.dataset?.paraLocalMusic === 'true'",
+            "const audioTrack = gameAudio || (!paraMusicTrack ? displayAudio : null);",
+        ]:
+            self.assertIn(marker, server)
+
+        self.assertNotIn("No separate media session", server)
+
