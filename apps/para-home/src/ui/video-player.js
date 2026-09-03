@@ -73,6 +73,14 @@ export function paraVideoPlayerMarkup({
   </div>`;
 }
 
+// TEMP DIAGNOSTIC — remove once the Media Gallery playback bug is confirmed
+// fixed. Toggle on to trace exactly what URL/segments a player was activated
+// with and what the <video> element reports as it loads.
+const PARA_PLAYER_DEBUG = true;
+function playerLog(...args) {
+  if (PARA_PLAYER_DEBUG) console.log("[para-player]", ...args);
+}
+
 export function activateParaVideoPlayers(root = document, { onError } = {}) {
   const cleanups = [];
   for (const player of root.querySelectorAll?.("[data-para-video-player]") || []) {
@@ -86,6 +94,21 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
     const segmentDurations = parseArray(player.dataset.videoSegmentDurations).map((value) => Math.max(0, Number(value || 0) / 1000));
     const segments = playlist.length > 1 ? playlist : [video.getAttribute("src") || video.src].filter(Boolean);
     const isPlaylist = segments.length > 1;
+
+    playerLog("activate", {
+      elementSrcAttr: video.getAttribute("src"),
+      elementSrcProp: video.src,
+      mimeType,
+      rawVideoSegmentsAttr: player.dataset.videoSegments,
+      parsedPlaylist: playlist,
+      resolvedSegments: segments,
+      isPlaylist,
+      expectedDurationSec: expected,
+    });
+    for (const segUrl of segments) {
+      fetch(segUrl).then((r) => playerLog("segment URL fetch check", segUrl, "status:", r.status, "ok:", r.ok))
+        .catch((e) => playerLog("segment URL fetch FAILED (likely revoked or invalid blob URL)", segUrl, e.message));
+    }
     let segmentIndex = 0;
     let pendingLocalTime = null;
     let resumeAfterSwitch = false;
@@ -307,7 +330,18 @@ export function activateParaVideoPlayers(root = document, { onError } = {}) {
       }
       update();
     };
-    const onMediaError = () => reportError(video.error || new Error(mediaErrorMessage(video)));
+    const onMediaError = () => {
+      playerLog("video error event", {
+        code: video.error?.code,
+        message: video.error?.message,
+        currentSrc: video.currentSrc,
+        srcAttr: video.getAttribute("src"),
+        segmentIndex,
+        networkState: video.networkState,
+        readyState: video.readyState,
+      });
+      reportError(video.error || new Error(mediaErrorMessage(video)));
+    };
 
     player.tabIndex = player.tabIndex >= 0 ? player.tabIndex : 0;
     player.addEventListener("click", onClick);

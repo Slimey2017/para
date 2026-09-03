@@ -14,10 +14,15 @@ const CAPTURE_SYNC_STORAGE_KEY = "para.capture.library.pulse.v1";
 let captureSyncChannel = null;
 let captureStorageListener = null;
 
+// TEMP DIAGNOSTIC — remove once the Media Gallery playback bug is confirmed fixed.
+const PARA_GALLERY_DEBUG = true;
+function galleryLog(...args) { if (PARA_GALLERY_DEBUG) console.log("[para-gallery]", ...args); }
+
 function releaseUrls() {
+  galleryLog("releaseUrls() called — revoking", liveUrls.size, "cached capture(s)", new Error().stack);
   for (const entry of liveUrls.values()) {
     const urls = Array.isArray(entry) ? entry : entry?.urls || [entry];
-    for (const url of urls) if (url) URL.revokeObjectURL(url);
+    for (const url of urls) if (url) { galleryLog("revoking blob URL", url); URL.revokeObjectURL(url); }
   }
   liveUrls.clear();
 }
@@ -26,13 +31,17 @@ function mediaSources(item) {
   if (!liveUrls.has(item.id)) {
     if (item.type === "clip") {
       const segments = capturePlaybackSegments(item);
+      galleryLog("creating blob URLs for", item.id, "segments:", segments.length, "blob sizes:", segments.map((s) => s.blob.size), "blob types:", segments.map((s) => s.blob.type));
       liveUrls.set(item.id, {
         urls: segments.map((segment) => URL.createObjectURL(segment.blob)),
         durationsMs: segments.map((segment) => Math.max(0, Number(segment.durationMs || 0))),
       });
+      galleryLog("created URLs for", item.id, ":", liveUrls.get(item.id).urls);
     } else {
       liveUrls.set(item.id, { urls: [URL.createObjectURL(capturePlaybackBlob(item))], durationsMs: [] });
     }
+  } else {
+    galleryLog("reusing cached URL for", item.id, ":", liveUrls.get(item.id).urls);
   }
   return liveUrls.get(item.id);
 }
