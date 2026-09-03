@@ -400,7 +400,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("getDisplayMedia", capture)
         self.assertNotIn("MediaRecorder", capture)
         self.assertIn("saves the recording directly to Media Gallery", capture)
-        self.assertIn('captureCanvas.captureStream(30)', server)
+        self.assertIn('captureCanvas.captureStream(RUNTIME_CAPTURE_FPS)', server)
         self.assertIn('new MediaRecorder(stream, runtimeRecorderOptions', server)
         self.assertIn("sourceMimeType: rawBlob.type", server)
         self.assertIn("captureVersion: 9", server)
@@ -547,19 +547,21 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("const GAME_ACTIVITY_ID = `store:${RUNTIME_ID}`", server)
         self.assertIn("localStorage.setItem(HOME_STATE_KEY", server)
 
-    def test_game_capture_uses_direct_frames_without_self_tab_fallback(self):
+    def test_game_capture_preserves_dom_hud_without_recording_para_shell(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
-        self.assertIn('captureCanvas.captureStream(30)', server)
+        self.assertIn('captureCanvas.captureStream(RUNTIME_CAPTURE_FPS)', server)
         self.assertIn('async function requestGameStream(audio = false)', server)
         self.assertIn('requestCompositedGameStream(audio)', server)
-        self.assertIn('createMediaStreamDestination()', server)
-        self.assertNotIn('normalizeRuntimeCapture', server)
-        self.assertNotIn('requestSessionSelfCapture(audio)', server)
-        self.assertNotIn('navigator.mediaDevices.getDisplayMedia', server)
-        self.assertNotIn("preferCurrentTab: true", server)
-        self.assertNotIn("sessionSelfCapture", server)
+        self.assertIn('requestRestrictedGameRootStream(audio, root)', server)
+        self.assertIn('gameRootHasDomVisuals', server)
+        self.assertIn('navigator.mediaDevices.getDisplayMedia', server)
+        self.assertIn("preferCurrentTab: true", server)
+        self.assertIn('RestrictionTarget.fromElement(captureRoot)', server)
+        self.assertIn("stream.__paraCaptureMode = 'restricted-game-root'", server)
+        self.assertIn("node.id === 'para-game-system-shell'", server)
         self.assertNotIn("RestrictionTarget.fromElement(document.body)", server)
-        self.assertNotIn('Choose This Tab', server)
+        self.assertNotIn('requestSessionSelfCapture(audio)', server)
+        self.assertNotIn('normalizeRuntimeCapture', server)
 
     def test_game_control_center_matches_home_button_contract_and_avoids_fullscreen_blur(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
@@ -712,7 +714,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("captureState: 'ready'", server)
         self.assertIn("verifyPersistedCapture(saved.id, rawBlob, 'ready')", server)
         self.assertIn("normalized: false", server)
-        self.assertNotIn("getDisplayMedia", server)
+        self.assertIn("requestRestrictedGameRootStream", server)
         self.assertNotIn("getDisplayMedia", capture)
         self.assertNotIn("MediaRecorder", capture)
         self.assertIn("saves the recording directly to Media Gallery", capture)
@@ -724,10 +726,10 @@ class RepositoryTests(unittest.TestCase):
     def test_v51_direct_renderer_stream_and_control_center_text_wrapping(self):
         server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
         self.assertIn("requestDirectGameSurfaceStream", server)
-        self.assertIn("element.captureStream(30)", server)
+        self.assertIn("element.captureStream(RUNTIME_CAPTURE_FPS)", server)
         self.assertIn("direct-canvas-stream", server)
         self.assertIn("preserveDrawingBuffer=false", server)
-        self.assertNotIn("getDisplayMedia", server)
+        self.assertIn("requestRestrictedGameRootStream", server)
         self.assertIn("max-width:min(560px,calc(100vw - 24px))", server)
         self.assertIn("overflow-wrap:anywhere", server)
         self.assertIn("word-break:break-word", server)
@@ -849,6 +851,26 @@ class RepositoryTests(unittest.TestCase):
         success_toast = server.find("toast('Gameplay capture saved to Media Gallery')")
         self.assertGreater(final_save, -1)
         self.assertGreater(success_toast, final_save)
+
+    def test_v58_hud_hotfix_records_full_game_root_for_dom_overlays(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        for marker in [
+            "gameCaptureRoot",
+            "gameRootHasDomVisuals",
+            "requestRestrictedGameRootStream",
+            "RestrictionTarget.fromElement(captureRoot)",
+            "navigator.mediaDevices.getDisplayMedia",
+            "preferCurrentTab: true",
+            "selfBrowserSurface: 'include'",
+            "stream.__paraCaptureMode = 'restricted-game-root'",
+            "node.id === 'para-game-system-shell'",
+            "captureRoot.style.isolation = 'isolate'",
+            "captureRoot.style.transformStyle = 'flat'",
+        ]:
+            self.assertIn(marker, server)
+        self.assertNotIn("RestrictionTarget.fromElement(document.body)", server)
+        self.assertIn("element.captureStream(RUNTIME_CAPTURE_FPS)", server)
+        self.assertIn("captureCanvas.captureStream(RUNTIME_CAPTURE_FPS)", server)
 
     def test_v58_para_home_csp_allows_blob_video_without_widening_fetch_policy(self):
         api_server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")

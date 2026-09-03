@@ -2835,11 +2835,166 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     return stream;
   }
 
+  const PARA_CAPTURE_HANDLE = `para-game:${RUNTIME_ID}`;
+  try {
+    navigator.mediaDevices?.setCaptureHandleConfig?.({
+      exposeOrigin: false,
+      handle: PARA_CAPTURE_HANDLE,
+      permittedOrigins: [location.origin],
+    });
+  } catch (_) {}
+
+  function clippedViewportArea(rect) {
+    if (!rect) return 0;
+    const left = Math.max(0, Number(rect.left || 0));
+    const top = Math.max(0, Number(rect.top || 0));
+    const right = Math.min(innerWidth || 0, Number(rect.right || 0));
+    const bottom = Math.min(innerHeight || 0, Number(rect.bottom || 0));
+    return Math.max(0, right - left) * Math.max(0, bottom - top);
+  }
+
+  function gameCaptureRoot(baseElement = directCaptureCandidates()[0]?.element || primaryGameCanvas()) {
+    if (!baseElement) return null;
+    const explicit = document.querySelector('[data-para-capture-root]');
+    if (explicit && explicit.contains(baseElement)) return explicit;
+
+    const viewportArea = Math.max(1, (innerWidth || 1) * (innerHeight || 1));
+    let node = baseElement.parentElement;
+    let best = baseElement;
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (node.id === 'para-game-system-shell') break;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const coverage = clippedViewportArea(rect) / viewportArea;
+      const visible = style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
+      if (visible && coverage >= .55) {
+        best = node;
+        // The nearest large ancestor is normally the game's own screen/root.
+        // Stop here instead of climbing to body, which would also contain PARA UI.
+        break;
+      }
+      node = node.parentElement;
+    }
+    return best;
+  }
+
+  function gameRootHasDomVisuals(root, baseElement = null) {
+    if (!root || root === baseElement) return false;
+    const ignoredTags = new Set(['CANVAS', 'VIDEO', 'AUDIO', 'SOURCE', 'SCRIPT', 'STYLE', 'LINK', 'META']);
+    for (const element of root.querySelectorAll('*')) {
+      if (element === baseElement || ignoredTags.has(element.tagName)) continue;
+      if (element.id === 'para-game-system-shell' || element.closest?.('#para-game-system-shell')) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2 || clippedViewportArea(rect) <= 0) continue;
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0) continue;
+      const text = String(element.textContent || '').trim();
+      const positioned = style.position === 'absolute' || style.position === 'fixed' || style.zIndex !== 'auto';
+      const visualTag = element instanceof SVGElement || element instanceof HTMLImageElement;
+      const painted = style.backgroundImage !== 'none' || !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor);
+      if ((text && (positioned || painted)) || visualTag) return true;
+    }
+    return false;
+  }
+
+  async function requestRestrictedGameRootStream(audio = false, root = null) {
+    const captureRoot = root || gameCaptureRoot();
+    if (!captureRoot) throw new Error('PARA could not find the full game view.');
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      throw new Error('This game uses HTML HUD overlays, but full-game element capture is unavailable in this browser.');
+    }
+    if (!globalThis.RestrictionTarget?.fromElement) {
+      throw new Error('This game uses HTML HUD overlays, but this browser cannot restrict capture to the game element.');
+    }
+
+    let display = null;
+    const previousIsolation = captureRoot.style.isolation;
+    const previousTransformStyle = captureRoot.style.transformStyle;
+    // Element Capture requires an eligible stacking context. These two values
+    // satisfy that contract without resizing or reparenting the game's DOM.
+    captureRoot.style.isolation = 'isolate';
+    captureRoot.style.transformStyle = 'flat';
+    try {
+      display = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: RUNTIME_CAPTURE_FPS, max: RUNTIME_CAPTURE_FPS } },
+        audio: !!audio,
+        preferCurrentTab: true,
+        selfBrowserSurface: 'include',
+        surfaceSwitching: 'exclude',
+        monitorTypeSurfaces: 'exclude',
+      });
+      const videoTrack = display.getVideoTracks?.()[0];
+      if (!videoTrack) throw new Error('The browser did not provide a game video track.');
+      if (typeof videoTrack.restrictTo !== 'function') {
+        throw new Error('This browser cannot isolate the game from PARA system UI.');
+      }
+      const handle = videoTrack.getCaptureHandle?.();
+      if (handle?.handle && handle.handle !== PARA_CAPTURE_HANDLE) {
+        throw new Error('Choose This Tab so PARA records the running game.');
+      }
+
+      const target = await RestrictionTarget.fromElement(captureRoot);
+      await videoTrack.restrictTo(target);
+      try { videoTrack.contentHint = 'motion'; } catch (_) {}
+
+      const tracks = [videoTrack];
+      if (audio) {
+        const displayAudio = display.getAudioTracks?.().find((track) => track.readyState !== 'ended');
+        const gameAudio = capturedGameAudioTracks().find((track) => track.readyState !== 'ended');
+        const audioTrack = displayAudio || gameAudio;
+        if (audioTrack) {
+          try { tracks.push(displayAudio ? audioTrack : audioTrack.clone()); } catch (_) {}
+        }
+      }
+
+      const stream = new MediaStream(tracks);
+      const rect = captureRoot.getBoundingClientRect();
+      const settings = videoTrack.getSettings?.() || {};
+      const captureWidth = Math.max(2, Number(settings.width || rect.width || innerWidth || 1280));
+      const captureHeight = Math.max(2, Number(settings.height || rect.height || innerHeight || 720));
+      const rootAspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 0;
+      const captureAspect = captureWidth / captureHeight;
+      if (rootAspect > 0 && Math.abs(Math.log(captureAspect / rootAspect)) > .18) {
+        throw new Error('PARA rejected a full-game capture whose dimensions would distort the video.');
+      }
+      stream.__paraCaptureWidth = captureWidth;
+      stream.__paraCaptureHeight = captureHeight;
+      stream.__paraCaptureFps = Number(settings.frameRate || RUNTIME_CAPTURE_FPS) || RUNTIME_CAPTURE_FPS;
+      stream.__paraCaptureCoverage = clippedViewportArea(rect) / Math.max(1, (innerWidth || 1) * (innerHeight || 1));
+      stream.__paraCaptureMode = 'restricted-game-root';
+      stream.__paraCleanup = () => {
+        display?.getTracks?.().forEach((track) => { try { track.stop(); } catch (_) {} });
+        tracks.slice(1).forEach((track) => {
+          if (!(display?.getTracks?.() || []).includes(track)) { try { track.stop(); } catch (_) {} }
+        });
+        captureRoot.style.isolation = previousIsolation;
+        captureRoot.style.transformStyle = previousTransformStyle;
+      };
+      return stream;
+    } catch (error) {
+      display?.getTracks?.().forEach((track) => { try { track.stop(); } catch (_) {} });
+      captureRoot.style.isolation = previousIsolation;
+      captureRoot.style.transformStyle = previousTransformStyle;
+      if (error?.name === 'NotAllowedError') {
+        throw new Error("PARA needs This Tab permission to record this game's HUD and pop-ups.");
+      }
+      throw error;
+    }
+  }
+
   async function requestGameStream(audio = false) {
-    // V51: capture the renderer's own stream before trying to redraw it into a
-    // second canvas. WebGL canvases commonly use preserveDrawingBuffer=false;
-    // drawImage/getImageData can look blank even while canvas.captureStream()
-    // can capture the live renderer correctly. No tab/screen recorder fallback.
+    const directCandidate = directCaptureCandidates()[0] || null;
+    const root = gameCaptureRoot(directCandidate?.element || null);
+    if (root && gameRootHasDomVisuals(root, directCandidate?.element || null)) {
+      // A canvas stream only contains canvas pixels. Games like Slime Wars render
+      // their kill feed, health, ammo, notifications, scoreboards, SVG crosshair,
+      // and pop-ups as DOM children over the renderer. Use Element Capture so the
+      // game root and all of its descendants are recorded, while PARA's shadow-DOM
+      // system shell remains a sibling and therefore stays out of the video.
+      return requestRestrictedGameRootStream(audio, root);
+    }
+
+    // Canvas/video-only games keep the low-overhead direct renderer path.
     let directError = null;
     try { return await requestDirectGameSurfaceStream(audio); }
     catch (error) { directError = error; }
@@ -3345,7 +3500,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   async function startRecording() {
     closeShell();
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       const prepared = await requestVerifiedGameRecording(true);
       const { stream, mimeType } = prepared;
@@ -3486,7 +3640,6 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
 
   async function startReplay() {
     closeShell();
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       if (replay) { toast('PARA Replay is already running'); return; }
       const prepared = await requestVerifiedGameRecording(true);
