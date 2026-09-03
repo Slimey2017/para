@@ -951,6 +951,15 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('.music-import-zone', styles)
         self.assertIn('.music-now-playing', styles)
 
+    def test_v59_2_music_route_is_registered_with_router_manifest(self):
+        manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        registry = (ROOT / "apps/para-home/src/services/system-app-registry.js").read_text(encoding="utf-8")
+
+        self.assertIn('{ id: "music", label: "Music", group: "library" }', manifest)
+        self.assertIn('music: musicScreen', app)
+        self.assertIn('route: "music"', registry)
+
     def test_v59_1_music_handoff_plays_in_web_games_and_stays_out_of_recordings(self):
         service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
         media_session = (ROOT / "apps/para-home/src/services/media-session.js").read_text(encoding="utf-8")
