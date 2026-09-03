@@ -994,3 +994,18 @@ class RepositoryTests(unittest.TestCase):
 
         self.assertNotIn("No separate media session", server)
 
+
+    def test_v59_3_para_music_holds_menu_soundtrack_suspension_across_navigation(self):
+        menu_music = (ROOT / "apps/para-home/src/services/menu-music.js").read_text(encoding="utf-8")
+        media_session = (ROOT / "apps/para-home/src/services/media-session.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("let suspended = false", menu_music)
+        self.assertIn("if (suspended || gameRunning || sound.menuMusic === false)", menu_music)
+        self.assertIn("suspended = true", menu_music)
+        self.assertIn("suspended = false", menu_music)
+        self.assertIn("if (!suspended && prefs().menuMusic !== false && unlocked)", menu_music)
+        self.assertIn("if (suspended || !unlocked || prefs().menuMusic === false) return", menu_music)
+        self.assertIn('session.appId === "para:music"', media_session)
+        self.assertIn("suspendMenuMusic({ duration: 100 })", media_session)
+        self.assertIn("syncMenuMusic({ gameRunning:", app)

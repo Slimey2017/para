@@ -1,0 +1,134 @@
+diff --git a/PARA_MUSIC_MENU_SOUNDTRACK_MUTE_FIX_V59_3.md b/PARA_MUSIC_MENU_SOUNDTRACK_MUTE_FIX_V59_3.md
+new file mode 100644
+index 0000000..629b356
+--- /dev/null
++++ b/PARA_MUSIC_MENU_SOUNDTRACK_MUTE_FIX_V59_3.md
+@@ -0,0 +1,41 @@
++# PARA V59.3 — Music Menu Soundtrack Mute Fix
++
++V59.3 fixes PARA's normal menu/background soundtrack continuing to play underneath PARA Music.
++
++## Root cause
++
++PARA Music already called `suspendMenuMusic()`, but the menu-music service did not remember that suspension. `app.js` calls `syncMenuMusic()` whenever PARA renders a route. A later route render, unlock event, or menu-music volume update could therefore start the normal soundtrack again even though PARA Music still owned the background-music lane.
++
++## Fix
++
++- `menu-music.js` now keeps an explicit `suspended` lock.
++- `suspendMenuMusic()` sets the lock before fading/pause.
++- `syncMenuMusic()` refuses to play while the lock is active.
++- `unlockMenuMusic()` cannot restart menu music while suspended because it routes through the locked sync path.
++- Menu-music volume changes cannot wake the soundtrack while suspended.
++- Ducking cannot wake or modify the soundtrack while suspended.
++- `resumeMenuMusic()` is the only normal release path and clears the lock.
++- PARA Music's media session now requests a short 100 ms shutdown so the two tracks do not audibly overlap.
++- The cumulative patch now ships `apps/para-home/src/services/menu-music.js`; V59/V59.1/V59.2 previously relied on the base repository copy.
++
++## Expected behavior
++
++1. Normal PARA menu music is playing.
++2. Open PARA Music and start a local song.
++3. The normal PARA soundtrack fades out immediately and pauses.
++4. Navigate around PARA while the local song plays: the menu soundtrack stays silent.
++5. Pause the local song: the menu soundtrack stays silent because PARA Music still owns the music lane.
++6. Stop/clear the PARA Music session: normal menu music may resume according to the user's menu-music setting.
++
++## Unchanged
++
++- Local music remains browser-local only.
++- In-game music handoff remains intact.
++- Gameplay recordings still exclude PARA Music.
++- V58 capture/CSP/HUD fixes are untouched.
++
++## Validation
++
++- `node --check` passed for `menu-music.js` and `media-session.js`.
++- Python repository test file compiles.
++- 7 targeted V58/V59/V59.1/V59.2/V59.3 regressions passed.
+diff --git a/apps/para-home/src/services/media-session.js b/apps/para-home/src/services/media-session.js
+index ac857c5..4e1a29a 100644
+--- a/apps/para-home/src/services/media-session.js
++++ b/apps/para-home/src/services/media-session.js
+@@ -31,7 +31,7 @@ function syncHomeMusic() {
+   // PARA Music owns the background-music lane even while paused. Do not let
+   // the normal PARA menu soundtrack start underneath a user's local library.
+   const localMusicOwnsBackground = session.active && session.appId === "para:music";
+-  if (localMusicOwnsBackground || (session.active && session.playbackState === "playing")) suspendMenuMusic({ duration: 420 });
++  if (localMusicOwnsBackground || (session.active && session.playbackState === "playing")) suspendMenuMusic({ duration: 100 });
+   else resumeMenuMusic({ duration: 520 });
+ }
+ 
+diff --git a/apps/para-home/src/services/menu-music.js b/apps/para-home/src/services/menu-music.js
+index 01df5aa..9ae6251 100644
+--- a/apps/para-home/src/services/menu-music.js
++++ b/apps/para-home/src/services/menu-music.js
+@@ -4,6 +4,7 @@ const TRACK = "./assets/audio/sleep-music-no-1.mp3";
+ let player = null;
+ let fadeTimer = null;
+ let unlocked = false;
++let suspended = false;
+ 
+ function prefs() { return getProfilePreferences().sound; }
+ function targetVolume() { return Math.max(0, Math.min(1, Number(prefs().menuMusicVolume ?? 22) / 100)); }
+@@ -35,7 +36,7 @@ function fadeTo(value, ms = 650, pauseAfter = false) {
+ export function syncMenuMusic({ gameRunning = false } = {}) {
+   const audio = ensurePlayer();
+   const sound = prefs();
+-  if (gameRunning || sound.menuMusic === false) { fadeTo(0, 600, true); return; }
++  if (suspended || gameRunning || sound.menuMusic === false) { fadeTo(0, 120, true); return; }
+   if (!unlocked) return;
+   audio.play().then(() => fadeTo(targetVolume(), 700)).catch(() => {});
+ }
+@@ -53,16 +54,18 @@ export function toggleMenuMusic() {
+ export function setMenuMusicVolume(value) {
+   const volume = Math.max(0, Math.min(100, Number(value) || 0));
+   setProfilePreferences({ sound: { menuMusicVolume: volume } });
+-  if (prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
++  if (!suspended && prefs().menuMusic !== false && unlocked) fadeTo(volume / 100, 100);
+   return volume;
+ }
+ 
+-export function suspendMenuMusic({ duration = 700 } = {}) {
++export function suspendMenuMusic({ duration = 120 } = {}) {
++  suspended = true;
+   clearTimeout(duckTimer);
+   fadeTo(0, duration, true);
+ }
+ 
+ export function resumeMenuMusic({ duration = 650 } = {}) {
++  suspended = false;
+   if (!unlocked || prefs().menuMusic === false) return;
+   const audio = ensurePlayer();
+   audio.play().then(() => fadeTo(targetVolume(), duration)).catch(() => {});
+@@ -70,7 +73,7 @@ export function resumeMenuMusic({ duration = 650 } = {}) {
+ 
+ let duckTimer = null;
+ export function duckMenuMusic({ amount = 0.32, duration = 240 } = {}) {
+-  if (!unlocked || prefs().menuMusic === false) return;
++  if (suspended || !unlocked || prefs().menuMusic === false) return;
+   const normal = targetVolume();
+   const ducked = Math.max(0, normal * (1 - Math.max(0, Math.min(.8, amount))));
+   clearTimeout(duckTimer);
+diff --git a/tests/test_repository.py b/tests/test_repository.py
+index 127a009..18277c6 100644
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -994,3 +994,18 @@ class RepositoryTests(unittest.TestCase):
+ 
+         self.assertNotIn("No separate media session", server)
+ 
++
++    def test_v59_3_para_music_holds_menu_soundtrack_suspension_across_navigation(self):
++        menu_music = (ROOT / "apps/para-home/src/services/menu-music.js").read_text(encoding="utf-8")
++        media_session = (ROOT / "apps/para-home/src/services/media-session.js").read_text(encoding="utf-8")
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++
++        self.assertIn("let suspended = false", menu_music)
++        self.assertIn("if (suspended || gameRunning || sound.menuMusic === false)", menu_music)
++        self.assertIn("suspended = true", menu_music)
++        self.assertIn("suspended = false", menu_music)
++        self.assertIn("if (!suspended && prefs().menuMusic !== false && unlocked)", menu_music)
++        self.assertIn("if (suspended || !unlocked || prefs().menuMusic === false) return", menu_music)
++        self.assertIn('session.appId === "para:music"', media_session)
++        self.assertIn("suspendMenuMusic({ duration: 100 })", media_session)
++        self.assertIn("syncMenuMusic({ gameRunning:", app)
