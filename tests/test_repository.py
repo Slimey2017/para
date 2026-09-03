@@ -850,3 +850,17 @@ class RepositoryTests(unittest.TestCase):
         self.assertGreater(final_save, -1)
         self.assertGreater(success_toast, final_save)
 
+
+    def test_v58_para_home_csp_allows_blob_video_without_widening_fetch_policy(self):
+        api_server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        gateway = (ROOT / "services/gateway/server.py").read_text(encoding="utf-8")
+
+        media_directive = "media-src 'self' data: blob:;"
+        self.assertEqual(api_server.count(media_directive), 3)
+        self.assertEqual(gateway.count(media_directive), 2)
+        self.assertNotIn("connect-src 'self' blob:", api_server)
+        self.assertNotIn("connect-src 'self' blob:", gateway)
+        self.assertIn(
+            "img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self';",
+            api_server,
+        )
