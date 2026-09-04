@@ -1,0 +1,200 @@
+diff -ruN /mnt/data/para_v594/PARA_MUSIC_COLD_BOOT_GUARD_V59_5.md /mnt/data/para_v595/PARA_MUSIC_COLD_BOOT_GUARD_V59_5.md
+--- /mnt/data/para_v594/PARA_MUSIC_COLD_BOOT_GUARD_V59_5.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/para_v595/PARA_MUSIC_COLD_BOOT_GUARD_V59_5.md	2026-09-04 13:19:06.176317503 +0000
+@@ -0,0 +1,23 @@
++# PARA Music V59.5 — Cold Boot Guard
++
++## Bug
++V59.4 restored the saved local-music handoff on every PARA Home boot. Because `restoreLocalMusicSession()` defaults to `attemptPlayback: true`, a track that had last been playing could immediately start when PARA was opened or reloaded.
++
++## Fix
++- Cold PARA Home boot/reload restores the selected track, timestamp, and saved volume in a **paused** state.
++- PARA Music only auto-continues when the current tab is performing an intentional Home -> game or game -> document handoff.
++- Intentional continuity uses a short-lived `sessionStorage` marker: `para.music.continue.v1`.
++- The marker is consumed once and expires after 12 seconds, so stale sessions cannot trigger surprise playback later.
++- Suspended Home over a living game still controls the game runtime's single persistent music player and does not create another player.
++- Recorder isolation and the V59.3 normal-menu soundtrack mute lock are unchanged.
++
++## Expected behavior
++1. Play `All Of The Lights` in PARA Music.
++2. Close/reload/open PARA normally: the track is remembered, but it does **not** start playing by itself.
++3. Press Play: playback starts normally from the remembered position.
++4. While playing, launch a WEB game from PARA Home: the song continues through the intentional handoff.
++5. Open suspended PARA Home over the game and return to the game: the same runtime player continues without clone/restart behavior.
++
++## Validation
++Targeted V59–V59.5 repository checks: 6/6 passed.
++`services/api/server.py` also passes Python syntax compilation.
+diff -ruN /mnt/data/para_v594/apps/para-home/src/app.js /mnt/data/para_v595/apps/para-home/src/app.js
+--- /mnt/data/para_v594/apps/para-home/src/app.js	2026-09-03 16:04:51.000000000 +0000
++++ /mnt/data/para_v595/apps/para-home/src/app.js	2026-09-04 13:18:26.342933310 +0000
+@@ -289,7 +289,7 @@
+   window.setTimeout(() => {
+     node.classList.add("is-committed");
+     window.setTimeout(() => {
+-      prepareLocalMusicHandoff();
++      prepareLocalMusicHandoff({ continuePlayback: true });
+       window.location.assign(destination);
+     }, reduced ? 1 : 120);
+   }, reduced ? 20 : 500);
+diff -ruN /mnt/data/para_v594/apps/para-home/src/services/local-music.js /mnt/data/para_v595/apps/para-home/src/services/local-music.js
+--- /mnt/data/para_v594/apps/para-home/src/services/local-music.js	2026-09-03 16:10:34.000000000 +0000
++++ /mnt/data/para_v595/apps/para-home/src/services/local-music.js	2026-09-04 13:18:26.342122981 +0000
+@@ -10,6 +10,7 @@
+ const TRACK_STORE = "tracks";
+ const MUSIC_EVENT = "para-local-music-change";
+ const HANDOFF_KEY = "para.music.handoff.v1";
++const CONTINUE_KEY = "para.music.continue.v1";
+ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "webm"]);
+ const SHELL_PARAMS = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+ const IS_SUSPENDED_HOME = SHELL_PARAMS.get("para_suspended_shell") === "1";
+@@ -512,8 +513,24 @@
+   } catch { /* Local handoff is best effort. */ }
+ }
+ 
+-export function prepareLocalMusicHandoff() {
++function markMusicContinuation() {
++  try { sessionStorage.setItem(CONTINUE_KEY, String(Date.now())); }
++  catch { /* Continuity marker is best effort. */ }
++}
++
++function consumeMusicContinuation(maxAgeMs = 12000) {
++  try {
++    const at = Number(sessionStorage.getItem(CONTINUE_KEY) || 0);
++    sessionStorage.removeItem(CONTINUE_KEY);
++    return at > 0 && Date.now() - at >= 0 && Date.now() - at <= maxAgeMs;
++  } catch {
++    return false;
++  }
++}
++
++export function prepareLocalMusicHandoff({ continuePlayback = false } = {}) {
+   persistMusicHandoff(true);
++  if (continuePlayback) markMusicContinuation();
+   return localMusicState();
+ }
+ 
+@@ -767,11 +784,19 @@
+ if (typeof window !== "undefined") {
+   window.addEventListener("pagehide", () => prepareLocalMusicHandoff());
+   const restore = () => {
+-    if (parentMusicHost()) startBridgeSync();
+-    void restoreLocalMusicSession().catch(() => {});
++    if (parentMusicHost()) {
++      startBridgeSync();
++      void restoreLocalMusicSession({ attemptPlayback: false }).catch(() => {});
++      return;
++    }
++    // A normal PARA boot/reload may restore the selected track and position,
++    // but it must never unexpectedly start blasting audio. Only an explicit
++    // same-tab Home <-> game handoff is allowed to continue playback.
++    const continuePlayback = consumeMusicContinuation();
++    void restoreLocalMusicSession({ attemptPlayback: continuePlayback }).catch(() => {});
+   };
+   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restore, { once: true });
+   else queueMicrotask(restore);
+ }
+ 
+-export { MUSIC_EVENT, HANDOFF_KEY };
++export { MUSIC_EVENT, HANDOFF_KEY, CONTINUE_KEY };
+diff -ruN /mnt/data/para_v594/services/api/server.py /mnt/data/para_v595/services/api/server.py
+--- /mnt/data/para_v594/services/api/server.py	2026-09-03 16:10:35.000000000 +0000
++++ /mnt/data/para_v595/services/api/server.py	2026-09-04 13:18:26.344330944 +0000
+@@ -1462,6 +1462,7 @@
+   const PARA_MUSIC_DB_NAME = 'para-music-library-v1';
+   const PARA_MUSIC_TRACK_STORE = 'tracks';
+   const PARA_MUSIC_HANDOFF_KEY = 'para.music.handoff.v1';
++  const PARA_MUSIC_CONTINUE_KEY = 'para.music.continue.v1';
+   let paraMusicDbPromise = null;
+   let paraMusicAudio = null;
+   let paraMusicObjectUrl = '';
+@@ -1479,6 +1480,18 @@
+     } catch (_) { return null; }
+   }
+ 
++  function markParaMusicContinuation() {
++    try { sessionStorage.setItem(PARA_MUSIC_CONTINUE_KEY, String(Date.now())); } catch (_) {}
++  }
++
++  function consumeParaMusicContinuation(maxAgeMs = 12000) {
++    try {
++      const at = Number(sessionStorage.getItem(PARA_MUSIC_CONTINUE_KEY) || 0);
++      sessionStorage.removeItem(PARA_MUSIC_CONTINUE_KEY);
++      return at > 0 && Date.now() - at >= 0 && Date.now() - at <= maxAgeMs;
++    } catch (_) { return false; }
++  }
++
+   function paraMusicState() {
+     return {
+       active: Boolean(paraMusicTrack),
+@@ -2022,7 +2035,7 @@
+     try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
+     const node = createGamePageTransition('Closing Game');
+     node.classList.add('is-visible');
+-    setTimeout(() => { writeParaMusicHandoff(true); location.href = destination; }, 430);
++    setTimeout(() => { writeParaMusicHandoff(true); markParaMusicContinuation(); location.href = destination; }, 430);
+   }
+ 
+   function switchSuspendedGame(storeId) {
+@@ -2037,7 +2050,7 @@
+     const node = createGamePageTransition('Switching Games');
+     node.classList.add('is-visible');
+     const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
+-    setTimeout(() => { writeParaMusicHandoff(true); location.href = next; }, 430);
++    setTimeout(() => { writeParaMusicHandoff(true); markParaMusicContinuation(); location.href = next; }, 430);
+   }
+ 
+   function leaveGame(destination = '/#/home') {
+@@ -2080,7 +2093,10 @@
+   const bootParaGameRuntime = () => {
+     rememberGameDocumentTitle();
+     revealGameAfterLaunch();
+-    void restoreParaMusicFromHandoff({ attemptPlayback: true });
++    // Continue a song only when PARA Home explicitly marked this same-tab
++    // navigation as a music handoff. A cold game-page boot stays silent.
++    const continuePlayback = consumeParaMusicContinuation();
++    void restoreParaMusicFromHandoff({ attemptPlayback: continuePlayback });
+   };
+   addEventListener('pagehide', () => writeParaMusicHandoff(true));
+   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', bootParaGameRuntime, { once: true });
+diff -ruN /mnt/data/para_v594/tests/test_repository.py /mnt/data/para_v595/tests/test_repository.py
+--- /mnt/data/para_v594/tests/test_repository.py	2026-09-03 16:09:10.000000000 +0000
++++ /mnt/data/para_v595/tests/test_repository.py	2026-09-04 13:18:44.431450541 +0000
+@@ -1031,7 +1031,7 @@
+             'artworkBlob',
+         ]:
+             self.assertIn(marker, service)
+-        self.assertIn('prepareLocalMusicHandoff();', app)
++        self.assertIn('prepareLocalMusicHandoff({ continuePlayback: true });', app)
+         self.assertIn('parentMusicOwnsBackground()', menu_music)
+ 
+         for marker in [
+@@ -1039,7 +1039,7 @@
+             'compensatedParaMusicTime',
+             'PARA Music belongs to the persistent game runtime',
+             'Home controls this same player through the',
+-            'writeParaMusicHandoff(true); location.href = destination',
++            'writeParaMusicHandoff(true); markParaMusicContinuation(); location.href = destination',
+         ]:
+             self.assertIn(marker, server)
+         self.assertNotIn("if (!media.paused) media.pause();\n          paraMusicSuppressPausePersist = false;\n          continue;", server)
+@@ -1060,3 +1060,19 @@
+             '.music-track__thumb',
+         ]:
+             self.assertIn(marker, styles)
++
++    def test_v59_5_cold_boot_never_autoplays_saved_local_music(self):
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++
++        self.assertIn('const CONTINUE_KEY = "para.music.continue.v1";', service)
++        self.assertIn('consumeMusicContinuation()', service)
++        self.assertIn('restoreLocalMusicSession({ attemptPlayback: continuePlayback })', service)
++        self.assertIn('prepareLocalMusicHandoff({ continuePlayback: true });', app)
++        self.assertIn("const PARA_MUSIC_CONTINUE_KEY = 'para.music.continue.v1';", server)
++        self.assertIn('consumeParaMusicContinuation()', server)
++        self.assertIn('markParaMusicContinuation(); location.href = destination', server)
++        self.assertIn('markParaMusicContinuation(); location.href = next', server)
++        self.assertNotIn('void restoreParaMusicFromHandoff({ attemptPlayback: true });', server)
++

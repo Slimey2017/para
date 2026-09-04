@@ -10,6 +10,7 @@ const DB_VERSION = 1;
 const TRACK_STORE = "tracks";
 const MUSIC_EVENT = "para-local-music-change";
 const HANDOFF_KEY = "para.music.handoff.v1";
+const CONTINUE_KEY = "para.music.continue.v1";
 const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "webm"]);
 const SHELL_PARAMS = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
 const IS_SUSPENDED_HOME = SHELL_PARAMS.get("para_suspended_shell") === "1";
@@ -512,8 +513,24 @@ function persistMusicHandoff(force = false) {
   } catch { /* Local handoff is best effort. */ }
 }
 
-export function prepareLocalMusicHandoff() {
+function markMusicContinuation() {
+  try { sessionStorage.setItem(CONTINUE_KEY, String(Date.now())); }
+  catch { /* Continuity marker is best effort. */ }
+}
+
+function consumeMusicContinuation(maxAgeMs = 12000) {
+  try {
+    const at = Number(sessionStorage.getItem(CONTINUE_KEY) || 0);
+    sessionStorage.removeItem(CONTINUE_KEY);
+    return at > 0 && Date.now() - at >= 0 && Date.now() - at <= maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
+export function prepareLocalMusicHandoff({ continuePlayback = false } = {}) {
   persistMusicHandoff(true);
+  if (continuePlayback) markMusicContinuation();
   return localMusicState();
 }
 
@@ -767,11 +784,19 @@ export function localMusicState() {
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", () => prepareLocalMusicHandoff());
   const restore = () => {
-    if (parentMusicHost()) startBridgeSync();
-    void restoreLocalMusicSession().catch(() => {});
+    if (parentMusicHost()) {
+      startBridgeSync();
+      void restoreLocalMusicSession({ attemptPlayback: false }).catch(() => {});
+      return;
+    }
+    // A normal PARA boot/reload may restore the selected track and position,
+    // but it must never unexpectedly start blasting audio. Only an explicit
+    // same-tab Home <-> game handoff is allowed to continue playback.
+    const continuePlayback = consumeMusicContinuation();
+    void restoreLocalMusicSession({ attemptPlayback: continuePlayback }).catch(() => {});
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restore, { once: true });
   else queueMicrotask(restore);
 }
 
-export { MUSIC_EVENT, HANDOFF_KEY };
+export { MUSIC_EVENT, HANDOFF_KEY, CONTINUE_KEY };

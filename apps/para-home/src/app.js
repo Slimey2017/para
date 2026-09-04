@@ -289,7 +289,7 @@ function transitionIntoGame(destination, title = "PARA Game", artwork = []) {
   window.setTimeout(() => {
     node.classList.add("is-committed");
     window.setTimeout(() => {
-      prepareLocalMusicHandoff();
+      prepareLocalMusicHandoff({ continuePlayback: true });
       window.location.assign(destination);
     }, reduced ? 1 : 120);
   }, reduced ? 20 : 500);

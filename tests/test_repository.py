@@ -1031,7 +1031,7 @@ class RepositoryTests(unittest.TestCase):
             'artworkBlob',
         ]:
             self.assertIn(marker, service)
-        self.assertIn('prepareLocalMusicHandoff();', app)
+        self.assertIn('prepareLocalMusicHandoff({ continuePlayback: true });', app)
         self.assertIn('parentMusicOwnsBackground()', menu_music)
 
         for marker in [
@@ -1039,7 +1039,7 @@ class RepositoryTests(unittest.TestCase):
             'compensatedParaMusicTime',
             'PARA Music belongs to the persistent game runtime',
             'Home controls this same player through the',
-            'writeParaMusicHandoff(true); location.href = destination',
+            'writeParaMusicHandoff(true); markParaMusicContinuation(); location.href = destination',
         ]:
             self.assertIn(marker, server)
         self.assertNotIn("if (!media.paused) media.pause();\n          paraMusicSuppressPausePersist = false;\n          continue;", server)
@@ -1060,3 +1060,19 @@ class RepositoryTests(unittest.TestCase):
             '.music-track__thumb',
         ]:
             self.assertIn(marker, styles)
+
+    def test_v59_5_cold_boot_never_autoplays_saved_local_music(self):
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        service = (ROOT / "apps/para-home/src/services/local-music.js").read_text(encoding="utf-8")
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+
+        self.assertIn('const CONTINUE_KEY = "para.music.continue.v1";', service)
+        self.assertIn('consumeMusicContinuation()', service)
+        self.assertIn('restoreLocalMusicSession({ attemptPlayback: continuePlayback })', service)
+        self.assertIn('prepareLocalMusicHandoff({ continuePlayback: true });', app)
+        self.assertIn("const PARA_MUSIC_CONTINUE_KEY = 'para.music.continue.v1';", server)
+        self.assertIn('consumeParaMusicContinuation()', server)
+        self.assertIn('markParaMusicContinuation(); location.href = destination', server)
+        self.assertIn('markParaMusicContinuation(); location.href = next', server)
+        self.assertNotIn('void restoreParaMusicFromHandoff({ attemptPlayback: true });', server)
+

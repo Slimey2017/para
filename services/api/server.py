@@ -1462,6 +1462,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const PARA_MUSIC_DB_NAME = 'para-music-library-v1';
   const PARA_MUSIC_TRACK_STORE = 'tracks';
   const PARA_MUSIC_HANDOFF_KEY = 'para.music.handoff.v1';
+  const PARA_MUSIC_CONTINUE_KEY = 'para.music.continue.v1';
   let paraMusicDbPromise = null;
   let paraMusicAudio = null;
   let paraMusicObjectUrl = '';
@@ -1477,6 +1478,18 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
       const value = JSON.parse(localStorage.getItem(PARA_MUSIC_HANDOFF_KEY) || 'null');
       return value && typeof value === 'object' ? value : null;
     } catch (_) { return null; }
+  }
+
+  function markParaMusicContinuation() {
+    try { sessionStorage.setItem(PARA_MUSIC_CONTINUE_KEY, String(Date.now())); } catch (_) {}
+  }
+
+  function consumeParaMusicContinuation(maxAgeMs = 12000) {
+    try {
+      const at = Number(sessionStorage.getItem(PARA_MUSIC_CONTINUE_KEY) || 0);
+      sessionStorage.removeItem(PARA_MUSIC_CONTINUE_KEY);
+      return at > 0 && Date.now() - at >= 0 && Date.now() - at <= maxAgeMs;
+    } catch (_) { return false; }
   }
 
   function paraMusicState() {
@@ -2022,7 +2035,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     try { sessionStorage.setItem(GAME_RETURN_TRANSITION_KEY, JSON.stringify({ title: GAME_TITLE, at: Date.now() })); } catch (_) {}
     const node = createGamePageTransition('Closing Game');
     node.classList.add('is-visible');
-    setTimeout(() => { writeParaMusicHandoff(true); location.href = destination; }, 430);
+    setTimeout(() => { writeParaMusicHandoff(true); markParaMusicContinuation(); location.href = destination; }, 430);
   }
 
   function switchSuspendedGame(storeId) {
@@ -2037,7 +2050,7 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
     const node = createGamePageTransition('Switching Games');
     node.classList.add('is-visible');
     const next = `/api/v1/store/content/${encodeURIComponent(id)}/index.html?para_game_mode=1&para_build=v25`;
-    setTimeout(() => { writeParaMusicHandoff(true); location.href = next; }, 430);
+    setTimeout(() => { writeParaMusicHandoff(true); markParaMusicContinuation(); location.href = next; }, 430);
   }
 
   function leaveGame(destination = '/#/home') {
@@ -2080,7 +2093,10 @@ def store_content(item_id: str, relative_path: str) -> tuple[int, bytes, str]:
   const bootParaGameRuntime = () => {
     rememberGameDocumentTitle();
     revealGameAfterLaunch();
-    void restoreParaMusicFromHandoff({ attemptPlayback: true });
+    // Continue a song only when PARA Home explicitly marked this same-tab
+    // navigation as a music handoff. A cold game-page boot stays silent.
+    const continuePlayback = consumeParaMusicContinuation();
+    void restoreParaMusicFromHandoff({ attemptPlayback: continuePlayback });
   };
   addEventListener('pagehide', () => writeParaMusicHandoff(true));
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', bootParaGameRuntime, { once: true });
