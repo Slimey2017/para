@@ -1,0 +1,75 @@
+@pmenu 1
+
+menu "Channel Grid" {
+  id "para.example.channel-grid"
+  author "PARA"
+  version "1.0.0"
+  description "A bright channel-style grid that demonstrates PMENU v1."
+  background "background.png"
+  preview "preview.png"
+  accent "#8f5cff"
+  show-clock true
+  show-profile true
+}
+
+layout channel-grid {
+  columns 4
+  rows 2
+  gap 18
+}
+
+item games {
+  label "Games"
+  route "games"
+  icon "assets/games.png"
+  position 1 1
+}
+
+item apps {
+  label "Apps"
+  route "apps"
+  icon "assets/apps.png"
+  position 2 1
+}
+
+item store {
+  label "ParaStore"
+  route "parastore"
+  icon "assets/store.png"
+  position 3 1
+}
+
+item music {
+  label "Music"
+  route "music"
+  icon "assets/music.png"
+  position 4 1
+}
+
+item files {
+  label "Files"
+  route "files"
+  icon "assets/files.png"
+  position 1 2
+}
+
+item media {
+  label "Media"
+  route "media-gallery"
+  icon "assets/media.png"
+  position 2 2
+}
+
+item friends {
+  label "Friends"
+  route "friends"
+  icon "assets/friends.png"
+  position 3 2
+}
+
+item settings {
+  label "Settings"
+  route "settings"
+  icon "assets/settings.png"
+  position 4 2
+}

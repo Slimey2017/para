@@ -16,7 +16,7 @@ export function personalizationScreen() {
     title: "Personalization",
     description: "Make PARA feel like yours.",
     eyebrow: "Settings",
-    body: `<div class="settings-grid personalization-grid">${tile({ title: "Background", meta: "Wallpaper, preview, fitting, and dimming", route: "background", icon: "◩", autofocus: true })}${tile({ title: "Control Center", meta: "Arrange quick system controls", route: "control-center-settings", icon: "◎" })}</div>`,
+    body: `<div class="settings-grid personalization-grid">${tile({ title: "Home Styles", meta: "Change the entire Home layout with PMENU folders", route: "home-styles", icon: "▦", autofocus: true })}${tile({ title: "Background", meta: "Wallpaper, preview, fitting, and dimming", route: "background", icon: "◩" })}${tile({ title: "Control Center", meta: "Arrange quick system controls", route: "control-center-settings", icon: "◎" })}</div>`,
   });
 }
 

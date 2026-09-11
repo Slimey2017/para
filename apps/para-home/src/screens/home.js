@@ -2,6 +2,7 @@ import { getState } from "../state.js";
 import { paraApi, escapeHtml } from "../services/para-api.js";
 import { profileRuntime, pruneContinueQueue, recentExperiences } from "../services/experience-runtime.js";
 import { paraLogo, accountQuickMenu } from "../ui/components.js";
+import { activePmenuManifest, activateCustomHome, customHomeScreen } from "../services/pmenu.js";
 
 const sections = [
   { id: "continue", title: "Continue" },
@@ -178,6 +179,8 @@ function primaryFocusId(section, model) {
 
 export function homeScreen() {
   const profile = getState().activeProfile || "P1";
+  const customHome = activePmenuManifest();
+  if (customHome) return customHomeScreen(customHome, profile);
   const runtime = profileRuntime();
   const activeDownloads = runtime.downloads.filter((item) => item.status === "downloading").length;
   const unreadNotifications = runtime.notifications.filter((note) => !note.readAt).length;
@@ -187,6 +190,7 @@ export function homeScreen() {
 
 
 export function activateHome({ focus }) {
+  if (document.querySelector(".pmenu-home")) return activateCustomHome({ focus });
   const root = document.querySelector(".home-ui");
   const context = root?.querySelector(".home-context");
   if (!root || !context) return () => {};

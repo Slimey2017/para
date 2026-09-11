@@ -18,6 +18,7 @@ import {
 import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
 import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
 import { musicScreen, activateMusic } from "./screens/music.js";
+import { homeStylesScreen, activateHomeStyles } from "./screens/home-styles.js";
 import { capturePlaybackBlob, capturePlaybackMime, capturePlaybackSegments, isSegmentedCapture, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
 import {
   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
@@ -127,6 +128,7 @@ const renderers = {
   health: healthScreen,
   recovery: recoveryScreen,
   personalization: personalizationScreen,
+  "home-styles": homeStylesScreen,
   background: backgroundScreen,
   "control-center-settings": controlCenterSettingsScreen,
 };
@@ -489,6 +491,8 @@ function render(route) {
     cleanupScreen = activateParaInputScreen();
   } else if (route === "para-lab") {
     cleanupScreen = activateParaLab();
+  } else if (route === "home-styles") {
+    cleanupScreen = activateHomeStyles({ focus, notify: toast });
   } else if (route === "background") {
     cleanupScreen = activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
   } else if (route === "control-center-settings") {

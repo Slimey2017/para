@@ -1,0 +1,808 @@
+--- para_recon_v595/para/apps/para-home/src/app.js	2026-09-04 13:18:26.000000000 +0000
++++ para_recon_v60/para/apps/para-home/src/app.js	2026-09-11 23:41:49.385061453 +0000
+@@ -18,6 +18,7 @@
+ import { filesScreen, downloadManagerScreen, activateFiles, activateDownloadManager, filesBack } from "./screens/files.js";
+ import { mediaGalleryScreen, achievementsScreen, activateMediaGallery, activateAchievements, removeCapture, selectMediaCapture, filterMediaGallery } from "./screens/media.js";
+ import { musicScreen, activateMusic } from "./screens/music.js";
++import { homeStylesScreen, activateHomeStyles } from "./screens/home-styles.js";
+ import { capturePlaybackBlob, capturePlaybackMime, capturePlaybackSegments, isSegmentedCapture, captureScreenshot, recordRecentClip, startReplayBuffer, saveReplayClip, shareCapture, listCaptures, getCapture, replayStatus, startManualRecording, stopManualRecording, manualRecordingStatus } from "./services/capture-service.js";
+ import {
+   controllerScreen, updateControllerScreen, activateControllerScreen, paraInputScreen, activateParaInputScreen, storageScreen, activateStorage,
+@@ -127,6 +128,7 @@
+   health: healthScreen,
+   recovery: recoveryScreen,
+   personalization: personalizationScreen,
++  "home-styles": homeStylesScreen,
+   background: backgroundScreen,
+   "control-center-settings": controlCenterSettingsScreen,
+ };
+@@ -489,6 +491,8 @@
+     cleanupScreen = activateParaInputScreen();
+   } else if (route === "para-lab") {
+     cleanupScreen = activateParaLab();
++  } else if (route === "home-styles") {
++    cleanupScreen = activateHomeStyles({ focus, notify: toast });
+   } else if (route === "background") {
+     cleanupScreen = activateBackgroundScreen({ focus, changed: schedulePreferenceSave });
+   } else if (route === "control-center-settings") {
+--- para_recon_v595/para/apps/para-home/src/screen-manifest.js	2026-09-03 15:41:14.000000000 +0000
++++ para_recon_v60/para/apps/para-home/src/screen-manifest.js	2026-09-11 23:41:49.385252184 +0000
+@@ -29,6 +29,7 @@
+   { id: "files", label: "PARA Files", group: "library" },
+   { id: "downloads", label: "Downloads", group: "system" },
+   { id: "personalization", label: "Personalization", group: "system" },
++  { id: "home-styles", label: "Home Styles", group: "system" },
+   { id: "background", label: "Background", group: "system" },
+   { id: "control-center-settings", label: "Control Center customization", group: "system" },
+   { id: "controller", label: "Controller pairing", group: "system" },
+--- para_recon_v595/para/apps/para-home/src/screens/home.js	2026-09-02 00:02:28.000000000 +0000
++++ para_recon_v60/para/apps/para-home/src/screens/home.js	2026-09-11 23:41:49.378395836 +0000
+@@ -2,6 +2,7 @@
+ import { paraApi, escapeHtml } from "../services/para-api.js";
+ import { profileRuntime, pruneContinueQueue, recentExperiences } from "../services/experience-runtime.js";
+ import { paraLogo, accountQuickMenu } from "../ui/components.js";
++import { activePmenuManifest, activateCustomHome, customHomeScreen } from "../services/pmenu.js";
+ 
+ const sections = [
+   { id: "continue", title: "Continue" },
+@@ -178,6 +179,8 @@
+ 
+ export function homeScreen() {
+   const profile = getState().activeProfile || "P1";
++  const customHome = activePmenuManifest();
++  if (customHome) return customHomeScreen(customHome, profile);
+   const runtime = profileRuntime();
+   const activeDownloads = runtime.downloads.filter((item) => item.status === "downloading").length;
+   const unreadNotifications = runtime.notifications.filter((note) => !note.readAt).length;
+@@ -187,6 +190,7 @@
+ 
+ 
+ export function activateHome({ focus }) {
++  if (document.querySelector(".pmenu-home")) return activateCustomHome({ focus });
+   const root = document.querySelector(".home-ui");
+   const context = root?.querySelector(".home-context");
+   if (!root || !context) return () => {};
+--- para_recon_v595/para/apps/para-home/src/screens/personalization.js	2026-08-31 03:47:27.000000000 +0000
++++ para_recon_v60/para/apps/para-home/src/screens/personalization.js	2026-09-11 23:41:49.378819019 +0000
+@@ -16,7 +16,7 @@
+     title: "Personalization",
+     description: "Make PARA feel like yours.",
+     eyebrow: "Settings",
+-    body: `<div class="settings-grid personalization-grid">${tile({ title: "Background", meta: "Wallpaper, preview, fitting, and dimming", route: "background", icon: "◩", autofocus: true })}${tile({ title: "Control Center", meta: "Arrange quick system controls", route: "control-center-settings", icon: "◎" })}</div>`,
++    body: `<div class="settings-grid personalization-grid">${tile({ title: "Home Styles", meta: "Change the entire Home layout with PMENU folders", route: "home-styles", icon: "▦", autofocus: true })}${tile({ title: "Background", meta: "Wallpaper, preview, fitting, and dimming", route: "background", icon: "◩" })}${tile({ title: "Control Center", meta: "Arrange quick system controls", route: "control-center-settings", icon: "◎" })}</div>`,
+   });
+ }
+ 
+--- para_recon_v595/para/apps/para-home/styles.css	2026-09-03 16:08:03.000000000 +0000
++++ para_recon_v60/para/apps/para-home/styles.css	2026-09-11 23:41:49.530574270 +0000
+@@ -2248,3 +2248,46 @@
+ @media(max-width:980px){.music-now-playing{grid-template-columns:minmax(220px,.65fr) minmax(0,1.35fr);gap:24px}.music-track-list{grid-template-columns:1fr}}
+ @media(max-width:720px){.music-now-playing{grid-template-columns:1fr;padding:20px}.music-cover-shell{width:min(78vw,280px)}.music-now-playing__content{text-align:center;padding:0}.music-now-playing__kicker,.music-transport{justify-content:center}.music-timeline,.music-volume{margin-inline:auto;width:100%}.music-import-zone{align-items:stretch;flex-direction:column}.music-import-zone .action-button{width:100%}.music-local-note{align-items:flex-start;flex-direction:column}.music-track__main{grid-template-columns:44px minmax(0,1fr) auto}.music-track__size{display:none}}
+ @media(prefers-reduced-motion:reduce){.music-now-playing::before,.music-cover__generated::before,.music-vinyl,.music-equalizer i,.music-mini-equalizer i{animation:none!important}}
++/* PMENU v1 — folder-based PARA Home Styles */
++.pmenu-page .page__body { display: grid; gap: 18px; }
++.pmenu-import { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:24px; }
++.pmenu-import strong { display:block; font-size:1.12rem; margin-bottom:6px; }
++.pmenu-import p { margin:0; max-width:720px; color:var(--muted); }
++.pmenu-format-note { display:flex; align-items:center; gap:12px; padding:0 4px; color:var(--muted); font-size:.86rem; }
++.pmenu-format-note strong { color:var(--accent); letter-spacing:.08em; }
++.pmenu-pack-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
++.pmenu-pack-card { overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:24px; background:rgba(12,10,18,.78); box-shadow:0 18px 50px rgba(0,0,0,.28); }
++.pmenu-pack-card.is-active { border-color:color-mix(in srgb,var(--accent) 72%,white 12%); box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),0 18px 50px rgba(0,0,0,.32); }
++.pmenu-pack-card__preview { min-height:160px; background:radial-gradient(circle at 65% 25%,rgba(157,87,255,.32),transparent 38%),linear-gradient(145deg,#171020,#050407); background-size:cover; background-position:center; display:grid; place-items:center; }
++.pmenu-pack-card__preview span { width:68px; height:68px; border-radius:18px; display:grid; place-items:center; font-size:2rem; font-weight:800; background:rgba(255,255,255,.09); backdrop-filter:blur(12px); }
++.pmenu-pack-card__copy { padding:18px; }
++.pmenu-pack-card__copy small { color:var(--accent); letter-spacing:.08em; font-weight:800; }
++.pmenu-pack-card__copy h2 { margin:5px 0 6px; font-size:1.3rem; }
++.pmenu-pack-card__copy p { margin:0 0 16px; color:var(--muted); min-height:2.4em; }
++.pmenu-pack-card__copy > div { display:flex; gap:10px; }
++.pmenu-status { min-height:1.4em; margin:0; color:var(--muted); }
++.pmenu-status.is-error { color:#ff8f9e; }
++
++.pmenu-home { position:relative; min-height:100%; overflow:hidden; background:#08070c; color:#fff; isolation:isolate; }
++.pmenu-home__background { position:absolute; inset:0; z-index:-2; background-size:cover; background-position:center; }
++.pmenu-home__background::after { content:""; position:absolute; inset:0; background:linear-gradient(to bottom,rgba(3,3,7,.18),rgba(3,3,7,.45)); }
++.pmenu-home::after { content:""; position:absolute; inset:auto -15% -28% -15%; height:52%; z-index:-1; background:radial-gradient(ellipse at center,color-mix(in srgb,var(--pmenu-accent) 28%,transparent),transparent 66%); pointer-events:none; }
++.pmenu-home__header { min-height:88px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:18px; padding:18px 34px; position:relative; z-index:2; }
++.pmenu-home__brand,.pmenu-home__status button,.pmenu-home__footer button { border:0; color:#fff; background:rgba(8,7,13,.46); backdrop-filter:blur(15px); border-radius:18px; }
++.pmenu-home__brand { justify-self:start; display:flex; align-items:center; gap:10px; padding:10px 14px; font-size:1rem; }
++.pmenu-home__brand span { color:var(--pmenu-accent); }
++.pmenu-home__title { text-align:center; display:grid; gap:1px; }
++.pmenu-home__title small { color:rgba(255,255,255,.62); font-size:.72rem; text-transform:uppercase; letter-spacing:.16em; }
++.pmenu-home__title strong { font-size:1.08rem; }
++.pmenu-home__status { justify-self:end; display:flex; align-items:center; gap:12px; font-weight:700; }
++.pmenu-home__status button { padding:10px 14px; }
++.pmenu-channel-grid { min-height:calc(100vh - 178px); max-width:1280px; margin:0 auto; padding:34px 48px 70px; display:grid; grid-template-columns:repeat(var(--pmenu-columns),minmax(0,1fr)); grid-template-rows:repeat(var(--pmenu-rows),minmax(120px,1fr)); gap:var(--pmenu-gap); align-content:center; }
++.pmenu-channel { grid-column:var(--pmenu-x) / span var(--pmenu-w); grid-row:var(--pmenu-y) / span var(--pmenu-h); min-height:132px; border:1px solid rgba(255,255,255,.17); border-radius:22px; background:rgba(248,248,252,.93); color:#17151c; box-shadow:0 14px 36px rgba(0,0,0,.28); overflow:hidden; position:relative; padding:0; display:grid; grid-template-rows:1fr auto; transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease; }
++.pmenu-channel:hover,.pmenu-channel:focus-visible,.pmenu-channel[data-focused="true"] { transform:translateY(-5px) scale(1.025); outline:0; border-color:var(--pmenu-accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--pmenu-accent) 28%,transparent),0 22px 46px rgba(0,0,0,.34); }
++.pmenu-channel__art { min-height:86px; display:grid; place-items:center; overflow:hidden; background:linear-gradient(150deg,#fff,#e7e5ec); }
++.pmenu-channel__art img { width:100%; height:100%; object-fit:cover; }
++.pmenu-channel__fallback { width:58px; height:58px; border-radius:18px; display:grid; place-items:center; color:#fff; font-size:1.7rem; font-weight:900; background:var(--pmenu-accent); box-shadow:0 8px 22px color-mix(in srgb,var(--pmenu-accent) 32%,transparent); }
++.pmenu-channel > strong { padding:10px 12px 12px; font-size:.92rem; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
++.pmenu-home__footer { position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:space-between; align-items:center; padding:14px 34px; color:rgba(255,255,255,.72); font-size:.8rem; }
++.pmenu-home__footer button { padding:9px 13px; font-weight:700; }
++@media (max-width:900px) { .pmenu-channel-grid { padding-inline:22px; grid-template-columns:repeat(2,minmax(0,1fr)); } .pmenu-channel { grid-column:auto !important; grid-row:auto !important; } .pmenu-home__title { display:none; } .pmenu-home__header { grid-template-columns:1fr 1fr; } }
+--- para_recon_v595/para/tests/test_repository.py	2026-09-04 13:18:44.000000000 +0000
++++ para_recon_v60/para/tests/test_repository.py	2026-09-11 23:41:49.385441705 +0000
+@@ -1076,3 +1076,23 @@
+         self.assertIn('markParaMusicContinuation(); location.href = next', server)
+         self.assertNotIn('void restoreParaMusicFromHandoff({ attemptPlayback: true });', server)
+ 
++
++    def test_pmenu_v1_home_styles_are_folder_based_and_sandboxed(self):
++        service = (ROOT / "apps/para-home/src/services/pmenu.js").read_text(encoding="utf-8")
++        screen = (ROOT / "apps/para-home/src/screens/home-styles.js").read_text(encoding="utf-8")
++        home = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
++        personalization = (ROOT / "apps/para-home/src/screens/personalization.js").read_text(encoding="utf-8")
++        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
++        manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
++        self.assertIn('^@pmenu\\s+1$', service)
++        self.assertIn('webkitdirectory', screen)
++        self.assertIn('exactly one .pmenu file', service)
++        self.assertIn('Missing asset:', service)
++        self.assertIn('IndexedDB', service)
++        self.assertIn('customHomeScreen', home)
++        self.assertIn('activateCustomHome', home)
++        self.assertIn('route: "home-styles"', personalization)
++        self.assertIn('"home-styles": homeStylesScreen', app)
++        self.assertIn('id: "home-styles"', manifest)
++        self.assertNotIn('eval(', service)
++        self.assertNotIn('new Function(', service)
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ para_recon_v60/para/apps/para-home/src/services/pmenu.js	2026-09-11 23:41:48.490349421 +0000
+@@ -0,0 +1,383 @@
++import { escapeHtml } from "./para-api.js";
++
++const DB_NAME = "para-home-styles-v1";
++const DB_VERSION = 1;
++const PACK_STORE = "packs";
++const ASSET_STORE = "assets";
++const ACTIVE_KEY = "para.pmenu.active.v1";
++const MANIFEST_KEY = "para.pmenu.active-manifest.v1";
++const MAX_FILES = 160;
++const MAX_ASSET_BYTES = 24 * 1024 * 1024;
++const ALLOWED_ASSET_TYPES = new Set([
++  "image/png", "image/jpeg", "image/webp", "image/gif",
++  "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/webm",
++]);
++
++const DEFAULT_ITEMS = Object.freeze([
++  { id: "games", label: "Games", route: "games", position: [1, 1] },
++  { id: "apps", label: "Apps", route: "apps", position: [2, 1] },
++  { id: "store", label: "ParaStore", route: "parastore", position: [3, 1] },
++  { id: "music", label: "Music", route: "music", position: [4, 1] },
++  { id: "files", label: "Files", route: "files", position: [1, 2] },
++  { id: "media", label: "Media", route: "media-gallery", position: [2, 2] },
++  { id: "friends", label: "Friends", route: "friends", position: [3, 2] },
++  { id: "settings", label: "Settings", route: "settings", position: [4, 2] },
++]);
++
++let activeManifestCache = readActiveManifest();
++let activeObjectUrls = [];
++
++function openDb() {
++  return new Promise((resolve, reject) => {
++    if (!globalThis.indexedDB) return reject(new Error("IndexedDB is unavailable"));
++    const request = indexedDB.open(DB_NAME, DB_VERSION);
++    request.onupgradeneeded = () => {
++      const db = request.result;
++      if (!db.objectStoreNames.contains(PACK_STORE)) db.createObjectStore(PACK_STORE, { keyPath: "id" });
++      if (!db.objectStoreNames.contains(ASSET_STORE)) db.createObjectStore(ASSET_STORE, { keyPath: "key" });
++    };
++    request.onsuccess = () => resolve(request.result);
++    request.onerror = () => reject(request.error || new Error("Could not open Home Style storage"));
++  });
++}
++
++function txDone(tx) {
++  return new Promise((resolve, reject) => {
++    tx.oncomplete = () => resolve();
++    tx.onerror = () => reject(tx.error || new Error("Home Style storage failed"));
++    tx.onabort = () => reject(tx.error || new Error("Home Style storage aborted"));
++  });
++}
++
++function readActiveManifest() {
++  try {
++    const raw = localStorage.getItem(MANIFEST_KEY);
++    const value = raw ? JSON.parse(raw) : null;
++    return value && value.id ? value : null;
++  } catch {
++    return null;
++  }
++}
++
++function clearObjectUrls() {
++  activeObjectUrls.forEach((url) => URL.revokeObjectURL(url));
++  activeObjectUrls = [];
++}
++
++function cleanPath(value) {
++  const path = String(value || "").replaceAll("\\", "/").replace(/^\.\//, "");
++  if (!path || path.startsWith("/") || path.includes("../") || path === ".." || /^[a-z]+:/i.test(path)) return "";
++  return path.split("/").filter((part) => part && part !== ".").join("/");
++}
++
++function unquote(value) {
++  const trimmed = String(value || "").trim();
++  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
++    return trimmed.slice(1, -1).replace(/\\([\\"'])/g, "$1");
++  }
++  return trimmed;
++}
++
++function stripComment(line) {
++  let quote = "";
++  for (let index = 0; index < line.length; index += 1) {
++    const char = line[index];
++    if ((char === '"' || char === "'") && line[index - 1] !== "\\") quote = quote === char ? "" : quote || char;
++    if (!quote && char === "#") return line.slice(0, index);
++  }
++  return line;
++}
++
++function parseProperty(line) {
++  const match = line.match(/^([a-zA-Z][\w-]*)\s*(?:=\s*|\s+)(.+)$/);
++  if (!match) return null;
++  return [match[1].toLowerCase(), unquote(match[2])];
++}
++
++function parseBool(value, fallback = false) {
++  if (/^(true|yes|on|1)$/i.test(value)) return true;
++  if (/^(false|no|off|0)$/i.test(value)) return false;
++  return fallback;
++}
++
++function asInt(value, fallback, min, max) {
++  const number = Number.parseInt(value, 10);
++  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
++}
++
++function routeIsSafe(route) {
++  return /^[a-z0-9][a-z0-9-]*$/i.test(route || "");
++}
++
++export function parsePmenu(text) {
++  const source = String(text || "").replace(/^\uFEFF/, "");
++  const lines = source.split(/\r?\n/).map((line) => stripComment(line).trim()).filter(Boolean);
++  if (!lines.length || !/^@pmenu\s+1$/i.test(lines[0])) throw new Error("This is not a PMENU v1 file");
++
++  const manifest = {
++    format: "pmenu",
++    formatVersion: 1,
++    id: "",
++    name: "Untitled Home Style",
++    author: "Unknown",
++    version: "1.0.0",
++    description: "",
++    layout: { type: "channel-grid", columns: 4, rows: 3, gap: 18 },
++    background: "",
++    preview: "",
++    accent: "#9b5cff",
++    showClock: true,
++    showProfile: true,
++    sounds: {},
++    items: [],
++  };
++
++  let block = "root";
++  let currentItem = null;
++  for (const raw of lines.slice(1)) {
++    const open = raw.match(/^(menu|layout|item|sounds)\b(?:\s+([^\{]+?))?\s*\{$/i);
++    if (open) {
++      const type = open[1].toLowerCase();
++      const arg = unquote(open[2] || "");
++      if (type === "menu") {
++        block = "menu";
++        if (arg) manifest.name = arg;
++      } else if (type === "layout") {
++        block = "layout";
++        if (arg) manifest.layout.type = arg.toLowerCase();
++      } else if (type === "sounds") {
++        block = "sounds";
++      } else {
++        if (!/^[a-z0-9][\w-]*$/i.test(arg)) throw new Error(`Invalid item id: ${arg || "(missing)"}`);
++        currentItem = { id: arg, label: arg, route: "", icon: "", position: [1, 1], size: [1, 1] };
++        manifest.items.push(currentItem);
++        block = "item";
++      }
++      continue;
++    }
++    if (raw === "}") {
++      block = "root";
++      currentItem = null;
++      continue;
++    }
++    const property = parseProperty(raw);
++    if (!property) continue;
++    const [key, value] = property;
++    if (block === "item" && currentItem) {
++      if (key === "label") currentItem.label = value.slice(0, 64);
++      else if (key === "route" && routeIsSafe(value)) currentItem.route = value;
++      else if (key === "icon") currentItem.icon = cleanPath(value);
++      else if (key === "position") {
++        const [x, y] = value.split(/[\s,]+/).map(Number);
++        currentItem.position = [Math.max(1, x || 1), Math.max(1, y || 1)];
++      } else if (key === "size") {
++        const [w, h] = value.split(/[\s,]+/).map(Number);
++        currentItem.size = [Math.max(1, Math.min(4, w || 1)), Math.max(1, Math.min(3, h || 1))];
++      }
++      continue;
++    }
++    if (block === "layout") {
++      if (key === "type") manifest.layout.type = value.toLowerCase();
++      else if (key === "columns") manifest.layout.columns = asInt(value, 4, 1, 8);
++      else if (key === "rows") manifest.layout.rows = asInt(value, 3, 1, 6);
++      else if (key === "gap") manifest.layout.gap = asInt(value, 18, 0, 64);
++      continue;
++    }
++    if (block === "sounds") {
++      if (["move", "select", "back", "music"].includes(key)) manifest.sounds[key] = cleanPath(value);
++      continue;
++    }
++    if (key === "id") manifest.id = value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 80);
++    else if (key === "name") manifest.name = value.slice(0, 80);
++    else if (key === "author") manifest.author = value.slice(0, 80);
++    else if (key === "version") manifest.version = value.slice(0, 32);
++    else if (key === "description") manifest.description = value.slice(0, 180);
++    else if (key === "background") manifest.background = cleanPath(value);
++    else if (key === "preview") manifest.preview = cleanPath(value);
++    else if (key === "accent" && /^#[0-9a-f]{6}$/i.test(value)) manifest.accent = value;
++    else if (key === "show-clock") manifest.showClock = parseBool(value, true);
++    else if (key === "show-profile") manifest.showProfile = parseBool(value, true);
++  }
++
++  if (!manifest.id) throw new Error("PMENU is missing an id");
++  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(manifest.id)) throw new Error("PMENU id contains unsupported characters");
++  if (!new Set(["channel-grid", "grid"]).has(manifest.layout.type)) throw new Error(`Unsupported layout: ${manifest.layout.type}`);
++  if (!manifest.items.length) manifest.items = DEFAULT_ITEMS.map((item) => ({ ...item, size: [1, 1], icon: "" }));
++  manifest.items = manifest.items.filter((item) => item.route && routeIsSafe(item.route)).slice(0, 48);
++  if (!manifest.items.length) throw new Error("PMENU needs at least one item with a valid route");
++  return manifest;
++}
++
++function commonRoot(files) {
++  const paths = files.map((file) => String(file.webkitRelativePath || file.name).replaceAll("\\", "/"));
++  const first = paths[0]?.split("/")[0] || "";
++  return first && paths.every((path) => path.startsWith(`${first}/`)) ? `${first}/` : "";
++}
++
++function relativeFileMap(files) {
++  const root = commonRoot(files);
++  return new Map(files.map((file) => {
++    const raw = String(file.webkitRelativePath || file.name).replaceAll("\\", "/");
++    return [cleanPath(root && raw.startsWith(root) ? raw.slice(root.length) : raw), file];
++  }).filter(([path]) => path));
++}
++
++function referencedAssets(manifest) {
++  const refs = new Set([manifest.background, manifest.preview, ...Object.values(manifest.sounds || {})].filter(Boolean));
++  manifest.items.forEach((item) => { if (item.icon) refs.add(item.icon); });
++  return refs;
++}
++
++export async function installPmenuFolder(fileList) {
++  const files = [...(fileList || [])];
++  if (!files.length) throw new Error("Choose a Home Style folder");
++  if (files.length > MAX_FILES) throw new Error(`Home Style contains too many files (${files.length}/${MAX_FILES})`);
++  const map = relativeFileMap(files);
++  const definitions = [...map.entries()].filter(([path]) => path.toLowerCase().endsWith(".pmenu"));
++  if (definitions.length !== 1) throw new Error("The folder must contain exactly one .pmenu file");
++  const [definitionPath, definitionFile] = definitions[0];
++  if (definitionPath.includes("/")) throw new Error("Put the .pmenu file at the top of the Home Style folder");
++  const manifest = parsePmenu(await definitionFile.text());
++  const refs = referencedAssets(manifest);
++  let totalBytes = 0;
++  for (const path of refs) {
++    const file = map.get(path);
++    if (!file) throw new Error(`Missing asset: ${path}`);
++    if (!ALLOWED_ASSET_TYPES.has(file.type)) throw new Error(`Unsupported asset type: ${path}`);
++    totalBytes += file.size;
++  }
++  if (totalBytes > MAX_ASSET_BYTES) throw new Error("Home Style assets exceed 24 MB");
++
++  const db = await openDb();
++  const tx = db.transaction([PACK_STORE, ASSET_STORE], "readwrite");
++  const packs = tx.objectStore(PACK_STORE);
++  const assets = tx.objectStore(ASSET_STORE);
++  const old = await new Promise((resolve) => {
++    const request = packs.get(manifest.id);
++    request.onsuccess = () => resolve(request.result || null);
++    request.onerror = () => resolve(null);
++  });
++  for (const path of old?.assets || []) assets.delete(`${manifest.id}:${path}`);
++  for (const path of refs) {
++    const file = map.get(path);
++    assets.put({ key: `${manifest.id}:${path}`, packId: manifest.id, path, blob: file, type: file.type, size: file.size });
++  }
++  packs.put({ id: manifest.id, manifest, assets: [...refs], installedAt: Date.now() });
++  await txDone(tx);
++  db.close();
++  return manifest;
++}
++
++export async function listPmenuPacks() {
++  if (!globalThis.indexedDB) return [];
++  const db = await openDb();
++  const tx = db.transaction(PACK_STORE, "readonly");
++  const values = await new Promise((resolve, reject) => {
++    const request = tx.objectStore(PACK_STORE).getAll();
++    request.onsuccess = () => resolve(request.result || []);
++    request.onerror = () => reject(request.error);
++  });
++  await txDone(tx);
++  db.close();
++  return values.sort((a, b) => (b.installedAt || 0) - (a.installedAt || 0));
++}
++
++export async function removePmenuPack(id) {
++  const db = await openDb();
++  const tx = db.transaction([PACK_STORE, ASSET_STORE], "readwrite");
++  const packs = tx.objectStore(PACK_STORE);
++  const assets = tx.objectStore(ASSET_STORE);
++  const pack = await new Promise((resolve) => {
++    const request = packs.get(id);
++    request.onsuccess = () => resolve(request.result || null);
++    request.onerror = () => resolve(null);
++  });
++  for (const path of pack?.assets || []) assets.delete(`${id}:${path}`);
++  packs.delete(id);
++  await txDone(tx);
++  db.close();
++  if (activeManifestCache?.id === id) clearActivePmenu();
++}
++
++export function activePmenuManifest() {
++  return activeManifestCache;
++}
++
++export function setActivePmenu(manifest) {
++  activeManifestCache = manifest ? JSON.parse(JSON.stringify(manifest)) : null;
++  if (activeManifestCache) {
++    localStorage.setItem(ACTIVE_KEY, activeManifestCache.id);
++    localStorage.setItem(MANIFEST_KEY, JSON.stringify(activeManifestCache));
++  } else {
++    localStorage.removeItem(ACTIVE_KEY);
++    localStorage.removeItem(MANIFEST_KEY);
++  }
++  document.documentElement.dataset.pmenu = activeManifestCache?.id || "default";
++  return activeManifestCache;
++}
++
++export function clearActivePmenu() {
++  clearObjectUrls();
++  setActivePmenu(null);
++}
++
++async function assetBlob(packId, path) {
++  const db = await openDb();
++  const tx = db.transaction(ASSET_STORE, "readonly");
++  const value = await new Promise((resolve, reject) => {
++    const request = tx.objectStore(ASSET_STORE).get(`${packId}:${path}`);
++    request.onsuccess = () => resolve(request.result || null);
++    request.onerror = () => reject(request.error);
++  });
++  await txDone(tx);
++  db.close();
++  return value?.blob || null;
++}
++
++export async function resolvePmenuAsset(packId, path) {
++  if (!packId || !path) return "";
++  const blob = await assetBlob(packId, path);
++  if (!blob) return "";
++  const url = URL.createObjectURL(blob);
++  activeObjectUrls.push(url);
++  return url;
++}
++
++function homeItem(item, columns) {
++  const [x, y] = item.position || [1, 1];
++  const [w, h] = item.size || [1, 1];
++  const icon = item.icon
++    ? `<img data-pmenu-asset="${escapeHtml(item.icon)}" alt="" />`
++    : `<span class="pmenu-channel__fallback" aria-hidden="true">${escapeHtml(item.label.slice(0, 1).toUpperCase())}</span>`;
++  return `<button type="button" class="pmenu-channel" data-route="${escapeHtml(item.route)}" data-focus-id="pmenu:${escapeHtml(item.id)}" style="--pmenu-x:${Math.min(columns, Math.max(1, x))};--pmenu-y:${Math.max(1, y)};--pmenu-w:${w};--pmenu-h:${h}"><span class="pmenu-channel__art">${icon}</span><strong>${escapeHtml(item.label)}</strong></button>`;
++}
++
++export function customHomeScreen(manifest, profile = "P1") {
++  if (!manifest) return "";
++  const columns = manifest.layout?.columns || 4;
++  const rows = manifest.layout?.rows || 3;
++  const gap = manifest.layout?.gap ?? 18;
++  const backgroundStyle = manifest.background ? "" : `background:radial-gradient(circle at 50% 10%,${manifest.accent}33,transparent 45%),#08070c;`;
++  return `<section class="pmenu-home" data-pmenu-id="${escapeHtml(manifest.id)}" aria-label="${escapeHtml(manifest.name)}" style="--pmenu-accent:${escapeHtml(manifest.accent)};--pmenu-columns:${columns};--pmenu-rows:${rows};--pmenu-gap:${gap}px;${backgroundStyle}"><div class="pmenu-home__background" ${manifest.background ? `data-pmenu-background="${escapeHtml(manifest.background)}"` : ""}></div><header class="pmenu-home__header"><button type="button" class="pmenu-home__brand" data-action="open-control-center" data-focus-id="pmenu:para"><span>◉</span><strong>PARA</strong></button><div class="pmenu-home__title"><small>Home Style</small><strong>${escapeHtml(manifest.name)}</strong></div><div class="pmenu-home__status">${manifest.showClock ? '<time data-clock>--:--</time>' : ""}${manifest.showProfile ? `<button type="button" data-route="account" data-focus-id="pmenu:profile">${escapeHtml(profile)}</button>` : ""}</div></header><main class="pmenu-channel-grid" data-focus-zone="pmenu-grid">${manifest.items.map((item) => homeItem(item, columns)).join("")}</main><footer class="pmenu-home__footer"><span>${escapeHtml(manifest.author)}</span><button type="button" data-route="home-styles" data-focus-id="pmenu:customize">Customize Home</button></footer></section>`;
++}
++
++export function activateCustomHome({ focus } = {}) {
++  const root = document.querySelector(".pmenu-home");
++  const manifest = activeManifestCache;
++  if (!root || !manifest) return () => {};
++  let alive = true;
++  clearObjectUrls();
++  const applyAssets = async () => {
++    const background = root.querySelector("[data-pmenu-background]");
++    if (background) {
++      const url = await resolvePmenuAsset(manifest.id, background.dataset.pmenuBackground);
++      if (alive && url) background.style.backgroundImage = `url("${url}")`;
++    }
++    for (const image of root.querySelectorAll("[data-pmenu-asset]")) {
++      const url = await resolvePmenuAsset(manifest.id, image.dataset.pmenuAsset);
++      if (alive && url) image.src = url;
++    }
++  };
++  void applyAssets().then(() => focus?.focusFirst?.());
++  return () => { alive = false; clearObjectUrls(); };
++}
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ para_recon_v60/para/apps/para-home/src/screens/home-styles.js	2026-09-11 23:41:48.492339087 +0000
+@@ -0,0 +1,121 @@
++import { page } from "../ui/components.js";
++import { escapeHtml } from "../services/para-api.js";
++import {
++  activePmenuManifest, clearActivePmenu, installPmenuFolder, listPmenuPacks,
++  removePmenuPack, resolvePmenuAsset, setActivePmenu,
++} from "../services/pmenu.js";
++
++function packCard(pack, active) {
++  const manifest = pack.manifest;
++  return `<article class="pmenu-pack-card ${active ? "is-active" : ""}" data-pmenu-pack="${escapeHtml(manifest.id)}"><div class="pmenu-pack-card__preview" ${manifest.preview ? `data-pmenu-preview="${escapeHtml(manifest.preview)}"` : ""}><span>${escapeHtml(manifest.name.slice(0, 1).toUpperCase())}</span></div><div class="pmenu-pack-card__copy"><small>${active ? "ACTIVE HOME STYLE" : `PMENU ${escapeHtml(manifest.version)}`}</small><h2>${escapeHtml(manifest.name)}</h2><p>${escapeHtml(manifest.description || `By ${manifest.author}`)}</p><div><button class="action-button" type="button" data-pmenu-apply="${escapeHtml(manifest.id)}">${active ? "Applied" : "Apply"}</button><button class="action-button action-button--ghost" type="button" data-pmenu-remove="${escapeHtml(manifest.id)}">Remove</button></div></div></article>`;
++}
++
++export function homeStylesScreen() {
++  return page({
++    title: "Home Styles",
++    description: "Change the entire PARA Home layout with PMENU folders.",
++    eyebrow: "Personalization",
++    className: "pmenu-page",
++    body: `<section class="pmenu-import panel"><div><strong>Install a Home Style</strong><p>Select a normal folder containing one .pmenu definition plus its images and sounds. PMENU is not an archive.</p></div><button class="action-button" type="button" data-pmenu-browse data-autofocus="true">Choose Folder</button><input type="file" data-pmenu-folder webkitdirectory multiple hidden /></section><section class="pmenu-format-note"><strong>PMENU v1</strong><span>Folder-based • local assets • no JavaScript execution</span></section><div class="pmenu-pack-list" data-pmenu-list><div class="library-loading"><span></span><strong>Reading Home Styles…</strong></div></div><button class="list-row pmenu-default" type="button" data-pmenu-default><span class="list-row__icon">↺</span><span class="list-row__body"><span class="list-row__title">Use PARA Default</span><span class="list-row__meta">Return Home to the standard PARA layout</span></span></button><p class="pmenu-status" data-pmenu-status aria-live="polite"></p>`,
++  });
++}
++
++export function activateHomeStyles({ focus, notify } = {}) {
++  const pageRoot = document.querySelector(".pmenu-page");
++  const picker = pageRoot?.querySelector("[data-pmenu-folder]");
++  const list = pageRoot?.querySelector("[data-pmenu-list]");
++  const status = pageRoot?.querySelector("[data-pmenu-status]");
++  if (!pageRoot || !picker || !list) return () => {};
++  let alive = true;
++  let previewUrls = [];
++  let packs = [];
++
++  const clearPreviews = () => {
++    previewUrls.forEach((url) => URL.revokeObjectURL(url));
++    previewUrls = [];
++  };
++  const setStatus = (message, error = false) => {
++    if (!status) return;
++    status.textContent = message;
++    status.classList.toggle("is-error", error);
++  };
++  const render = async () => {
++    clearPreviews();
++    packs = await listPmenuPacks();
++    if (!alive) return;
++    const activeId = activePmenuManifest()?.id || "";
++    list.innerHTML = packs.length
++      ? packs.map((pack) => packCard(pack, pack.id === activeId)).join("")
++      : `<div class="library-empty"><span>▦</span><strong>No custom Home Styles yet</strong><p>Choose a folder to install your first .pmenu style.</p></div>`;
++    for (const card of list.querySelectorAll("[data-pmenu-pack]")) {
++      const pack = packs.find((candidate) => candidate.id === card.dataset.pmenuPack);
++      const preview = card.querySelector("[data-pmenu-preview]");
++      if (!pack || !preview) continue;
++      const url = await resolvePmenuAsset(pack.id, preview.dataset.pmenuPreview);
++      if (!alive || !url) continue;
++      previewUrls.push(url);
++      preview.style.backgroundImage = `url("${url}")`;
++    }
++    focus?.focusFirst?.();
++  };
++
++  const onChange = async () => {
++    if (!picker.files?.length) return;
++    try {
++      setStatus("Checking PMENU folder…");
++      const manifest = await installPmenuFolder(picker.files);
++      if (!alive) return;
++      setActivePmenu(manifest);
++      setStatus(`${manifest.name} installed and applied.`);
++      notify?.("Home Style installed", manifest.name);
++      await render();
++    } catch (error) {
++      setStatus(error?.message || "Could not install that Home Style", true);
++      notify?.("Home Style not installed", error?.message || "Invalid PMENU folder");
++    } finally {
++      picker.value = "";
++    }
++  };
++
++  const onClick = async (event) => {
++    const browse = event.target.closest?.("[data-pmenu-browse]");
++    if (browse) { picker.click(); return; }
++    const apply = event.target.closest?.("[data-pmenu-apply]");
++    if (apply) {
++      const pack = packs.find((candidate) => candidate.id === apply.dataset.pmenuApply);
++      if (pack) {
++        setActivePmenu(pack.manifest);
++        setStatus(`${pack.manifest.name} is now your Home Style.`);
++        notify?.("Home Style applied", pack.manifest.name);
++        await render();
++      }
++      return;
++    }
++    const remove = event.target.closest?.("[data-pmenu-remove]");
++    if (remove) {
++      const pack = packs.find((candidate) => candidate.id === remove.dataset.pmenuRemove);
++      if (!pack) return;
++      await removePmenuPack(pack.id);
++      setStatus(`${pack.manifest.name} removed.`);
++      notify?.("Home Style removed", pack.manifest.name);
++      await render();
++      return;
++    }
++    if (event.target.closest?.("[data-pmenu-default]")) {
++      clearActivePmenu();
++      setStatus("PARA Default will be used on Home.");
++      notify?.("PARA Default applied");
++      await render();
++    }
++  };
++
++  picker.addEventListener("change", onChange);
++  pageRoot.addEventListener("click", onClick);
++  void render();
++  return () => {
++    alive = false;
++    picker.removeEventListener("change", onChange);
++    pageRoot.removeEventListener("click", onClick);
++    clearPreviews();
++  };
++}
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ para_recon_v60/para/PARA_PMENU_HOME_STYLES_V60.md	2026-09-11 23:42:41.673904712 +0000
+@@ -0,0 +1,67 @@
++# PARA V60 — PMENU Home Styles
++
++PMENU v1 adds folder-based Home menu customization to PARA.
++
++## What PMENU is
++A Home Style is a normal folder. It contains exactly one `.pmenu` definition file at the folder root plus local image/audio assets beside it. `.pmenu` is not a ZIP/archive format and it does not execute JavaScript.
++
++Example:
++
++```
++ChannelGrid/
++├── ChannelGrid.pmenu
++├── background.png
++├── preview.png
++└── assets/
++    ├── games.png
++    ├── apps.png
++    └── ...
++```
++
++## Browser workflow
++Open **Settings → Personalization → Home Styles → Choose Folder** and select the Home Style folder. PARA validates the PMENU definition and referenced assets, stores the installed style locally in IndexedDB, and lets the profile apply/remove it.
++
++## PMENU v1 syntax
++
++```
++@pmenu 1
++
++menu "My Home" {
++  id "creator.my-home"
++  author "Creator"
++  version "1.0.0"
++  background "background.png"
++  preview "preview.png"
++  accent "#8f5cff"
++}
++
++layout channel-grid {
++  columns 4
++  rows 2
++  gap 18
++}
++
++item games {
++  label "Games"
++  route "games"
++  icon "assets/games.png"
++  position 1 1
++}
++```
++
++Supported PMENU v1 layout types: `channel-grid` and `grid`.
++
++## Safety / validation
++- exactly one `.pmenu` file at the top of the selected folder
++- no absolute paths or `../` path traversal
++- local PNG/JPEG/WebP/GIF images and common audio formats only
++- 160-file selection limit
++- referenced assets capped at 24 MB total
++- no JavaScript, `eval`, or custom executable code in a PMENU pack
++- routes are declarative PARA routes
++
++## Included example
++`examples/home-styles/ChannelGrid/` is a working PMENU v1 folder with a background, preview, and eight local channel images.
++
++## Validation
++Targeted regression tests pass for PMENU plus V58/V59 recorder/music behavior. The PMENU parser also successfully parses the included ChannelGrid example.
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ para_recon_v60/para/examples/home-styles/ChannelGrid/ChannelGrid.pmenu	2026-09-11 23:42:20.190180023 +0000
+@@ -0,0 +1,75 @@
++@pmenu 1
++
++menu "Channel Grid" {
++  id "para.example.channel-grid"
++  author "PARA"
++  version "1.0.0"
++  description "A bright channel-style grid that demonstrates PMENU v1."
++  background "background.png"
++  preview "preview.png"
++  accent "#8f5cff"
++  show-clock true
++  show-profile true
++}
++
++layout channel-grid {
++  columns 4
++  rows 2
++  gap 18
++}
++
++item games {
++  label "Games"
++  route "games"
++  icon "assets/games.png"
++  position 1 1
++}
++
++item apps {
++  label "Apps"
++  route "apps"
++  icon "assets/apps.png"
++  position 2 1
++}
++
++item store {
++  label "ParaStore"
++  route "parastore"
++  icon "assets/store.png"
++  position 3 1
++}
++
++item music {
++  label "Music"
++  route "music"
++  icon "assets/music.png"
++  position 4 1
++}
++
++item files {
++  label "Files"
++  route "files"
++  icon "assets/files.png"
++  position 1 2
++}
++
++item media {
++  label "Media"
++  route "media-gallery"
++  icon "assets/media.png"
++  position 2 2
++}
++
++item friends {
++  label "Friends"
++  route "friends"
++  icon "assets/friends.png"
++  position 3 2
++}
++
++item settings {
++  label "Settings"
++  route "settings"
++  icon "assets/settings.png"
++  position 4 2
++}

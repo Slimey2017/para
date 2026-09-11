@@ -29,6 +29,7 @@ export const screens = [
   { id: "files", label: "PARA Files", group: "library" },
   { id: "downloads", label: "Downloads", group: "system" },
   { id: "personalization", label: "Personalization", group: "system" },
+  { id: "home-styles", label: "Home Styles", group: "system" },
   { id: "background", label: "Background", group: "system" },
   { id: "control-center-settings", label: "Control Center customization", group: "system" },
   { id: "controller", label: "Controller pairing", group: "system" },

@@ -1076,3 +1076,23 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('markParaMusicContinuation(); location.href = next', server)
         self.assertNotIn('void restoreParaMusicFromHandoff({ attemptPlayback: true });', server)
 
+
+    def test_pmenu_v1_home_styles_are_folder_based_and_sandboxed(self):
+        service = (ROOT / "apps/para-home/src/services/pmenu.js").read_text(encoding="utf-8")
+        screen = (ROOT / "apps/para-home/src/screens/home-styles.js").read_text(encoding="utf-8")
+        home = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
+        personalization = (ROOT / "apps/para-home/src/screens/personalization.js").read_text(encoding="utf-8")
+        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
+        manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
+        self.assertIn('^@pmenu\\s+1$', service)
+        self.assertIn('webkitdirectory', screen)
+        self.assertIn('exactly one .pmenu file', service)
+        self.assertIn('Missing asset:', service)
+        self.assertIn('IndexedDB', service)
+        self.assertIn('customHomeScreen', home)
+        self.assertIn('activateCustomHome', home)
+        self.assertIn('route: "home-styles"', personalization)
+        self.assertIn('"home-styles": homeStylesScreen', app)
+        self.assertIn('id: "home-styles"', manifest)
+        self.assertNotIn('eval(', service)
+        self.assertNotIn('new Function(', service)
