@@ -118,7 +118,14 @@ def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | N
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
             body = response.read().decode("utf-8")
-            return response.status, json.loads(body) if body else {}
+            if not body:
+                return response.status, {}
+            try:
+                parsed = json.loads(body)
+            except json.JSONDecodeError as error:
+                print(f"[para-account] invalid JSON from Supabase path={path!r}: {error}", file=sys.stderr, flush=True)
+                return 502, {"error": "account_bad_response", "message": "PARA Account received an invalid response from the account service."}
+            return response.status, parsed if isinstance(parsed, dict) else {"data": parsed}
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", "replace")
         try:
@@ -127,9 +134,16 @@ def _supabase_auth_request(path: str, *, method: str = "POST", payload: dict | N
             parsed = {"message": "PARA Account request failed."}
         if not isinstance(parsed, dict):
             parsed = {"message": "PARA Account request failed."}
+        if error.code >= 500:
+            print(f"[para-account] Supabase HTTP {error.code} path={path!r} body={body[:500]!r}", file=sys.stderr, flush=True)
         return error.code, parsed
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-        return 502, {"error": "account_unavailable", "message": "PARA Account could not reach the account service."}
+    except urllib.error.URLError as error:
+        reason = getattr(error, "reason", error)
+        print(f"[para-account] network failure path={path!r}: {reason!r}", file=sys.stderr, flush=True)
+        return 503, {"error": "account_service_unreachable", "message": "PARA Account could not reach the account service."}
+    except TimeoutError as error:
+        print(f"[para-account] timeout path={path!r}: {error!r}", file=sys.stderr, flush=True)
+        return 504, {"error": "account_service_timeout", "message": "PARA Account timed out while contacting the account service."}
 
 
 def _supabase_account_rest_request(
@@ -943,6 +957,25 @@ def auth_sign_in(email: str, password: str) -> tuple[int, dict, dict | None]:
     tokens = {"access_token": payload["access_token"], "refresh_token": payload["refresh_token"], "expires_in": int(payload.get("expires_in") or 3600)}
     return 200, {"signed_in": True, "user": user}, tokens
 
+
+
+def auth_account_health() -> tuple[int, dict]:
+    """Probe Supabase Auth without exposing credentials or user data."""
+    status, payload = _supabase_auth_request("/auth/v1/settings", method="GET")
+    if status >= 400:
+        error_code = payload.get("error") if isinstance(payload, dict) else "account_unavailable"
+        return status, {
+            "ok": False,
+            "service": "supabase-auth",
+            "error": error_code or "account_unavailable",
+            "message": _auth_message(payload, "PARA Account service is unavailable."),
+            "project_ref": PARA_ACCOUNT_SUPABASE_PROJECT_REF,
+        }
+    return 200, {
+        "ok": True,
+        "service": "supabase-auth",
+        "project_ref": PARA_ACCOUNT_SUPABASE_PROJECT_REF,
+    }
 
 
 def auth_request_password_recovery(email: str) -> tuple[int, dict]:
@@ -4606,6 +4639,10 @@ class ParaHandler(SimpleHTTPRequestHandler):
                 return
             account_status, result = gaming_account_status(access, "steam")
             self._send_json(account_status, result, refreshed_headers)
+            return
+        if request.path == "/api/v1/auth/health":
+            status, payload = auth_account_health()
+            self._send_json(status, payload)
             return
         if request.path == "/api/v1/auth/session":
             status, payload, headers = self._auth_session()

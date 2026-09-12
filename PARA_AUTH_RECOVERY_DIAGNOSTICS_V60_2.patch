@@ -1,0 +1,92 @@
+--- a/services/api/server.py
++++ b/services/api/server.py
+@@ -118,7 +118,14 @@
+     try:
+         with urllib.request.urlopen(request, timeout=12) as response:
+             body = response.read().decode("utf-8")
+-            return response.status, json.loads(body) if body else {}
++            if not body:
++                return response.status, {}
++            try:
++                parsed = json.loads(body)
++            except json.JSONDecodeError as error:
++                print(f"[para-account] invalid JSON from Supabase path={path!r}: {error}", file=sys.stderr, flush=True)
++                return 502, {"error": "account_bad_response", "message": "PARA Account received an invalid response from the account service."}
++            return response.status, parsed if isinstance(parsed, dict) else {"data": parsed}
+     except urllib.error.HTTPError as error:
+         body = error.read().decode("utf-8", "replace")
+         try:
+@@ -127,9 +134,16 @@
+             parsed = {"message": "PARA Account request failed."}
+         if not isinstance(parsed, dict):
+             parsed = {"message": "PARA Account request failed."}
++        if error.code >= 500:
++            print(f"[para-account] Supabase HTTP {error.code} path={path!r} body={body[:500]!r}", file=sys.stderr, flush=True)
+         return error.code, parsed
+-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+-        return 502, {"error": "account_unavailable", "message": "PARA Account could not reach the account service."}
++    except urllib.error.URLError as error:
++        reason = getattr(error, "reason", error)
++        print(f"[para-account] network failure path={path!r}: {reason!r}", file=sys.stderr, flush=True)
++        return 503, {"error": "account_service_unreachable", "message": "PARA Account could not reach the account service."}
++    except TimeoutError as error:
++        print(f"[para-account] timeout path={path!r}: {error!r}", file=sys.stderr, flush=True)
++        return 504, {"error": "account_service_timeout", "message": "PARA Account timed out while contacting the account service."}
+ 
+ 
+ def _supabase_account_rest_request(
+@@ -945,6 +959,25 @@
+ 
+ 
+ 
++def auth_account_health() -> tuple[int, dict]:
++    """Probe Supabase Auth without exposing credentials or user data."""
++    status, payload = _supabase_auth_request("/auth/v1/settings", method="GET")
++    if status >= 400:
++        error_code = payload.get("error") if isinstance(payload, dict) else "account_unavailable"
++        return status, {
++            "ok": False,
++            "service": "supabase-auth",
++            "error": error_code or "account_unavailable",
++            "message": _auth_message(payload, "PARA Account service is unavailable."),
++            "project_ref": PARA_ACCOUNT_SUPABASE_PROJECT_REF,
++        }
++    return 200, {
++        "ok": True,
++        "service": "supabase-auth",
++        "project_ref": PARA_ACCOUNT_SUPABASE_PROJECT_REF,
++    }
++
++
+ def auth_request_password_recovery(email: str) -> tuple[int, dict]:
+     email = _normalize_verification_email(email)
+     if not email:
+@@ -4607,6 +4640,10 @@
+             account_status, result = gaming_account_status(access, "steam")
+             self._send_json(account_status, result, refreshed_headers)
+             return
++        if request.path == "/api/v1/auth/health":
++            status, payload = auth_account_health()
++            self._send_json(status, payload)
++            return
+         if request.path == "/api/v1/auth/session":
+             status, payload, headers = self._auth_session()
+             self._send_json(status, payload, headers)
+--- a/tests/test_repository.py
++++ b/tests/test_repository.py
+@@ -1076,3 +1076,15 @@
+         self.assertIn('markParaMusicContinuation(); location.href = next', server)
+         self.assertNotIn('void restoreParaMusicFromHandoff({ attemptPlayback: true });', server)
+ 
++
++    def test_v60_2_auth_network_failures_are_classified_and_health_probe_exists(self):
++        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
++        self.assertIn('except urllib.error.URLError as error:', server)
++        self.assertIn('"account_service_unreachable"', server)
++        self.assertIn('return 503, {"error": "account_service_unreachable"', server)
++        self.assertIn('except TimeoutError as error:', server)
++        self.assertIn('return 504, {"error": "account_service_timeout"', server)
++        self.assertIn('def auth_account_health()', server)
++        self.assertIn('"/auth/v1/settings"', server)
++        self.assertIn('request.path == "/api/v1/auth/health"', server)
++        self.assertIn('[para-account] network failure', server)

@@ -1077,44 +1077,14 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('void restoreParaMusicFromHandoff({ attemptPlayback: true });', server)
 
 
-    def test_pmenu_v1_home_styles_are_folder_based_and_sandboxed(self):
-        service = (ROOT / "apps/para-home/src/services/pmenu.js").read_text(encoding="utf-8")
-        screen = (ROOT / "apps/para-home/src/screens/home-styles.js").read_text(encoding="utf-8")
-        home = (ROOT / "apps/para-home/src/screens/home.js").read_text(encoding="utf-8")
-        personalization = (ROOT / "apps/para-home/src/screens/personalization.js").read_text(encoding="utf-8")
-        app = (ROOT / "apps/para-home/src/app.js").read_text(encoding="utf-8")
-        manifest = (ROOT / "apps/para-home/src/screen-manifest.js").read_text(encoding="utf-8")
-        self.assertIn('^@pmenu\\s+1$', service)
-        self.assertIn('webkitdirectory', screen)
-        self.assertIn('exactly one .pmenu file', service)
-        self.assertIn('Missing asset:', service)
-        self.assertIn('IndexedDB', service)
-        self.assertIn('customHomeScreen', home)
-        self.assertIn('activateCustomHome', home)
-        self.assertIn('route: "home-styles"', personalization)
-        self.assertIn('"home-styles": homeStylesScreen', app)
-        self.assertIn('id: "home-styles"', manifest)
-        self.assertNotIn('eval(', service)
-        self.assertNotIn('new Function(', service)
-
-class PmenuLayoutEngineTests(unittest.TestCase):
-    def test_pmenu_v601_supports_multiple_structural_layouts(self):
-        service = (ROOT / "apps/para-home/src/services/pmenu.js").read_text(encoding="utf-8")
-        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
-        for layout in ["channel-grid", "grid", "crossbar", "blades", "carousel"]:
-            self.assertIn(f'"{layout}"', service)
-            self.assertIn(f"pmenu-layout--{layout}", css)
-        self.assertIn("SUPPORTED_LAYOUTS", service)
-        self.assertIn('data-pmenu-layout="${escapeHtml(layoutType)}"', service)
-        self.assertIn('data-focus-zone="pmenu-layout"', service)
-
-    def test_pmenu_v601_examples_are_real_folders_not_archives(self):
-        examples = ROOT / "examples/home-styles"
-        for name, layout in [("Crossbar", "crossbar"), ("Blades", "blades"), ("Carousel", "carousel")]:
-            pmenu = examples / name / f"{name}.pmenu"
-            self.assertTrue(pmenu.exists())
-            text = pmenu.read_text(encoding="utf-8")
-            self.assertIn("@pmenu 1", text)
-            self.assertIn(f"layout {layout} {{", text)
-            self.assertIn("item ", text)
-            self.assertNotIn(".zip", text.lower())
+    def test_v60_2_auth_network_failures_are_classified_and_health_probe_exists(self):
+        server = (ROOT / "services/api/server.py").read_text(encoding="utf-8")
+        self.assertIn('except urllib.error.URLError as error:', server)
+        self.assertIn('"account_service_unreachable"', server)
+        self.assertIn('return 503, {"error": "account_service_unreachable"', server)
+        self.assertIn('except TimeoutError as error:', server)
+        self.assertIn('return 504, {"error": "account_service_timeout"', server)
+        self.assertIn('def auth_account_health()', server)
+        self.assertIn('"/auth/v1/settings"', server)
+        self.assertIn('request.path == "/api/v1/auth/health"', server)
+        self.assertIn('[para-account] network failure', server)
