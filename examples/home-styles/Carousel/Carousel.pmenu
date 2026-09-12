@@ -1,0 +1,38 @@
+@pmenu 1
+
+menu "PARA Carousel" {
+  id "para.example.carousel"
+  author "PARA"
+  version "1.0.0"
+  description "Big showcase cards that snap through the Home screen."
+  accent "#a764ff"
+}
+
+layout carousel {
+  gap 28
+}
+
+item games {
+  label "Games"
+  route "games"
+}
+
+item store {
+  label "ParaStore"
+  route "parastore"
+}
+
+item music {
+  label "Music"
+  route "music"
+}
+
+item media {
+  label "Media"
+  route "media-gallery"
+}
+
+item files {
+  label "Files"
+  route "files"
+}

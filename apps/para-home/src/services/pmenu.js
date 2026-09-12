@@ -8,6 +8,7 @@ const ACTIVE_KEY = "para.pmenu.active.v1";
 const MANIFEST_KEY = "para.pmenu.active-manifest.v1";
 const MAX_FILES = 160;
 const MAX_ASSET_BYTES = 24 * 1024 * 1024;
+const SUPPORTED_LAYOUTS = new Set(["channel-grid", "grid", "crossbar", "blades", "carousel"]);
 const ALLOWED_ASSET_TYPES = new Set([
   "image/png", "image/jpeg", "image/webp", "image/gif",
   "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/webm",
@@ -201,7 +202,7 @@ export function parsePmenu(text) {
 
   if (!manifest.id) throw new Error("PMENU is missing an id");
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(manifest.id)) throw new Error("PMENU id contains unsupported characters");
-  if (!new Set(["channel-grid", "grid"]).has(manifest.layout.type)) throw new Error(`Unsupported layout: ${manifest.layout.type}`);
+  if (!SUPPORTED_LAYOUTS.has(manifest.layout.type)) throw new Error(`Unsupported layout: ${manifest.layout.type}`);
   if (!manifest.items.length) manifest.items = DEFAULT_ITEMS.map((item) => ({ ...item, size: [1, 1], icon: "" }));
   manifest.items = manifest.items.filter((item) => item.route && routeIsSafe(item.route)).slice(0, 48);
   if (!manifest.items.length) throw new Error("PMENU needs at least one item with a valid route");
@@ -343,22 +344,31 @@ export async function resolvePmenuAsset(packId, path) {
   return url;
 }
 
-function homeItem(item, columns) {
+function safeLayoutType(value) {
+  const layout = String(value || "channel-grid").toLowerCase();
+  return SUPPORTED_LAYOUTS.has(layout) ? layout : "channel-grid";
+}
+
+function homeItem(item, layoutType, columns) {
   const [x, y] = item.position || [1, 1];
   const [w, h] = item.size || [1, 1];
   const icon = item.icon
     ? `<img data-pmenu-asset="${escapeHtml(item.icon)}" alt="" />`
     : `<span class="pmenu-channel__fallback" aria-hidden="true">${escapeHtml(item.label.slice(0, 1).toUpperCase())}</span>`;
-  return `<button type="button" class="pmenu-channel" data-route="${escapeHtml(item.route)}" data-focus-id="pmenu:${escapeHtml(item.id)}" style="--pmenu-x:${Math.min(columns, Math.max(1, x))};--pmenu-y:${Math.max(1, y)};--pmenu-w:${w};--pmenu-h:${h}"><span class="pmenu-channel__art">${icon}</span><strong>${escapeHtml(item.label)}</strong></button>`;
+  const gridStyle = layoutType === "channel-grid" || layoutType === "grid"
+    ? `--pmenu-x:${Math.min(columns, Math.max(1, x))};--pmenu-y:${Math.max(1, y)};--pmenu-w:${w};--pmenu-h:${h};`
+    : "";
+  return `<button type="button" class="pmenu-channel pmenu-channel--${escapeHtml(layoutType)}" data-pmenu-item="${escapeHtml(item.id)}" data-route="${escapeHtml(item.route)}" data-focus-id="pmenu:${escapeHtml(item.id)}" style="${gridStyle}"><span class="pmenu-channel__art">${icon}</span><strong>${escapeHtml(item.label)}</strong></button>`;
 }
 
 export function customHomeScreen(manifest, profile = "P1") {
   if (!manifest) return "";
+  const layoutType = safeLayoutType(manifest.layout?.type);
   const columns = manifest.layout?.columns || 4;
   const rows = manifest.layout?.rows || 3;
   const gap = manifest.layout?.gap ?? 18;
   const backgroundStyle = manifest.background ? "" : `background:radial-gradient(circle at 50% 10%,${manifest.accent}33,transparent 45%),#08070c;`;
-  return `<section class="pmenu-home" data-pmenu-id="${escapeHtml(manifest.id)}" aria-label="${escapeHtml(manifest.name)}" style="--pmenu-accent:${escapeHtml(manifest.accent)};--pmenu-columns:${columns};--pmenu-rows:${rows};--pmenu-gap:${gap}px;${backgroundStyle}"><div class="pmenu-home__background" ${manifest.background ? `data-pmenu-background="${escapeHtml(manifest.background)}"` : ""}></div><header class="pmenu-home__header"><button type="button" class="pmenu-home__brand" data-action="open-control-center" data-focus-id="pmenu:para"><span>◉</span><strong>PARA</strong></button><div class="pmenu-home__title"><small>Home Style</small><strong>${escapeHtml(manifest.name)}</strong></div><div class="pmenu-home__status">${manifest.showClock ? '<time data-clock>--:--</time>' : ""}${manifest.showProfile ? `<button type="button" data-route="account" data-focus-id="pmenu:profile">${escapeHtml(profile)}</button>` : ""}</div></header><main class="pmenu-channel-grid" data-focus-zone="pmenu-grid">${manifest.items.map((item) => homeItem(item, columns)).join("")}</main><footer class="pmenu-home__footer"><span>${escapeHtml(manifest.author)}</span><button type="button" data-route="home-styles" data-focus-id="pmenu:customize">Customize Home</button></footer></section>`;
+  return `<section class="pmenu-home pmenu-home--${escapeHtml(layoutType)}" data-pmenu-id="${escapeHtml(manifest.id)}" data-pmenu-layout="${escapeHtml(layoutType)}" aria-label="${escapeHtml(manifest.name)}" style="--pmenu-accent:${escapeHtml(manifest.accent)};--pmenu-columns:${columns};--pmenu-rows:${rows};--pmenu-gap:${gap}px;${backgroundStyle}"><div class="pmenu-home__background" ${manifest.background ? `data-pmenu-background="${escapeHtml(manifest.background)}"` : ""}></div><header class="pmenu-home__header"><button type="button" class="pmenu-home__brand" data-action="open-control-center" data-focus-id="pmenu:para"><span>◉</span><strong>PARA</strong></button><div class="pmenu-home__title"><small>Home Style</small><strong>${escapeHtml(manifest.name)}</strong></div><div class="pmenu-home__status">${manifest.showClock ? '<time data-clock>--:--</time>' : ""}${manifest.showProfile ? `<button type="button" data-route="account" data-focus-id="pmenu:profile">${escapeHtml(profile)}</button>` : ""}</div></header><main class="pmenu-layout pmenu-layout--${escapeHtml(layoutType)}" data-focus-zone="pmenu-layout">${manifest.items.map((item) => homeItem(item, layoutType, columns)).join("")}</main><footer class="pmenu-home__footer"><span>${escapeHtml(manifest.author)}</span><button type="button" data-route="home-styles" data-focus-id="pmenu:customize">Customize Home</button></footer></section>`;
 }
 
 export function activateCustomHome({ focus } = {}) {

@@ -1,0 +1,43 @@
+@pmenu 1
+
+menu "PARA Crossbar" {
+  id "para.example.crossbar"
+  author "PARA"
+  version "1.0.0"
+  description "A horizontal icon rail for couch navigation."
+  accent "#9b5cff"
+}
+
+layout crossbar {
+  gap 26
+}
+
+item games {
+  label "Games"
+  route "games"
+}
+
+item apps {
+  label "Apps"
+  route "apps"
+}
+
+item store {
+  label "ParaStore"
+  route "parastore"
+}
+
+item music {
+  label "Music"
+  route "music"
+}
+
+item files {
+  label "Files"
+  route "files"
+}
+
+item settings {
+  label "Settings"
+  route "settings"
+}

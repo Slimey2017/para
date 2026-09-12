@@ -1,0 +1,314 @@
+--- para_full_v60/para/apps/para-home/src/services/pmenu.js	2026-09-11 23:40:39.058238714 +0000
++++ para_full_v601/para/apps/para-home/src/services/pmenu.js	2026-09-11 23:54:48.538993846 +0000
+@@ -8,6 +8,7 @@
+ const MANIFEST_KEY = "para.pmenu.active-manifest.v1";
+ const MAX_FILES = 160;
+ const MAX_ASSET_BYTES = 24 * 1024 * 1024;
++const SUPPORTED_LAYOUTS = new Set(["channel-grid", "grid", "crossbar", "blades", "carousel"]);
+ const ALLOWED_ASSET_TYPES = new Set([
+   "image/png", "image/jpeg", "image/webp", "image/gif",
+   "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/webm",
+@@ -201,7 +202,7 @@
+ 
+   if (!manifest.id) throw new Error("PMENU is missing an id");
+   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(manifest.id)) throw new Error("PMENU id contains unsupported characters");
+-  if (!new Set(["channel-grid", "grid"]).has(manifest.layout.type)) throw new Error(`Unsupported layout: ${manifest.layout.type}`);
++  if (!SUPPORTED_LAYOUTS.has(manifest.layout.type)) throw new Error(`Unsupported layout: ${manifest.layout.type}`);
+   if (!manifest.items.length) manifest.items = DEFAULT_ITEMS.map((item) => ({ ...item, size: [1, 1], icon: "" }));
+   manifest.items = manifest.items.filter((item) => item.route && routeIsSafe(item.route)).slice(0, 48);
+   if (!manifest.items.length) throw new Error("PMENU needs at least one item with a valid route");
+@@ -343,22 +344,31 @@
+   return url;
+ }
+ 
+-function homeItem(item, columns) {
++function safeLayoutType(value) {
++  const layout = String(value || "channel-grid").toLowerCase();
++  return SUPPORTED_LAYOUTS.has(layout) ? layout : "channel-grid";
++}
++
++function homeItem(item, layoutType, columns) {
+   const [x, y] = item.position || [1, 1];
+   const [w, h] = item.size || [1, 1];
+   const icon = item.icon
+     ? `<img data-pmenu-asset="${escapeHtml(item.icon)}" alt="" />`
+     : `<span class="pmenu-channel__fallback" aria-hidden="true">${escapeHtml(item.label.slice(0, 1).toUpperCase())}</span>`;
+-  return `<button type="button" class="pmenu-channel" data-route="${escapeHtml(item.route)}" data-focus-id="pmenu:${escapeHtml(item.id)}" style="--pmenu-x:${Math.min(columns, Math.max(1, x))};--pmenu-y:${Math.max(1, y)};--pmenu-w:${w};--pmenu-h:${h}"><span class="pmenu-channel__art">${icon}</span><strong>${escapeHtml(item.label)}</strong></button>`;
++  const gridStyle = layoutType === "channel-grid" || layoutType === "grid"
++    ? `--pmenu-x:${Math.min(columns, Math.max(1, x))};--pmenu-y:${Math.max(1, y)};--pmenu-w:${w};--pmenu-h:${h};`
++    : "";
++  return `<button type="button" class="pmenu-channel pmenu-channel--${escapeHtml(layoutType)}" data-pmenu-item="${escapeHtml(item.id)}" data-route="${escapeHtml(item.route)}" data-focus-id="pmenu:${escapeHtml(item.id)}" style="${gridStyle}"><span class="pmenu-channel__art">${icon}</span><strong>${escapeHtml(item.label)}</strong></button>`;
+ }
+ 
+ export function customHomeScreen(manifest, profile = "P1") {
+   if (!manifest) return "";
++  const layoutType = safeLayoutType(manifest.layout?.type);
+   const columns = manifest.layout?.columns || 4;
+   const rows = manifest.layout?.rows || 3;
+   const gap = manifest.layout?.gap ?? 18;
+   const backgroundStyle = manifest.background ? "" : `background:radial-gradient(circle at 50% 10%,${manifest.accent}33,transparent 45%),#08070c;`;
+-  return `<section class="pmenu-home" data-pmenu-id="${escapeHtml(manifest.id)}" aria-label="${escapeHtml(manifest.name)}" style="--pmenu-accent:${escapeHtml(manifest.accent)};--pmenu-columns:${columns};--pmenu-rows:${rows};--pmenu-gap:${gap}px;${backgroundStyle}"><div class="pmenu-home__background" ${manifest.background ? `data-pmenu-background="${escapeHtml(manifest.background)}"` : ""}></div><header class="pmenu-home__header"><button type="button" class="pmenu-home__brand" data-action="open-control-center" data-focus-id="pmenu:para"><span>◉</span><strong>PARA</strong></button><div class="pmenu-home__title"><small>Home Style</small><strong>${escapeHtml(manifest.name)}</strong></div><div class="pmenu-home__status">${manifest.showClock ? '<time data-clock>--:--</time>' : ""}${manifest.showProfile ? `<button type="button" data-route="account" data-focus-id="pmenu:profile">${escapeHtml(profile)}</button>` : ""}</div></header><main class="pmenu-channel-grid" data-focus-zone="pmenu-grid">${manifest.items.map((item) => homeItem(item, columns)).join("")}</main><footer class="pmenu-home__footer"><span>${escapeHtml(manifest.author)}</span><button type="button" data-route="home-styles" data-focus-id="pmenu:customize">Customize Home</button></footer></section>`;
++  return `<section class="pmenu-home pmenu-home--${escapeHtml(layoutType)}" data-pmenu-id="${escapeHtml(manifest.id)}" data-pmenu-layout="${escapeHtml(layoutType)}" aria-label="${escapeHtml(manifest.name)}" style="--pmenu-accent:${escapeHtml(manifest.accent)};--pmenu-columns:${columns};--pmenu-rows:${rows};--pmenu-gap:${gap}px;${backgroundStyle}"><div class="pmenu-home__background" ${manifest.background ? `data-pmenu-background="${escapeHtml(manifest.background)}"` : ""}></div><header class="pmenu-home__header"><button type="button" class="pmenu-home__brand" data-action="open-control-center" data-focus-id="pmenu:para"><span>◉</span><strong>PARA</strong></button><div class="pmenu-home__title"><small>Home Style</small><strong>${escapeHtml(manifest.name)}</strong></div><div class="pmenu-home__status">${manifest.showClock ? '<time data-clock>--:--</time>' : ""}${manifest.showProfile ? `<button type="button" data-route="account" data-focus-id="pmenu:profile">${escapeHtml(profile)}</button>` : ""}</div></header><main class="pmenu-layout pmenu-layout--${escapeHtml(layoutType)}" data-focus-zone="pmenu-layout">${manifest.items.map((item) => homeItem(item, layoutType, columns)).join("")}</main><footer class="pmenu-home__footer"><span>${escapeHtml(manifest.author)}</span><button type="button" data-route="home-styles" data-focus-id="pmenu:customize">Customize Home</button></footer></section>`;
+ }
+ 
+ export function activateCustomHome({ focus } = {}) {
+--- para_full_v60/para/apps/para-home/styles.css	2026-09-11 23:41:08.355114741 +0000
++++ para_full_v601/para/apps/para-home/styles.css	2026-09-11 23:54:48.668597153 +0000
+@@ -2292,3 +2292,50 @@
+ .pmenu-home__footer { position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:space-between; align-items:center; padding:14px 34px; color:rgba(255,255,255,.72); font-size:.8rem; }
+ .pmenu-home__footer button { padding:9px 13px; font-weight:700; }
+ @media (max-width:900px) { .pmenu-channel-grid { padding-inline:22px; grid-template-columns:repeat(2,minmax(0,1fr)); } .pmenu-channel { grid-column:auto !important; grid-row:auto !important; } .pmenu-home__title { display:none; } .pmenu-home__header { grid-template-columns:1fr 1fr; } }
++
++/* PARA V60.1 PMENU layout engine ---------------------------------------- */
++.pmenu-layout { position:relative; z-index:1; }
++.pmenu-layout--channel-grid,
++.pmenu-layout--grid { min-height:calc(100vh - 178px); max-width:1280px; margin:0 auto; padding:34px 48px 70px; display:grid; grid-template-columns:repeat(var(--pmenu-columns),minmax(0,1fr)); grid-template-rows:repeat(var(--pmenu-rows),minmax(120px,1fr)); gap:var(--pmenu-gap); align-content:center; }
++.pmenu-layout--channel-grid .pmenu-channel,
++.pmenu-layout--grid .pmenu-channel { grid-column:var(--pmenu-x) / span var(--pmenu-w); grid-row:var(--pmenu-y) / span var(--pmenu-h); }
++
++.pmenu-layout--crossbar { min-height:calc(100vh - 178px); padding:clamp(90px,14vh,180px) 7vw 110px; display:flex; align-items:center; gap:var(--pmenu-gap); overflow-x:auto; overscroll-behavior-inline:contain; scroll-snap-type:x proximity; scrollbar-width:none; }
++.pmenu-layout--crossbar::-webkit-scrollbar { display:none; }
++.pmenu-layout--crossbar .pmenu-channel { flex:0 0 clamp(150px,17vw,240px); min-height:clamp(150px,20vw,250px); border:0; background:transparent; color:#fff; box-shadow:none; overflow:visible; scroll-snap-align:center; grid-template-rows:1fr auto; }
++.pmenu-layout--crossbar .pmenu-channel__art { min-height:clamp(112px,15vw,190px); border-radius:28px; border:1px solid rgba(255,255,255,.16); background:rgba(10,9,16,.7); backdrop-filter:blur(18px); box-shadow:0 18px 44px rgba(0,0,0,.25); }
++.pmenu-layout--crossbar .pmenu-channel > strong { color:rgba(255,255,255,.82); font-size:1rem; padding:14px 4px 0; }
++.pmenu-layout--crossbar .pmenu-channel:hover,
++.pmenu-layout--crossbar .pmenu-channel:focus-visible,
++.pmenu-layout--crossbar .pmenu-channel[data-focused="true"] { transform:translateY(-12px) scale(1.07); box-shadow:none; }
++.pmenu-layout--crossbar .pmenu-channel:hover .pmenu-channel__art,
++.pmenu-layout--crossbar .pmenu-channel:focus-visible .pmenu-channel__art,
++.pmenu-layout--crossbar .pmenu-channel[data-focused="true"] .pmenu-channel__art { border-color:var(--pmenu-accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--pmenu-accent) 30%,transparent),0 28px 60px rgba(0,0,0,.4); }
++
++.pmenu-layout--blades { min-height:calc(100vh - 178px); padding:34px 6vw 72px; display:flex; gap:max(8px,var(--pmenu-gap)); align-items:stretch; overflow-x:auto; scrollbar-width:none; }
++.pmenu-layout--blades::-webkit-scrollbar { display:none; }
++.pmenu-layout--blades .pmenu-channel { flex:1 0 min(18vw,240px); min-width:150px; min-height:58vh; display:grid; grid-template-rows:1fr auto; border-radius:16px; color:#fff; border:1px solid rgba(255,255,255,.12); background:linear-gradient(180deg,color-mix(in srgb,var(--pmenu-accent) 22%,rgba(16,14,24,.9)),rgba(8,7,13,.92)); box-shadow:0 18px 48px rgba(0,0,0,.3); }
++.pmenu-layout--blades .pmenu-channel__art { min-height:0; background:transparent; }
++.pmenu-layout--blades .pmenu-channel__art img { object-fit:cover; opacity:.85; }
++.pmenu-layout--blades .pmenu-channel > strong { font-size:1.02rem; text-align:left; padding:18px; border-top:1px solid rgba(255,255,255,.1); background:rgba(0,0,0,.18); }
++.pmenu-layout--blades .pmenu-channel:hover,
++.pmenu-layout--blades .pmenu-channel:focus-visible,
++.pmenu-layout--blades .pmenu-channel[data-focused="true"] { transform:translateY(-6px); border-color:var(--pmenu-accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--pmenu-accent) 24%,transparent),0 28px 60px rgba(0,0,0,.4); }
++
++.pmenu-layout--carousel { min-height:calc(100vh - 178px); padding:8vh 7vw 105px; display:flex; align-items:center; gap:var(--pmenu-gap); overflow-x:auto; scrollbar-width:none; scroll-snap-type:x mandatory; }
++.pmenu-layout--carousel::-webkit-scrollbar { display:none; }
++.pmenu-layout--carousel .pmenu-channel { flex:0 0 clamp(280px,42vw,620px); min-height:clamp(260px,45vh,480px); scroll-snap-align:center; border-radius:30px; color:#fff; background:rgba(8,7,13,.74); border:1px solid rgba(255,255,255,.15); grid-template-rows:1fr auto; }
++.pmenu-layout--carousel .pmenu-channel__art { min-height:0; background:linear-gradient(150deg,color-mix(in srgb,var(--pmenu-accent) 35%,#14101d),#07060b); }
++.pmenu-layout--carousel .pmenu-channel > strong { padding:18px 22px 22px; font-size:1.3rem; text-align:left; }
++.pmenu-layout--carousel .pmenu-channel:hover,
++.pmenu-layout--carousel .pmenu-channel:focus-visible,
++.pmenu-layout--carousel .pmenu-channel[data-focused="true"] { transform:scale(1.035); border-color:var(--pmenu-accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--pmenu-accent) 26%,transparent),0 30px 70px rgba(0,0,0,.45); }
++
++@media (max-width:900px) {
++  .pmenu-layout--channel-grid,
++  .pmenu-layout--grid { padding-inline:22px; grid-template-columns:repeat(2,minmax(0,1fr)); }
++  .pmenu-layout--channel-grid .pmenu-channel,
++  .pmenu-layout--grid .pmenu-channel { grid-column:auto !important; grid-row:auto !important; }
++  .pmenu-layout--blades { padding-inline:22px; }
++  .pmenu-layout--blades .pmenu-channel { flex-basis:42vw; min-width:190px; }
++}
+--- para_full_v60/para/tests/test_repository.py	2026-09-11 23:41:09.016499311 +0000
++++ para_full_v601/para/tests/test_repository.py	2026-09-11 23:55:22.274065519 +0000
+@@ -1096,3 +1096,25 @@
+         self.assertIn('id: "home-styles"', manifest)
+         self.assertNotIn('eval(', service)
+         self.assertNotIn('new Function(', service)
++
++class PmenuLayoutEngineTests(unittest.TestCase):
++    def test_pmenu_v601_supports_multiple_structural_layouts(self):
++        service = (ROOT / "apps/para-home/src/services/pmenu.js").read_text(encoding="utf-8")
++        css = (ROOT / "apps/para-home/styles.css").read_text(encoding="utf-8")
++        for layout in ["channel-grid", "grid", "crossbar", "blades", "carousel"]:
++            self.assertIn(f'"{layout}"', service)
++            self.assertIn(f"pmenu-layout--{layout}", css)
++        self.assertIn("SUPPORTED_LAYOUTS", service)
++        self.assertIn('data-pmenu-layout="${escapeHtml(layoutType)}"', service)
++        self.assertIn('data-focus-zone="pmenu-layout"', service)
++
++    def test_pmenu_v601_examples_are_real_folders_not_archives(self):
++        examples = ROOT / "examples/home-styles"
++        for name, layout in [("Crossbar", "crossbar"), ("Blades", "blades"), ("Carousel", "carousel")]:
++            pmenu = examples / name / f"{name}.pmenu"
++            self.assertTrue(pmenu.exists())
++            text = pmenu.read_text(encoding="utf-8")
++            self.assertIn("@pmenu 1", text)
++            self.assertIn(f"layout {layout} {{", text)
++            self.assertIn("item ", text)
++            self.assertNotIn(".zip", text.lower())
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ /mnt/data/para_full_v601/para/examples/home-styles/Crossbar/Crossbar.pmenu	2026-09-11 23:55:22.272862016 +0000
+@@ -0,0 +1,43 @@
++@pmenu 1
++
++menu "PARA Crossbar" {
++  id "para.example.crossbar"
++  author "PARA"
++  version "1.0.0"
++  description "A horizontal icon rail for couch navigation."
++  accent "#9b5cff"
++}
++
++layout crossbar {
++  gap 26
++}
++
++item games {
++  label "Games"
++  route "games"
++}
++
++item apps {
++  label "Apps"
++  route "apps"
++}
++
++item store {
++  label "ParaStore"
++  route "parastore"
++}
++
++item music {
++  label "Music"
++  route "music"
++}
++
++item files {
++  label "Files"
++  route "files"
++}
++
++item settings {
++  label "Settings"
++  route "settings"
++}
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ /mnt/data/para_full_v601/para/examples/home-styles/Blades/Blades.pmenu	2026-09-11 23:55:22.273012733 +0000
+@@ -0,0 +1,43 @@
++@pmenu 1
++
++menu "PARA Blades" {
++  id "para.example.blades"
++  author "PARA"
++  version "1.0.0"
++  description "Tall side-by-side panels with controller-first focus."
++  accent "#7f4cff"
++}
++
++layout blades {
++  gap 12
++}
++
++item games {
++  label "Games"
++  route "games"
++}
++
++item apps {
++  label "Apps"
++  route "apps"
++}
++
++item store {
++  label "ParaStore"
++  route "parastore"
++}
++
++item friends {
++  label "Friends"
++  route "friends"
++}
++
++item media {
++  label "Media"
++  route "media-gallery"
++}
++
++item settings {
++  label "Settings"
++  route "settings"
++}
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ /mnt/data/para_full_v601/para/examples/home-styles/Carousel/Carousel.pmenu	2026-09-11 23:55:22.273156197 +0000
+@@ -0,0 +1,38 @@
++@pmenu 1
++
++menu "PARA Carousel" {
++  id "para.example.carousel"
++  author "PARA"
++  version "1.0.0"
++  description "Big showcase cards that snap through the Home screen."
++  accent "#a764ff"
++}
++
++layout carousel {
++  gap 28
++}
++
++item games {
++  label "Games"
++  route "games"
++}
++
++item store {
++  label "ParaStore"
++  route "parastore"
++}
++
++item music {
++  label "Music"
++  route "music"
++}
++
++item media {
++  label "Media"
++  route "media-gallery"
++}
++
++item files {
++  label "Files"
++  route "files"
++}
+--- /dev/null	2026-09-11 23:37:29.879534751 +0000
++++ /mnt/data/para_full_v601/para/PARA_PMENU_LAYOUT_ENGINE_V60_1.md	2026-09-11 23:54:48.679666520 +0000
+@@ -0,0 +1,43 @@
++# PARA V60.1 — PMENU Layout Engine
++
++V60.1 moves PMENU beyond one grid renderer. A Home Style can now swap the actual navigation composition while using the same safe folder-based `.pmenu` format.
++
++## Layouts
++
++PMENU v1 now accepts:
++
++- `channel-grid` — Wii/channel-style grid with explicit item positions and sizes
++- `grid` — generic grid alias
++- `crossbar` — horizontal icon rail
++- `blades` — tall side-by-side menu panels
++- `carousel` — large snap-scrolling showcase cards
++
++Example:
++
++```text
++@pmenu 1
++
++menu "PARA Crossbar" {
++  id "para.example.crossbar"
++  author "PARA"
++  accent "#9b5cff"
++}
++
++layout crossbar {
++  gap 26
++}
++
++item games { label "Games" route "games" }
++item music { label "Music" route "music" }
++item settings { label "Settings" route "settings" }
++```
++
++The same item definitions and local assets work across all layouts. PMENU still executes no JavaScript.
++
++## Why this matters
++
++A Home Style is no longer just a wallpaper and reskinned grid. The layout block selects a real renderer mode, so a Wii-like channel grid, horizontal crossbar, blade dashboard, or large carousel can feel structurally different while all routes remain controlled by PARA.
++
++## Included examples
++
++`examples/home-styles/` now contains `ChannelGrid`, `Crossbar`, `Blades`, and `Carousel` sample folders.

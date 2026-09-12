@@ -1,0 +1,43 @@
+@pmenu 1
+
+menu "PARA Blades" {
+  id "para.example.blades"
+  author "PARA"
+  version "1.0.0"
+  description "Tall side-by-side panels with controller-first focus."
+  accent "#7f4cff"
+}
+
+layout blades {
+  gap 12
+}
+
+item games {
+  label "Games"
+  route "games"
+}
+
+item apps {
+  label "Apps"
+  route "apps"
+}
+
+item store {
+  label "ParaStore"
+  route "parastore"
+}
+
+item friends {
+  label "Friends"
+  route "friends"
+}
+
+item media {
+  label "Media"
+  route "media-gallery"
+}
+
+item settings {
+  label "Settings"
+  route "settings"
+}
